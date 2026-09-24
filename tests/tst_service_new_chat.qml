@@ -71,13 +71,19 @@ TestCase {
   function test_first_message_targets_only_a_phone_number_jid() {
     var service = createService()
     verify(!service.startNewChat("team@g.us", "hi", "app"))
-    verify(!service.startNewChat("123@lid", "hi", "app"))
+    verify(!service.startNewChat("abc@lid", "hi", "app"))
     verify(!service.startNewChat("5511912345678@s.whatsapp.net", "   ", "app"))
     compare(service.activeWriteKind, "")
     verify(service.startNewChat("5511912345678@s.whatsapp.net", " hi ", "app"))
     compare(service.activeWriteKind, "send-new")
     compare(service.activeWriteChatJid, "5511912345678@s.whatsapp.net")
     compare(service.activeWriteOwner, "app")
+  }
+
+  function test_first_message_accepts_the_lid_whatsapp_confirmed() {
+    var service = createService()
+    verify(service.startNewChat("123456789012345@lid", "hi", "app"))
+    compare(service.activeWriteKind, "send-new")
   }
 
   function test_first_message_respects_offline_mode() {

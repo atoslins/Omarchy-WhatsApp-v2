@@ -82,9 +82,10 @@ XDG_OPEN = Path("/usr/bin/xdg-open")
 NOTIFY_SEND = Path("/usr/bin/notify-send")
 OMARCHY_SHELL = Path("/usr/share/omarchy/bin/omarchy-shell")
 MAX_MESSAGE = 4096
-# A new chat only goes to a phone-number user JID the mirror already knows or
-# that WhatsApp confirmed moments ago; a typo never becomes a recipient.
-NEW_CHAT_JID = re.compile(r"^[0-9]{5,20}@s\.whatsapp\.net$")
+# A new chat only goes to a user JID the mirror already knows or that WhatsApp
+# confirmed moments ago; a typo never becomes a recipient. WhatsApp now answers
+# a number check with the person's @lid, which wacli can send to directly.
+NEW_CHAT_JID = re.compile(r"^[0-9]{5,20}@(?:s\.whatsapp\.net|lid)$")
 NEW_CHAT_CHECK_TTL = 15 * 60
 NEW_CHAT_CHECKS_FILE = "new-chat-checks.json"
 MAX_NEW_CHAT_CHECKS = 32
@@ -3179,11 +3180,27 @@ class Backend:
         }
         if registered:
             self._remember_new_chat_check(digits, jid)
-            known = self._known_person(jid)
-            output["has_chat"] = bool(known and known["has_chat"])
-            if output["has_chat"]:
-                output["name"] = self._chat(jid)["name"]
+            # The mirror files a person's chat under their phone JID even when
+            # WhatsApp answered with the @lid, so look for both.
+            for candidate in dict.fromkeys([jid, f"{digits}@s.whatsapp.net"]):
+                known = self._known_person(candidate)
+                if known is not None and known["has_chat"]:
+                    output.update(has_chat=True, jid=candidate,
+                                  name=self._chat(candidate)["name"])
+                    break
         return output
+
+    def _chat_of_message(self, message_id: str) -> str:
+        if not message_id:
+            return ""
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT chat_jid FROM messages WHERE msg_id = ? AND from_me = 1 "
+                    "ORDER BY ts DESC LIMIT 1", [message_id]).fetchone()
+        except sqlite3.Error:
+            return ""
+        return str(row["chat_jid"]) if row is not None else ""
 
     def send_new(self, target: Any, text: str) -> dict[str, Any]:
         """First message to someone: the recipient is known locally or was just confirmed."""
@@ -3194,14 +3211,16 @@ class Backend:
         if len(message) > MAX_MESSAGE:
             raise OmaWhatsAppError("Message is too long (maximum 4096 characters).")
         jid = str(request_target.get("jid") or "").strip()
+        digits = ""
         if jid:
             if not NEW_CHAT_JID.fullmatch(jid):
                 raise OmaWhatsAppError("Choose a person from your WhatsApp contacts.")
             known = self._known_person(jid)
-            confirmed = any(item["jid"] == jid and key.startswith(self.active.name + "\n")
-                            for key, item in self._new_chat_checks().items())
+            confirmed = [key.split("\n", 1)[1] for key, item in self._new_chat_checks().items()
+                         if item["jid"] == jid and key.startswith(self.active.name + "\n")]
             if known is None and not confirmed:
                 raise OmaWhatsAppError("Check that number with WhatsApp first.")
+            digits = confirmed[0] if confirmed else ""
         else:
             digits = self._phone_digits(request_target.get("phone"))
             cached = self._new_chat_checks().get(f"{self.active.name}\n{digits}")
@@ -3211,11 +3230,16 @@ class Backend:
             known = self._known_person(jid)
         if known is not None and known["has_chat"]:
             self.send(jid, message)
-            return {"ok": True, "kind": "send-new", "jid": jid}
+            return {"ok": True, "kind": "send-new", "jid": jid, "chat_jid": jid}
         command = ["--json", "send", "text", "--to", jid,
                    "--message", message, "--post-send-wait", "0"]
-        self._envelope(self._write(command, timeout=45))
-        return {"ok": True, "kind": "send-new", "jid": jid}
+        envelope = self._envelope(self._write(command, timeout=45))
+        # wacli stores the new chat under the phone JID when it knows the
+        # mapping; the sent message says exactly where it landed.
+        chat_jid = self._chat_of_message(self._sent_message_id(envelope))
+        if not chat_jid:
+            chat_jid = f"{digits}@s.whatsapp.net" if digits and jid.endswith("@lid") else jid
+        return {"ok": True, "kind": "send-new", "jid": jid, "chat_jid": chat_jid}
 
     def react(self, jid: str, message_id: str, emoji: str) -> dict[str, Any]:
         chat, message = self._message(jid, message_id)

@@ -896,6 +896,45 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(result["jid"], jid)
         self.assertEqual(write.call_count, 2)
 
+    def test_whatsapp_answering_with_a_lid_still_confirms_the_number(self) -> None:
+        # Found live: WhatsApp now answers a number check with the person's @lid.
+        lid = "123456789012345@lid"
+        with mock.patch.object(self.backend, "_mutate",
+                               return_value=self._check_reply("5511912345678", lid)):
+            checked = self.backend.check_number("+5511912345678", "remote-read")
+        self.assertTrue(checked["registered"])
+        self.assertEqual(checked["jid"], lid)
+        self.assertFalse(checked["has_chat"])
+        sent = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"id": "SYNTHETIC-SENT"}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=sent) as write:
+            result = self.backend.send_new({"jid": lid}, "hello")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--to") + 1], lid)
+        self.assertEqual(result["chat_jid"], "5511912345678@s.whatsapp.net",
+                         "without the stored row yet, the chat is expected under the phone JID")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES (?, '', 'SYNTHETIC-SENT', '', '', 90, 1, 'hello', '', '', '', '')""",
+                ["5511987654321@s.whatsapp.net"])
+        with mock.patch.object(self.backend, "_write", return_value=sent):
+            again = self.backend.send_new({"jid": lid}, "hello")
+        self.assertEqual(again["chat_jid"], "5511987654321@s.whatsapp.net",
+                         "the stored message names the chat wacli really used")
+
+    def test_a_lid_answer_for_someone_with_a_chat_opens_that_chat(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES (?, 'dm', 'Known', 5, 0, 0, 0, 0, 0)",
+                               ["5511912345678@s.whatsapp.net"])
+        with mock.patch.object(self.backend, "_mutate", return_value=self._check_reply(
+                "5511912345678", "123456789012345@lid")):
+            checked = self.backend.check_number("+5511912345678", "remote-read")
+        self.assertTrue(checked["has_chat"])
+        self.assertEqual(checked["jid"], "5511912345678@s.whatsapp.net")
+        self.assertEqual(checked["name"], "Known")
+
     def test_an_unregistered_number_is_never_remembered(self) -> None:
         with mock.patch.object(self.backend, "_mutate", return_value=self._check_reply(
                 "5511900000000", "", registered=False)):

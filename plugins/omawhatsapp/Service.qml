@@ -41,6 +41,9 @@ Item {
   property string newChatPeopleQuery: ""
   property bool newChatPeopleLoading: false
   property bool newChatPeoplePending: false
+  // Where the last first message landed: wacli files an @lid recipient's
+  // chat under their phone JID when it knows the mapping.
+  property string lastStartedChatJid: ""
   property var numberCheck: ({ account: "", phone: "", loading: false, registered: false,
     responded: false, jid: "", has_chat: false, name: "", error: "" })
   property var pendingReplyReadRef: ({ account: "", jid: "", key: "" })
@@ -549,7 +552,7 @@ Item {
   function startNewChat(jid, text, owner) {
     var value = String(text || "").trim()
     var target = String(jid || "")
-    if (value === "" || !/^[0-9]{5,20}@s[.]whatsapp[.]net$/.test(target)) return false
+    if (value === "" || !/^[0-9]{5,20}@(s[.]whatsapp[.]net|lid)$/.test(target)) return false
     return runWriteForChat("send-new", { target: { jid: target }, text: value },
       AccountModel.chatRef(statusAccount, target), owner)
   }
@@ -1332,6 +1335,8 @@ Item {
         voiceRecorder.markSent(finishedAccount, finishedJid)
         root.voiceOwner = "service"
       }
+      if (finishedKind === "send-new")
+        root.lastStartedChatJid = String(payload.chat_jid || finishedJid)
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
       if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()

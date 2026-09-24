@@ -204,7 +204,8 @@ Popup {
       if (kind !== "send-new" || !root.sending || !root.person
           || String(chatRef.jid || "") !== root.person.jid) return
       root.sending = false
-      root.chatStarted(root.person.jid)
+      var landed = String(root.service.lastStartedChatJid || "")
+      root.chatStarted(landed !== "" ? landed : root.person.jid)
       root.close()
     }
     function onWriteFailed(message, chatRef, details, owner) {

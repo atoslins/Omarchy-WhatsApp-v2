@@ -50,7 +50,10 @@ helper runs `wacli contacts check`, which asks WhatsApp whether the number is
 registered and stores nothing in the mirror. The confirmed JID is kept for 15
 minutes in the owner-private `new-chat-checks.json` (mode `0600`, at most 32
 entries), so the first message can go to exactly that recipient; expired
-entries are dropped on the next read. Unregistered numbers are not kept.
+entries are ignored and dropped the next time a number is checked.
+Unregistered numbers are not kept. WhatsApp answers with the person's `@lid`;
+wacli sends to it and files the chat under the phone JID when it knows the
+mapping.
 
 If a foreground wacli operation briefly yields background sync, the helper
 stores a crash-recovery intent containing only the public systemd unit name and

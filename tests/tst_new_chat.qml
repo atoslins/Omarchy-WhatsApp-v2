@@ -26,6 +26,7 @@ TestCase {
       property var searches: []
       property var checks: []
       property var started: null
+      property string lastStartedChatJid: ""
       property bool accept: true
       signal writeCompleted(string kind, var chatRef, var request, string owner)
       signal writeFailed(string message, var chatRef, var details, string owner)
@@ -98,6 +99,18 @@ TestCase {
     h.service.writeCompleted("send-new", { account: "work", jid: people[1].jid }, {}, "app")
     compare(spy.count, 1)
     tryCompare(h.dialog, "opened", false)
+  }
+
+  function test_the_started_chat_is_followed_where_wacli_filed_it() {
+    var h = createDialog()
+    h.dialog.choose({ jid: "123456789012345@lid", name: "", phone: "5511912345678", has_chat: false })
+    findChild(h.dialog.contentItem, "newChatMessage").text = "hello"
+    var spy = createTemporaryObject(signalSpyComponent, testCase,
+      { target: h.dialog, signalName: "chatStarted" })
+    verify(h.dialog.sendFirst())
+    h.service.lastStartedChatJid = "5511912345678@s.whatsapp.net"
+    h.service.writeCompleted("send-new", { account: "work", jid: "123456789012345@lid" }, {}, "app")
+    compare(spy.signalArguments[0][0], "5511912345678@s.whatsapp.net")
   }
 
   function test_a_failed_first_message_stays_on_screen_with_the_reason() {
