@@ -25,6 +25,8 @@ Item {
   property bool busyMedia: false
   property bool surfaceActive: true
   property string activePlaybackId: ""
+  property real audioRate: 1
+  signal audioRateRequested(real rate)
   property string timeFormat: "auto"
 
   signal selectedRequested()
@@ -262,6 +264,8 @@ Item {
         busy: root.busyMedia
         surfaceActive: root.surfaceActive
         activePlaybackId: root.activePlaybackId
+        audioRate: root.audioRate
+        onAudioRateRequested: function(rate) { root.audioRateRequested(rate) }
         onPlaybackRequested: function(messageId) {
           root.playbackRequested(messageId)
         }

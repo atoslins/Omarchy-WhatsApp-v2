@@ -1297,6 +1297,8 @@ Panel {
                 narrow: true
                 surfaceActive: root.opened && root.viewMode === "conversation"
                 activePlaybackId: root.activePlaybackId
+                audioRate: root.service ? root.service.audioRate : 1
+                onAudioRateRequested: function(rate) { if (root.service) root.service.audioRate = rate }
                 busyMedia: root.sending
                   && root.service.mediaDownloadId === String(modelData.id || "")
                 onSelectedRequested: {

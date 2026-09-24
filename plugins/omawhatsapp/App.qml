@@ -2591,6 +2591,8 @@ Item {
               narrow: root.narrow
               surfaceActive: root.timelineMediaActive
               activePlaybackId: root.activeTimelinePlaybackId
+              audioRate: root.service ? root.service.audioRate : 1
+              onAudioRateRequested: function(rate) { if (root.service) root.service.audioRate = rate }
               busyMedia: root.writeForCurrentChat
                 && root.service.mediaDownloadId === String(modelData.id)
               onSelectedRequested: {

@@ -77,6 +77,9 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Voice notes and audio play at 1×, 1.5× or 2× (one choice for every
+  bubble, as on the phone), show elapsed and total time, and seek where the
+  bar is clicked.
 - Less work on every mirror change: an answer identical to the previous one
   no longer rebuilds the chat list or the conversation, and the 12-second
   status poll reuses a healthy `wacli doctor` answer for a minute instead of

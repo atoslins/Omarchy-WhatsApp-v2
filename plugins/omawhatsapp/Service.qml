@@ -47,6 +47,8 @@ Item {
   // Messages sent from here that the mirror has not stored yet. They show at
   // once as pending bubbles: the send itself takes a second or more.
   property var pendingSends: []
+  // Voice note speed, shared by every audio bubble as on the phone.
+  property real audioRate: 1
   // Last helper answers, so an identical refresh does not rebuild the lists.
   property string lastChatsRaw: ""
   property string lastMessagesRaw: ""

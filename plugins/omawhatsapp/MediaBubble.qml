@@ -1,6 +1,7 @@
 import QtQuick
 import QtMultimedia
 import qs.Commons
+import qs.Ui as Ui
 import "MediaModel.js" as MediaModel
 
 // Typed media renderer. WhatsApp GIFs are usually looping MP4 files, while
@@ -19,6 +20,18 @@ Item {
   property bool busy: false
   property bool surfaceActive: true
   property string activePlaybackId: ""
+  // 1×, 1.5× or 2×; the choice is shared by every voice note.
+  property real audioRate: 1
+  signal audioRateRequested(real rate)
+  function nextAudioRate(rate) {
+    return rate < 1.25 ? 1.5 : (rate < 1.75 ? 2 : 1)
+  }
+  function clockText(ms) {
+    var seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000))
+    var minutes = Math.floor(seconds / 60)
+    var rest = seconds % 60
+    return minutes + ":" + (rest < 10 ? "0" : "") + rest
+  }
   property real decodedMediaWidth: 0
   property real decodedMediaHeight: 0
 
@@ -370,6 +383,7 @@ Item {
         objectName: "audioMediaPlayer"
         source: root.localUrl()
         audioOutput: audioSink
+        playbackRate: root.audioRate
       }
       Connections {
         target: root
@@ -416,23 +430,67 @@ Item {
           }
         }
       }
-      Column {
-        anchors.left: audioButton.right
-        anchors.leftMargin: Style.space(10)
+      Rectangle {
+        id: rateChip
+        objectName: "audioRate"
         anchors.right: parent.right
         anchors.rightMargin: Style.space(10)
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.space(5)
+        width: rateText.implicitWidth + Style.space(14)
+        height: Style.space(22)
+        radius: height / 2
+        color: rateHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+          : Style.normalFillFor(root.foreground, root.accent)
         Text {
           textFormat: Text.PlainText
-          text: root.label()
-          color: root.foreground
-          elide: Text.ElideRight
-          width: parent.width
+          id: rateText
+          anchors.centerIn: parent
+          text: (root.audioRate === 1.5 ? "1.5" : String(root.audioRate)) + "×"
+          color: root.audioRate !== 1 ? root.accent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
+        HoverHandler { id: rateHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: root.audioRateRequested(root.nextAudioRate(root.audioRate)) }
+        Ui.PanelToolTip { visible: rateHover.hovered; text: "Playback speed" }
+      }
+      Column {
+        anchors.left: audioButton.right
+        anchors.leftMargin: Style.space(10)
+        anchors.right: rateChip.left
+        anchors.rightMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(5)
+        Item {
+          width: parent.width
+          height: labelText.implicitHeight
+          Text {
+            textFormat: Text.PlainText
+            id: labelText
+            anchors.left: parent.left
+            anchors.right: timeText.left
+            anchors.rightMargin: Style.space(6)
+            text: root.label()
+            color: root.foreground
+            elide: Text.ElideRight
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Text {
+            textFormat: Text.PlainText
+            id: timeText
+            objectName: "audioTime"
+            anchors.right: parent.right
+            visible: audioPlayer.duration > 0
+            text: (audioPlayer.position > 0 ? root.clockText(audioPlayer.position) + " / " : "")
+              + root.clockText(audioPlayer.duration)
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
         Rectangle {
+          id: audioTrack
           width: parent.width
           height: Style.space(3)
           radius: height / 2
@@ -443,6 +501,18 @@ Item {
             height: parent.height
             radius: height / 2
             color: root.accent
+          }
+          // A taller hit area: the bar itself is only 3 px high.
+          MouseArea {
+            anchors.fill: parent
+            anchors.topMargin: -Style.space(8)
+            anchors.bottomMargin: -Style.space(8)
+            enabled: root.surfaceActive && audioPlayer.duration > 0 && audioPlayer.seekable
+            cursorShape: Qt.PointingHandCursor
+            onClicked: function(mouse) {
+              audioPlayer.position = Math.round(audioPlayer.duration
+                * Math.max(0, Math.min(1, mouse.x / audioTrack.width)))
+            }
           }
         }
       }
