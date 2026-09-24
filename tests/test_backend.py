@@ -848,6 +848,30 @@ class BackendTests(unittest.TestCase):
                     if item["jid"] == "alex@s.whatsapp.net")
         self.assertEqual(chat["preview"], "first line second line")
 
+    def test_older_pages_follow_the_oldest_loaded_message(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            for index in range(7):
+                connection.execute(
+                    """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                       ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                       VALUES ('alex@s.whatsapp.net', '', ?, '', '', ?, 0, ?, '', '', '', '')""",
+                    [f"old{index}", 30 if index < 3 else 20 + index, f"old {index}"])
+        first = self.backend.messages("alex@s.whatsapp.net", "", 3)
+        self.assertTrue(first["has_more"])
+        seen = [m["id"] for m in first["messages"]]
+        cursor = first["messages"][-1]
+        while True:
+            page = self.backend.messages("alex@s.whatsapp.net", "", 3,
+                                         {"ts": cursor["timestamp"], "id": cursor["id"]})
+            ids = [m["id"] for m in page["messages"]]
+            self.assertFalse(set(ids) & set(seen), "pages never repeat a message")
+            seen.extend(ids)
+            if not page["has_more"]:
+                break
+            cursor = page["messages"][-1]
+        self.assertEqual(len(seen), 8, "every message once, including three sharing a second")
+        self.assertEqual(seen[0], "a1")
+
     def test_messages_never_cross_chat_boundary(self) -> None:
         values = self.backend.messages("team@g.us")["messages"]
         self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])

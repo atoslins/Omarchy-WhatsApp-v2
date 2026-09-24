@@ -428,6 +428,21 @@ Item {
     { jid: "15552468101@s.whatsapp.net", name: "Nora Ali", phone: "15552468101", has_chat: false }
   ]
 
+  function oldestMessageInView() {
+    if (messageList.count === 0) return false
+    var item = messageList.itemAtIndex(messageList.count - 1)
+    if (!item) return false
+    var top = item.mapToItem(messageList, 0, 0).y
+    return top + item.height >= 0 && top <= messageList.height
+  }
+  function maybeLoadOlder() {
+    if (demoMode || !service || !opened || typeof service.loadOlderMessages !== "function") return false
+    if (contentFilter !== "all" || messageSearchField.text.trim() !== "") return false
+    if (!oldestMessageInView()) return false
+    return service.loadOlderMessages()
+  }
+  onOpenedChanged: if (opened) Qt.callLater(maybeLoadOlder)
+
   function openQuickSwitcher() {
     if (!opened) return false
     settingsOpen = false
@@ -2460,6 +2475,34 @@ Item {
           currentIndex: root.cursorIndex
           verticalLayoutDirection: ListView.BottomToTop
           boundsBehavior: Flickable.StopAtBounds
+          // When the oldest loaded message is on screen, fetch the page
+          // before it. Checked after scrolling and after the list changes.
+          onContentYChanged: olderCheck.restart()
+          onCountChanged: olderCheck.restart()
+          Timer {
+            id: olderCheck
+            interval: 150
+            repeat: false
+            onTriggered: root.maybeLoadOlder()
+          }
+
+          // Drawn bottom-to-top, the footer sits above the oldest message.
+          footer: Item {
+            width: messageList.width
+            height: olderHint.text !== "" ? Style.space(36) : 0
+            Text {
+              textFormat: Text.PlainText
+              id: olderHint
+              objectName: "olderMessagesHint"
+              anchors.centerIn: parent
+              text: root.demoMode || !root.service || root.visibleMessages.length === 0 ? ""
+                : root.service.loadingOlder ? "Loading older messages…"
+                : !root.service.hasOlderMessages ? "Start of this computer's copy of the chat" : ""
+              color: root.dimmer
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
 
           delegate: Item {
             id: messageRow

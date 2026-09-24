@@ -48,10 +48,19 @@ Item {
   // once as pending bubbles: the send itself takes a second or more.
   property var pendingSends: []
   property int pendingSendSerial: 0
+  // Older pages loaded by scrolling up. Kept apart so the refresh of the
+  // newest page, on every mirror change, never throws them away.
+  property var olderMessages: []
+  property bool loadingOlder: false
+  property bool hasOlderMessages: true
   readonly property var selectedMessages: {
     var key = selectedChatRef().key
     var stored = {}
     for (var i = 0; i < messages.length; i++) stored[String(messages[i].id || "")] = true
+    // A search shows only its own results.
+    var older = query !== "" ? [] : olderMessages.filter(function(item) {
+      return !stored[String(item.id || "")]
+    })
     var waiting = pendingSends.filter(function(item) {
       return item.key === key && !(item.message_id !== "" && stored[item.message_id])
     }).map(function(item) {
@@ -60,7 +69,23 @@ Item {
         mime_type: "", local_path: "", tags: [], quoted_id: item.reply_id,
         pending: true, send_state: item.state }
     })
-    return waiting.length > 0 ? waiting.reverse().concat(messages) : messages
+    var page = older.length > 0 ? messages.concat(older) : messages
+    return waiting.length > 0 ? waiting.reverse().concat(page) : page
+  }
+  function loadOlderMessages() {
+    if (loadingOlder || !hasOlderMessages || query !== "" || selectedChatJid === "") return false
+    var source = olderMessages.length > 0 ? olderMessages : messages
+    if (source.length === 0) return false
+    var oldest = source[source.length - 1]
+    loadingOlder = true
+    olderProcess.chatRef = selectedChatRef()
+    olderProcess.payload = JSON.stringify({
+      account: olderProcess.chatRef.account, jid: olderProcess.chatRef.jid,
+      before: { ts: Number(oldest.timestamp || 0), id: String(oldest.id || "") }
+    })
+    olderProcess.stdinEnabled = true
+    olderProcess.running = true
+    return true
   }
   // Chat details panel: what the mirror knows about the selected chat.
   property var chatDetails: ({})
@@ -349,6 +374,8 @@ Item {
       query = ""
       messages = []
       members = []
+      olderMessages = []
+      hasOlderMessages = true
       chatDetails = ({})
       errorText = ""
       refreshMessages()
@@ -1229,6 +1256,30 @@ Item {
   }
 
   Process {
+    id: olderProcess
+    objectName: "olderProcess"
+    property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    command: [root.helper, "messages", "--limit", "200"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: olderOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.loadingOlder = false
+      var payload = root.parseJson(olderOutput.text)
+      if (exitCode !== 0 || !payload || payload.ok !== true
+          || !AccountModel.sameRef(chatRef, root.selectedChatRef())) return
+      var known = {}
+      root.olderMessages.forEach(function(item) { known[String(item.id || "")] = true })
+      var page = (Array.isArray(payload.messages) ? payload.messages : [])
+        .filter(function(item) { return !known[String(item.id || "")] })
+      root.olderMessages = root.olderMessages.concat(page)
+      root.hasOlderMessages = payload.has_more === true && page.length > 0
+    }
+  }
+
+  Process {
     id: chatDetailsProcess
     objectName: "chatDetailsProcess"
     property string payload: ""
@@ -1405,6 +1456,7 @@ Item {
         root.errorText = (payload && payload.error) || String(messagesError.text || "Messages could not be read.").trim()
       } else if (payload && payload.ok === true && responseIsCurrent) {
         root.messages = Array.isArray(payload.messages) ? payload.messages : []
+        if (root.olderMessages.length === 0) root.hasOlderMessages = payload.has_more !== false
         root.prunePendingSends()
         root.selectedChatName = String(payload.chat.name || root.selectedChatName)
         root.selectedChatKind = String(payload.chat.kind || root.selectedChatKind)

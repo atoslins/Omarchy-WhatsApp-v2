@@ -142,6 +142,10 @@ TestCase {
       property bool appConversationVisible: false
       property string railDensity: "comfortable"
       property string syncPauseReason: ""
+      property bool loadingOlder: false
+      property bool hasOlderMessages: true
+      property int olderRequests: 0
+      function loadOlderMessages() { olderRequests += 1; return true }
       property bool chatDetailsWanted: false
       property bool chatDetailsLoading: false
       property var chatDetails: ({})
@@ -196,6 +200,19 @@ TestCase {
     verify(collapse.visible)
     settings.clicked()
     verify(app.settingsOpen)
+  }
+
+  function test_the_oldest_visible_message_asks_for_the_page_before_it() {
+    var h = createHarness({ messages: [
+      { id: "m2", text: "second", sender: "Synthetic", timestamp: 1787540100, from_me: false, media_type: "", reactions: [] },
+      { id: "m1", text: "first", sender: "Synthetic", timestamp: 1787540000, from_me: false, media_type: "", reactions: [] }
+    ] })
+    tryVerify(function() { return h.service.olderRequests > 0 }, 2000,
+      "a short chat shows its oldest message at once, so the next page is requested")
+    h.service.hasOlderMessages = false
+    var hint = findChild(h.app, "olderMessagesHint")
+    verify(hint !== null)
+    compare(hint.text, "Start of this computer's copy of the chat")
   }
 
   function test_ctrl_k_jumps_to_a_chat_by_name() {

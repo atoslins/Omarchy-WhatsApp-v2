@@ -2844,7 +2844,9 @@ class Backend:
         return {"ok": True, "kind": "sync-mode", "account": account.name,
                 "online": bool(online)}
 
-    def messages(self, jid: str, query: str = "", limit: int = 160) -> dict[str, Any]:
+    def messages(self, jid: str, query: str = "", limit: int = 160,
+                 before: Any = None) -> dict[str, Any]:
+        """Newest page of a chat, or the page older than ``before`` (ts and id)."""
         chat = self._chat(jid)
         sent_media_hints = self._sent_media_hints()
         sent_reply_hints = self._sent_reply_hints()
@@ -2861,7 +2863,16 @@ class Backend:
             where += """ AND LOWER(COALESCE(NULLIF(base.text, ''), NULLIF(base.media_caption, ''),
               NULLIF(base.display_text, ''), NULLIF(base.filename, ''), '')) LIKE LOWER(?) ESCAPE '\\'"""
             parameters.append(self._like(cleaned))
-        parameters.append(limit)
+        cursor = before if isinstance(before, dict) else None
+        if cursor is not None:
+            before_ts = bounded_int(cursor.get("ts"), 0, 0, 2**63 - 1)
+            before_id = str(cursor.get("id") or "")[:256]
+            # Same ordering as the page itself: ts, then insertion order.
+            where += """ AND (base.ts < ? OR (base.ts = ? AND base.rowid < COALESCE(
+              (SELECT rowid FROM messages WHERE chat_jid = base.chat_jid AND msg_id = ?), 0)))"""
+            parameters.extend([before_ts, before_ts, before_id])
+        # One extra row says whether an older page exists.
+        parameters.append(limit + 1)
         try:
             with closing(self._connect()) as connection:
                 rows = connection.execute(
@@ -2884,6 +2895,8 @@ class Backend:
                     ORDER BY base.ts DESC, base.rowid DESC LIMIT ?""",
                     parameters,
                 ).fetchall()
+                has_more = len(rows) > limit
+                rows = rows[:limit]
                 message_ids = [str(row["msg_id"]) for row in rows]
                 quoted_by_message = {}
                 for row in rows:
@@ -3001,7 +3014,8 @@ class Backend:
                 "location_address": str(row["location_address"] or ""),
                 "location_live": bool(row["location_live"]),
             })
-        return {"ok": True, "chat": chat, "query": cleaned, "messages": values}
+        return {"ok": True, "chat": chat, "query": cleaned, "messages": values,
+                "has_more": has_more}
 
     def chat_details(self, jid: str) -> dict[str, Any]:
         """Everything the mirror knows about one chat. Local only: no WhatsApp call."""
@@ -4958,7 +4972,8 @@ def main() -> int:
             return emit(backend.chats(str(payload.get("query") or ""), args.limit))
         if args.command == "messages":
             return emit(backend.messages(str(payload.get("jid") or ""),
-                                         str(payload.get("query") or ""), args.limit))
+                                         str(payload.get("query") or ""), args.limit,
+                                         payload.get("before")))
         if args.command == "chat-details":
             return emit(backend.chat_details(str(payload.get("jid") or "")))
         if args.command == "members":
