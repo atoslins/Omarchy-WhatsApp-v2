@@ -1,6 +1,8 @@
-.PHONY: validate test manifest lint release-check
+.PHONY: validate test manifest lint release-check dev demo
 
 OMARCHY_SHELL_DIR ?= /usr/share/omarchy/shell
+# Arch installs the Qt tools outside PATH.
+export PATH := $(PATH):/usr/lib/qt6/bin
 
 validate: test manifest lint
 
@@ -18,3 +20,11 @@ lint:
 
 release-check:
 	./scripts/test
+
+# Copy working-tree changes over an existing standalone install.
+dev:
+	./scripts/dev-sync
+
+# Open the full app with repository-owned demo data (safe for screenshots).
+demo:
+	omarchy-shell io.github.moizibnyousaf.omawhatsapp openApp '{"demo":true}'

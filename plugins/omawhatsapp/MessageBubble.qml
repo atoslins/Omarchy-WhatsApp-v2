@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Ui as Ui
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
 
@@ -78,6 +79,10 @@ Item {
   implicitHeight: bubble.height + (reactionRow.visible ? reactionRow.height + Style.space(4) : 0)
   height: implicitHeight
 
+  // The whole row, not only the bubble, reveals the actions: they sit beside
+  // the bubble when there is room, and the pointer must be able to reach them.
+  HoverHandler { id: rowHover }
+
   TextMetrics {
     id: messageMetrics
     text: root.bodyText
@@ -122,7 +127,6 @@ Item {
     border.width: root.selected ? 1 : 0
     border.color: root.accent
 
-    HoverHandler { id: bubbleHover }
 
     Column {
       id: bubbleColumn
@@ -321,19 +325,25 @@ Item {
 
     Rectangle {
       id: actionSurface
-      visible: bubbleHover.hovered || reactionPicker.opened || actionMenu.opened
-      anchors.top: parent.top
-      anchors.topMargin: Style.space(5)
-      anchors.right: root.message.from_me ? undefined : parent.right
-      anchors.left: root.message.from_me ? parent.left : undefined
-      anchors.rightMargin: Style.space(5)
-      anchors.leftMargin: Style.space(5)
-      width: actionRow.implicitWidth + Style.space(8)
-      height: Style.space(28)
+      objectName: "messageActions"
+      // Beside the bubble (incoming: right, outgoing: left) when the row has
+      // room, so the actions never cover the text; inside its top corner in
+      // the narrow single-pane layout.
+      readonly property bool outside: !root.narrow
+        && root.width - bubble.width >= width + Style.space(16)
+      visible: rowHover.hovered || reactionPicker.opened || actionMenu.opened
+      // Positioned explicitly: conditional anchors keep the previous edge when
+      // `outside` flips, which pinned both sides to the bubble's right edge.
+      x: outside
+        ? (root.message.from_me ? -width - Style.space(6) : parent.width + Style.space(6))
+        : (root.message.from_me ? Style.space(5) : parent.width - width - Style.space(5))
+      y: outside ? 0 : Style.space(5)
+      width: actionRow.implicitWidth + Style.space(6)
+      height: actionRow.implicitHeight + Style.space(4)
       radius: height / 2
-      color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.92)
+      color: Style.normalFillFor(root.foreground, root.accent)
       border.width: 1
-      border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+      border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
 
       Row {
         id: actionRow
@@ -341,33 +351,25 @@ Item {
         spacing: Style.space(1)
         Repeater {
           model: [
-            { icon: "󰜸", action: "reply", hint: "Reply" },
-            { icon: "󰋇", action: "react", hint: "React" },
-            { icon: "󰇙", action: "more", hint: "More" }
+            { icon: "󰑚", action: "reply", hint: "Reply" },
+            { icon: "󰇵", action: "react", hint: "React" },
+            { icon: "󰇙", action: "more", hint: "More actions" }
           ]
-          delegate: Rectangle {
+          delegate: Ui.PanelActionButton {
             required property var modelData
-            width: Style.space(24)
-            height: width
-            radius: width / 2
-            color: actionHover.hovered
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            Text {
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: modelData.icon
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-            HoverHandler { id: actionHover }
-            TapHandler {
-              onTapped: {
-                root.selectedRequested()
-                if (modelData.action === "reply") root.replyRequested()
-                else if (modelData.action === "react") reactionPicker.open()
-                else actionMenu.open()
-              }
+            objectName: "messageAction-" + modelData.action
+            iconText: modelData.icon
+            tooltipText: modelData.hint
+            foreground: root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            size: Style.space(24)
+            onClicked: {
+              root.selectedRequested()
+              if (modelData.action === "reply") root.replyRequested()
+              else if (modelData.action === "react") reactionPicker.open()
+              else actionMenu.open()
             }
           }
         }

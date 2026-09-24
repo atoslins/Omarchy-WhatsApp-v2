@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Arch installs the Qt tools (qmllint, qmltestrunner) outside PATH.
+[[ -d /usr/lib/qt6/bin && :$PATH: != *:/usr/lib/qt6/bin:* ]] && PATH="$PATH:/usr/lib/qt6/bin"
+
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
