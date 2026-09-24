@@ -264,8 +264,9 @@ class BackendTests(unittest.TestCase):
 
     def test_failed_avatar_batch_backs_off_so_later_chats_are_not_starved(self) -> None:
         account = self.backend.account("")
+        limit = backend_module.AVATAR_REFRESH_LIMIT
         rows = [{"account": account.name, "jid": f"synthetic-{index}@example"}
-                for index in range(15)]
+                for index in range(limit + 3)]
         batches = []
 
         def fail(selected, candidates):
@@ -277,9 +278,9 @@ class BackendTests(unittest.TestCase):
                     self.backend, "_profile_picture_metadata", side_effect=fail):
             first = self.backend.refresh_avatars("remote-read")
             second = self.backend.refresh_avatars("remote-read")
-        self.assertEqual((first["checked"], first["failed"]), (12, 12))
+        self.assertEqual((first["checked"], first["failed"]), (limit, limit))
         self.assertEqual((second["checked"], second["failed"]), (3, 3))
-        self.assertEqual(batches[1], [row["jid"] for row in rows[12:]])
+        self.assertEqual(batches[1], [row["jid"] for row in rows[limit:]])
 
     def test_failed_avatar_download_retries_from_the_cached_generation(self) -> None:
         account = self.backend.account("")

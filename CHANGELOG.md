@@ -9,6 +9,10 @@
   scoped to a locally indexed group. The registry now covers 104 leaves and
   records the release each leaf first appeared in (`min_wacli`).
 - Run CI against both wacli 0.17.1 and 0.18.3 on the Omarchy 4.0.4 shell API.
+- Keep up to 2048 chat photos in the private cache instead of 128, so accounts
+  with more chats than that stop evicting and re-downloading photos on every
+  refresh, and check 64 chats per explicit refresh instead of 12 so filling the
+  cache restarts background sync far fewer times.
 
 ## 0.14.0 — 2026-09-16
 

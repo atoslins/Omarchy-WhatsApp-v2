@@ -96,7 +96,9 @@ MAX_LIFECYCLE_RECOVERY = 4096
 ACTIVE_ACCOUNT: Any = object()
 ACCOUNT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 LEGACY_ACCOUNT_NAME = "primary"
-AVATAR_REFRESH_LIMIT = 12
+# Chats checked per explicit refresh. Each refresh yields the sync unit
+# while it runs, so a larger batch means fewer restarts for the same work.
+AVATAR_REFRESH_LIMIT = 64
 AVATAR_REFRESH_TTL = 7 * 24 * 60 * 60
 AVATAR_MISSING_TTL = 24 * 60 * 60
 AVATAR_FAILURE_BACKOFF = 60 * 60
