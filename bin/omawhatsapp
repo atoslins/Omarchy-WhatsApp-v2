@@ -113,6 +113,24 @@ CLIPBOARD_SENT_PATTERN = re.compile(
 )
 MAX_CLIPBOARD_SENT_FILES = 64
 MAX_CLIPBOARD_SENT_BYTES = 256 * 1024 * 1024
+# Rows wacli stores with synthetic text instead of content: "(message)" for
+# payloads it could not decode (protocol and placeholder messages) and the
+# "[Album: N images]" header that precedes an album's real media messages.
+# They are never shown as bubbles or used as a chat preview.
+def synthetic_message_sql(table: str) -> str:
+    return f"""(COALESCE({table}.media_type, '') = ''
+      AND COALESCE({table}.media_caption, '') = ''
+      AND COALESCE({table}.filename, '') = ''
+      AND ((COALESCE({table}.text, '') = ''
+            AND COALESCE({table}.display_text, '') IN ('', '(message)'))
+        OR {table}.text = '[Album]'
+        OR {table}.text GLOB '[[]Album: [0-9]*]'))"""
+
+
+# wacli writes "[Audio]" into the text of every audio message without a
+# caption; the voice bubble already says what it is.
+SYNTHETIC_AUDIO_TEXT = "[Audio]"
+
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
@@ -1976,7 +1994,9 @@ class Backend:
                       chats.pinned, chats.muted_until, chats.unread_count,
                       {name_sql} AS name,
                       CASE WHEN COALESCE(latest.media_type, '') <> '' THEN
-                        COALESCE(NULLIF(latest.text, ''), NULLIF(latest.media_caption, ''),
+                        COALESCE(NULLIF(CASE WHEN latest.media_type = 'audio'
+                            AND latest.text = '[Audio]' THEN '' ELSE latest.text END, ''),
+                          NULLIF(latest.media_caption, ''),
                           NULLIF(latest.filename, ''), '[' || latest.media_type || ']')
                       ELSE COALESCE(NULLIF(latest.text, ''),
                         NULLIF(latest.display_text, ''), '') END AS preview,
@@ -1989,6 +2009,7 @@ class Backend:
                     LEFT JOIN messages AS latest ON latest.rowid = (
                       SELECT rowid FROM messages WHERE chat_jid = chats.jid
                         AND deleted_at IS NULL AND COALESCE(reaction_to_id, '') = ''
+                        AND NOT {synthetic_message_sql("messages")}
                       ORDER BY ts DESC, rowid DESC LIMIT 1)
                     WHERE {where}
                     ORDER BY chats.pinned DESC, chats.last_message_ts DESC, name COLLATE NOCASE
@@ -2370,7 +2391,8 @@ class Backend:
           AND COALESCE(base.reaction_to_id, '') = ''
           AND (COALESCE(base.text, '') <> '' OR COALESCE(base.media_caption, '') <> '' OR
                COALESCE(base.display_text, '') <> '' OR COALESCE(base.filename, '') <> '' OR
-               COALESCE(base.media_type, '') <> '')"""
+               COALESCE(base.media_type, '') <> '')
+          AND NOT """ + synthetic_message_sql("base")
         parameters: list[Any] = [chat["jid"]]
         if cleaned:
             where += """ AND LOWER(COALESCE(NULLIF(base.text, ''), NULLIF(base.media_caption, ''),
@@ -2465,7 +2487,9 @@ class Backend:
             media_type = str(row["media_type"] or "")
             text_keys = ("text", "media_caption") if media_type else ("text", "display_text")
             text = next((str(row[key]).strip() for key in text_keys
-                if row[key] is not None and str(row[key]).strip()), "")
+                if row[key] is not None and str(row[key]).strip()
+                and not (media_type == "audio" and key == "text"
+                         and str(row[key]).strip() == SYNTHETIC_AUDIO_TEXT)), "")
             local_path = str(row["local_path"] or "")
             local_exists = bool(local_path) and Path(local_path).is_file()
             hint = sent_media_hints.get(self._sent_hint_key(chat["jid"], message_id), {})

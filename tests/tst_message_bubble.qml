@@ -52,6 +52,23 @@ TestCase {
     }
   }
 
+  function allTexts(item, found) {
+    found = found || []
+    if (item.text !== undefined && typeof item.text === "string") found.push(item)
+    for (var i = 0; i < item.children.length; i++) allTexts(item.children[i], found)
+    return found
+  }
+
+  function test_sent_message_claims_no_delivery_state() {
+    var messageBubble = createTemporaryObject(bubbleComponent, testCase)
+    verify(messageBubble !== null)
+    verify(messageBubble.message.from_me)
+    var ticks = allTexts(messageBubble).filter(function(item) {
+      return item.text === "✓" || item.text === "✓✓"
+    })
+    compare(ticks.length, 0, "wacli stores no receipts, so no tick may be drawn")
+  }
+
   function test_content_has_balanced_vertical_padding() {
     var messageBubble = createTemporaryObject(bubbleComponent, testCase)
     verify(messageBubble !== null)

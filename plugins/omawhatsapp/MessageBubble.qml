@@ -49,7 +49,6 @@ Item {
   readonly property real metadataWidth: timestampMetrics.advanceWidth
     + (message.edited === true ? editedMetrics.advanceWidth + Style.space(6) : 0)
     + (message.starred === true ? Style.space(16) : 0)
-    + (message.from_me ? Style.space(16) : 0)
   readonly property real naturalTextWidth: Math.max(
     messageMetrics.advanceWidth,
     senderMetrics.advanceWidth,
@@ -305,18 +304,12 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
+        // No delivery tick: wacli's mirror records no delivery or read
+        // receipts, so any tick here would be a claim the data cannot back.
         Text {
           textFormat: Text.PlainText
           text: root.timestampText
           color: root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-        Text {
-          textFormat: Text.PlainText
-          visible: root.message.from_me
-          text: "✓"
-          color: root.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }

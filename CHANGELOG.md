@@ -2,7 +2,6 @@
 
 ## Unreleased (fork)
 
-- Message hover actions sit beside the bubble with real icons and tooltips.
 - Accept wacli 0.17.1 or newer instead of exactly 0.17.1. The parity
   registry, tests, and CI are verified against 0.18.3; the installer reports
   a newer release and keeps its unclassified commands blocked.
@@ -18,6 +17,14 @@
 - The conversation subtitle no longer says "direct message" or "group"; it
   names the chat's account only when more than one is linked.
 - Remove the Ctrl+1…Ctrl+9 chat jumps.
+- Hide wacli's synthetic rows: "(message)" for payloads it cannot decode and
+  the "[Album: N images]" header before an album's real media no longer show as
+  bubbles or chat previews, and uncaptioned voice notes no longer carry the
+  "[Audio]" text. Drop the delivery tick, which the mirror has no data for.
+- Show the WhatsApp mark in the empty conversation pane.
+- Add `make dev`, which copies working-tree changes over an existing install
+  and restarts the shell when QML changed, and `make demo`. The installer and
+  test gate find qmllint in /usr/lib/qt6/bin on their own.
 - Every icon-only control has a tooltip, and the message hover actions use
   reply, emoji and more-actions icons instead of unrelated glyphs. The bar
   dropdown's attach button shows a paperclip instead of a megaphone.

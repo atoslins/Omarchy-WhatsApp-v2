@@ -551,6 +551,54 @@ class BackendTests(unittest.TestCase):
         self.assertEqual([value["id"] for value in values], ["t1", "t2"])
         self.assertNotIn("a1", [value["id"] for value in values])
 
+    def test_synthetic_placeholder_rows_are_neither_bubbles_nor_previews(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, display_text, reaction_to_id, media_type)
+                VALUES ('team@g.us', 'Design team', ?, 'member@s.whatsapp.net',
+                  'Sam', ?, 0, ?, ?, '', ?)""",
+                [
+                    ("protocol", 50, "", "(message)", ""),
+                    ("album-head", 51, "[Album: 3 images]", "[Album: 3 images]", ""),
+                    ("album-bare", 52, "[Album]", "[Album]", ""),
+                    ("typed", 53, "[Album: my trip]", "[Album: my trip]", ""),
+                ],
+            )
+        ids = [value["id"] for value in self.backend.messages("team@g.us")["messages"]]
+        self.assertNotIn("protocol", ids)
+        self.assertNotIn("album-head", ids)
+        self.assertNotIn("album-bare", ids)
+        self.assertIn("typed", ids, "only wacli's exact header shape is synthetic")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "DELETE FROM messages WHERE msg_id = 'typed'")
+        team = next(chat for chat in self.backend.chats()["chats"]
+                    if chat["jid"] == "team@g.us")
+        self.assertEqual(team["preview"], "ship it",
+                         "the preview skips placeholders to the latest real message")
+
+    def test_audio_without_caption_has_no_synthetic_text(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, media_caption, reaction_to_id, media_type, mime_type)
+                VALUES ('team@g.us', 'Design team', ?, 'member@s.whatsapp.net',
+                  'Sam', ?, 0, ?, ?, '', 'audio', 'audio/ogg')""",
+                [
+                    ("voice", 60, "[Audio]", ""),
+                    ("voice-caption", 61, "listen to this", "listen to this"),
+                ],
+            )
+        by_id = {value["id"]: value for value in self.backend.messages("team@g.us")["messages"]}
+        self.assertEqual(by_id["voice"]["text"], "")
+        self.assertEqual(by_id["voice-caption"]["text"], "listen to this")
+        team = next(chat for chat in self.backend.chats()["chats"]
+                    if chat["jid"] == "team@g.us")
+        self.assertEqual(team["preview"], "listen to this")
+
     def test_message_search_and_media_metadata(self) -> None:
         values = self.backend.messages("team@g.us", "mock")["messages"]
         self.assertEqual(len(values), 1)

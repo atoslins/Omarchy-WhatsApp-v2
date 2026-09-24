@@ -2302,8 +2302,8 @@ Item {
                 font.pixelSize: Style.font.body
               }
               Text {
-                objectName: "conversationSubtitle"
                 textFormat: Text.PlainText
+                objectName: "conversationSubtitle"
                 // wacli keeps neither the contact's about text nor live
                 // presence, so the only honest subtitle is the account the
                 // chat belongs to, and only when more than one is linked.
@@ -2466,14 +2466,29 @@ Item {
           }
         }
 
-        Text {
-          textFormat: Text.PlainText
+        Column {
+          objectName: "conversationEmptyState"
           visible: root.visibleMessages.length === 0 && !(root.service && root.service.loadingMessages)
           anchors.centerIn: messageList
-          text: root.displayGroupName === "" ? "Choose a chat" : "No local messages in this chat"
-          color: root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
+          spacing: Style.space(10)
+          Text {
+            textFormat: Text.PlainText
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.displayGroupName === ""
+            text: "󰖣"
+            color: root.dimmer
+            opacity: 0.5
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.iconLarge * 2
+          }
+          Text {
+            textFormat: Text.PlainText
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.displayGroupName === "" ? "Choose a chat" : "No local messages in this chat"
+            color: root.dimmer
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
         }
 
         ListView {
