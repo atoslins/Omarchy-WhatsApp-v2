@@ -106,7 +106,8 @@ Rectangle {
     if (section === "notifications") return [
       { kind: "toggle", key: "notify", title: "Desktop notifications",
         subtitle: !notifyAvailable ? "Needs notify-send from libnotify."
-          : (notifyOn ? "Muted and archived chats stay silent." : "Off; the bar still counts unread chats."),
+          : (notifyOn ? "Muted and archived chats stay silent. Right-click the bar icon to mute everything."
+            : "Muted; the bar still counts unread chats. Right-click the bar icon to turn them back on."),
         checked: notifyOn, available: notifyAvailable || notifyOn, busy: controlBusy },
       { kind: "toggle", key: "notify_preview", title: "Message text in notifications",
         subtitle: value("notificationsPreview", true)

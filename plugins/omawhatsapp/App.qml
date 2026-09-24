@@ -396,6 +396,22 @@ Item {
   // Media, links and docs: their own view, beside or over the conversation
   // like the details. The conversation itself is never filtered.
   property bool mediaBrowserOpen: false
+  // A panel drawn over the conversation takes every pointer event there. Its
+  // own mouse guard stops mouse areas only: tap and hover handlers on the
+  // bubbles under it still fired, so the covered conversation is disabled.
+  readonly property bool conversationCovered: (chatDetailsPanel.visible && !root.chatDetailsBeside)
+    || (mediaBrowser.visible && !root.mediaBrowserBeside)
+  property bool composerFocusBeforeCover: false
+  onConversationCoveredChanged: {
+    if (conversationCovered) {
+      root.composerFocusBeforeCover = composer.activeFocus
+      conversation.enabled = false
+      return
+    }
+    conversation.enabled = true
+    if (root.composerFocusBeforeCover) root.focusComposer()
+    root.composerFocusBeforeCover = false
+  }
   property string mediaBrowserKind: "media"
   readonly property bool mediaBrowserBeside: mediaBrowserOpen && !narrow && width >= Style.space(1100)
   property var viewerItems: []
@@ -4057,7 +4073,7 @@ Item {
             return root.mediaBrowserKind === "media" ? ["image", "video", "gif"].indexOf(String(item.media_type || "")) >= 0
               : root.mediaBrowserKind === "links" ? String(item.text || "").indexOf("http") >= 0
               : item.media_type === "document" })
-          : (root.service ? root.service.browserItems : [])
+          : (root.service && root.service.browserItems ? root.service.browserItems : [])
         loading: !root.demoMode && !!root.service && root.service.browserLoading
         foreground: root.foreground
         surface: root.background

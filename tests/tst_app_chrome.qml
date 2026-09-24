@@ -341,21 +341,128 @@ TestCase {
     tryCompare(findChild(h.app, "newChatDialog"), "opened", true)
   }
 
+  function firstMessageMenu(app) {
+    var row = findChild(app, "messageList").itemAtIndex(0)
+    return row ? findChild(row, "messageActionMenu") : null
+  }
+
+  function firstBubbleCenter(app) {
+    var bubble = findChild(findChild(app, "messageList").itemAtIndex(0), "messageBubbleSurface")
+    return bubble.mapToItem(app, bubble.width / 2, bubble.height / 2)
+  }
+
+  function anyMessageMenuOpen(app) {
+    var list = findChild(app, "messageList")
+    for (var i = 0; i < list.count; i++) {
+      var row = list.itemAtIndex(i)
+      var menu = row ? findChild(row, "messageActionMenu") : null
+      if (menu && menu.opened) return true
+    }
+    return false
+  }
+
   function test_panels_over_the_conversation_swallow_the_pointer() {
     // The owner right-clicked a group participant and got a message menu:
-    // the pointer went through the details panel to the bubble under it.
+    // the details panel stopped mouse areas, but tap handlers on the bubble
+    // under it still saw the click.
     var h = createHarness({ messages: [
       { id: "m1", text: "under the panel", sender: "Synthetic", timestamp: 1787540100,
         from_me: false, media_type: "", reactions: [] }] })
+    var list = findChild(h.app, "messageList")
+    tryVerify(function() { return list.count > 0 && list.itemAtIndex(0) !== null }, 3000, "message row")
+    var bubble = findChild(list.itemAtIndex(0), "messageBubbleSurface")
+    tryVerify(function() { return bubble.width > 0 && bubble.height > 0 }, 3000, "bubble size")
+    var point = bubble.mapToItem(h.app, bubble.width / 2, bubble.height / 2)
+    mouseClick(h.app, point.x, point.y, Qt.RightButton)
+    tryVerify(function() { return anyMessageMenuOpen(h.app) }, 1000, "control: the bubble answers a right click")
+    firstMessageMenu(h.app).close()
+    tryVerify(function() { return !anyMessageMenuOpen(h.app) })
+
     h.app.chatDetailsOpen = true
     var panel = findChild(h.app, "chatDetailsPanel")
     tryVerify(function() { return panel.visible && panel.width > 0 })
-    var guard = findChild(panel, "panelPointerGuard")
-    verify(guard !== null, "the panel owns every click and hover inside it")
-    verify(guard.acceptedButtons & Qt.RightButton)
-    verify(guard.hoverEnabled)
+    wait(100)
+    point = firstBubbleCenter(h.app)
+    verify(panel.contains(panel.mapFromItem(h.app, point.x, point.y)), "the bubble sits under the panel")
+    mouseClick(h.app, point.x, point.y, Qt.RightButton)
+    wait(100)
+    verify(!anyMessageMenuOpen(h.app), "a right click on the panel never reaches the bubble under it")
+    var avatar = findChild(h.app, "conversationAvatar")
+    var head = avatar.mapToItem(h.app, avatar.width / 2, avatar.height / 2)
+    verify(panel.contains(panel.mapFromItem(h.app, head.x, head.y)))
+    mouseClick(h.app, head.x, head.y)
+    wait(100)
+    verify(h.app.chatDetailsOpen, "a click on the panel never reaches the header under it")
+
+    h.app.chatDetailsOpen = false
+    h.app.openMediaBrowser("media")
     var browser = findChild(h.app, "mediaBrowser")
-    verify(findChild(browser, "panelPointerGuard") !== null)
+    tryVerify(function() { return browser.visible && browser.width > 0 })
+    wait(100)
+    point = firstBubbleCenter(h.app)
+    mouseClick(h.app, point.x, point.y, Qt.RightButton)
+    wait(100)
+    verify(!anyMessageMenuOpen(h.app), "the media view covers the bubble the same way")
+
+    h.app.mediaBrowserOpen = false
+    tryVerify(function() { return !browser.visible })
+    wait(100)
+    point = firstBubbleCenter(h.app)
+    mouseClick(h.app, point.x, point.y, Qt.RightButton)
+    tryVerify(function() { return anyMessageMenuOpen(h.app) }, 1000, "the bubble works again once the panel closes")
+    firstMessageMenu(h.app).close()
+  }
+
+  function test_a_right_click_on_a_participant_opens_only_the_participant_menu() {
+    // The owner's report, exactly: right-clicking a participant opened the
+    // participant menu and the menu of the message under the panel.
+    var messages = []
+    for (var i = 0; i < 14; i++)
+      messages.push({ id: "m" + i, text: "message under the panel " + i, sender: "Synthetic",
+        timestamp: 1787540100 - i * 60, from_me: i % 2 === 0, media_type: "", reactions: [] })
+    var people = []
+    for (var p = 0; p < 9; p++)
+      people.push({ jid: (p + 1) + "@s.whatsapp.net", name: "Synthetic person " + p,
+        phone: "1555000000" + p, role: p === 0 ? "superadmin" : "member", me: p === 1 })
+    var h = createHarness({ messages: messages, selectedChatKind: "group", chatDetails: {
+      ok: true, chat: { kind: "group", name: "Synthetic group" },
+      counts: { total: 14, media: 0, documents: 0, links: 0 },
+      group: { participant_count: 9, my_role: "admin" }, participants: people } })
+    var list = findChild(h.app, "messageList")
+    tryVerify(function() { return list.count > 0 && list.itemAtIndex(0) !== null }, 3000, "message rows")
+    h.app.chatDetailsOpen = true
+    var panel = findChild(h.app, "chatDetailsPanel")
+    tryVerify(function() { return panel.visible && panel.width > 0 })
+    var repeater = findChild(panel, "chatDetailsPeople")
+    tryVerify(function() { return repeater.count === 9 }, 2000, "participants")
+    var clicked = 0
+    for (var r = 0; r < repeater.count; r++) {
+      var row = repeater.itemAt(r)
+      var center = row.mapToItem(h.app, row.width / 3, row.height / 2)
+      if (center.y < 0 || center.y > h.app.height - 10 || r === 1) continue
+      mouseClick(h.app, center.x, center.y, Qt.RightButton)
+      wait(80)
+      verify(!anyMessageMenuOpen(h.app), "row " + r + ": no message menu under the participant")
+      var participantMenu = findChild(panel, "participantMenu")
+      verify(participantMenu.opened, "row " + r + ": the participant menu opens")
+      participantMenu.close()
+      tryVerify(function() { return !participantMenu.visible })
+      clicked++
+    }
+    verify(clicked >= 3, "enough rows were on screen to test")
+  }
+
+  function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {
+    var h = createHarness()
+    h.app.focusComposer()
+    var composer = findChild(h.app, "composerInput")
+    tryVerify(function() { return composer.activeFocus })
+    h.app.chatDetailsOpen = true
+    tryVerify(function() { return h.app.conversationCovered })
+    verify(!findChild(h.app, "messageList").enabled, "nothing under the panel answers the pointer")
+    h.app.chatDetailsOpen = false
+    tryVerify(function() { return composer.activeFocus }, 1000, "the draft is ready to type again")
+    verify(findChild(h.app, "messageList").enabled)
   }
 
   function test_media_links_and_docs_open_in_their_own_view_and_esc_goes_back() {

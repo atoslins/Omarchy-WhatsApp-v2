@@ -60,8 +60,11 @@ durable boundaries and prove the next run restores one coherent version.
 8. Confirm automatic reading is on by default: opening a chat, a new message
    arriving in the open chat, and replying mark it read on the phone, while a
    chat marked unread from the list stays unread until chosen again.
-   Middle-clicking the bar clears only the local notification badge. Verify the
-   settings switch with a mocked write.
+   Middle-clicking the bar clears only the local notification badge.
+   Right-clicking it mutes notifications: the OSD confirms, a crossed bell
+   shows beside the count, no popup or sound arrives, and a second right-click
+   unmutes without replaying the muted messages. Verify the settings switch
+   with a mocked write.
 9. Desktop notifications are on by default. Confirm the next incoming message
    pops up within about a second with the chat photo and one sound, that a photo
    reads "📷 Photo", that Omarchy's do not disturb keeps the sound quiet, that

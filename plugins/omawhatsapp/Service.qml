@@ -296,6 +296,9 @@ Item {
       + " · " + notificationMessageCount
       + (notificationMessageCount === 1 ? " message" : " messages")
       + " · middle-click to dismiss"
+  readonly property string barTooltipWithMute: barTooltip
+    + (notificationsMuted ? "\nNotifications muted · right-click to turn them on"
+      : "\nRight-click to mute notifications")
 
   signal textPasted(string text, var chatRef, string owner)
   signal attachmentPasted(string path, var chatRef, string owner)
@@ -932,6 +935,50 @@ Item {
     controlProcess.running = true
     return true
   }
+  // Right-clicking the bar icon mutes or unmutes every notification. It flips
+  // the Settings switch itself, so the two never disagree, and switching back
+  // on starts from the current messages instead of replaying the muted ones.
+  property string lastOsdMessage: ""
+  // -1: nothing waiting; 0: mute, 1: unmute, retried while a write finishes.
+  property int pendingNotificationsOn: -1
+  readonly property bool notificationToggleInFlight: pendingNotificationsOn >= 0
+    || (controlProcess.running && controlProcess.kind === "notify-mode")
+  readonly property bool notificationsMuted: pendingNotificationsOn >= 0
+    ? pendingNotificationsOn === 0 : !notificationsEnabled
+  function toggleNotificationsMuted() {
+    return setNotificationsOn(notificationsMuted)
+  }
+  function setNotificationsOn(on) {
+    var next = on === true
+    showNotificationOsd(next)
+    if (!setNotifications(next, null)) {
+      pendingNotificationsOn = next ? 1 : 0
+      notificationToggleRetry.restart()
+      return false
+    }
+    pendingNotificationsOn = -1
+    notificationToggleRetry.stop()
+    notificationsEnabled = next
+    return true
+  }
+  function showNotificationOsd(on) {
+    lastOsdMessage = on ? "WhatsApp notifications on" : "WhatsApp notifications muted"
+    Quickshell.execDetached(["omarchy", "osd", "-i", on ? "󰂚" : "󰂛", "-m", lastOsdMessage])
+  }
+  Timer {
+    id: notificationToggleRetry
+    interval: 300
+    repeat: true
+    onTriggered: {
+      if (root.pendingNotificationsOn < 0) { stop(); return }
+      var next = root.pendingNotificationsOn === 1
+      if (!root.setNotifications(next, null)) return
+      root.pendingNotificationsOn = -1
+      root.notificationsEnabled = next
+      stop()
+    }
+  }
+
   function setAutoDownloadMedia(enabled) {
     if (controlProcess.running || writing) return false
     controlWriting = true
@@ -1213,6 +1260,7 @@ Item {
 
   Process {
     id: statusProcess
+    objectName: "statusProcess"
     property string requestedAccount: ""
     command: [root.helper, "status", "--account", ""]
     stdout: StdioCollector { id: statusOutput }
@@ -1240,7 +1288,9 @@ Item {
         root.syncActive = payload.sync_active === true
         root.offlineMode = payload.offline_mode === true
         var notifications = payload.notifications
-        root.notificationsEnabled = !!notifications && notifications.enabled === true
+        // A status read that started before a mute toggle must not undo it.
+        if (!root.notificationToggleInFlight)
+          root.notificationsEnabled = !!notifications && notifications.enabled === true
         root.notificationsPreview = !notifications || notifications.preview !== false
         root.notificationsSound = !notifications || notifications.sound !== false
         root.notifyAvailable = payload.notify_available !== false
@@ -1341,6 +1391,7 @@ Item {
 
   Process {
     id: controlProcess
+    objectName: "controlProcess"
     property string kind: ""
     property string account: ""
     property string payload: ""

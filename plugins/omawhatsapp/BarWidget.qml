@@ -16,8 +16,11 @@ BarWidget {
   readonly property bool showUnreadCount:
     root.oma ? root.oma.showUnreadCount !== false : true
 
+  readonly property bool muted: !!oma && oma.notificationsMuted === true
+
   function refresh() { if (oma) oma.refresh() }
   function dismissNotifications() { if (oma) oma.dismissNotifications("") }
+  function toggleMute() { if (oma) oma.toggleNotificationsMuted() }
 
   readonly property bool opened: dropdownLoader.item
     ? dropdownLoader.item.opened === true : false
@@ -87,19 +90,24 @@ BarWidget {
 
   WidgetButton {
     id: button
+    objectName: "barButton"
     anchors.fill: parent
     bar: root.bar
+    // Muted shows a crossed bell next to the count; a vertical bar has room
+    // for one glyph, so the bell replaces the logo there.
     text: root.vertical
-      ? "󰖣"
+      ? (root.muted ? "󰂛" : "󰖣")
       : "󰖣" + (root.available && root.showUnreadCount && root.unreadCount > 0
         ? " " + (root.unreadCount > 99 ? "99+" : root.unreadCount) : "")
+        + (root.muted ? " 󰂛" : "")
     active: root.available && root.unreadCount > 0
+    dimmed: root.muted
     horizontalMargin: 8
-    tooltipText: root.oma ? root.oma.barTooltip : "OmaWhatsApp · reconnecting"
+    tooltipText: root.oma ? root.oma.barTooltipWithMute : "OmaWhatsApp · reconnecting"
 
     onPressed: function(code) {
       if (code === Qt.MiddleButton) root.dismissNotifications()
-      else if (code === Qt.RightButton) root.refresh()
+      else if (code === Qt.RightButton) root.toggleMute()
       else root.toggleDropdown()
     }
   }

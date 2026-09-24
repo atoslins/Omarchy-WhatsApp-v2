@@ -13,7 +13,7 @@
   icon buttons beside "Chats", the sync state shows as a quiet line at the
   bottom of the rail only while offline or reconnecting, and desktop
   notifications move into Settings. The manual refresh buttons are gone; the
-  store watcher already refreshes, and right-clicking the bar icon still does.
+  store watcher already refreshes.
 - The conversation subtitle no longer says "direct message" or "group"; it
   names the chat's account only when more than one is linked.
 - Remove the Ctrl+1…Ctrl+9 chat jumps.
@@ -91,7 +91,15 @@
   people by number, and leave the group. Removing, resetting the link and
   leaving take a second click to confirm.
 - The details and media panels own every click inside them: a right click on
-  a group participant opened the menu of the message bubble underneath.
+  a group participant also opened the menu of the message bubble underneath,
+  because the panel's mouse guard did not stop tap handlers. The conversation
+  under a covering panel is now disabled, and the draft gets its focus back
+  when the panel closes.
+- Right-click the bar icon to mute or unmute every desktop notification and
+  its sound. A crossed bell beside the count shows the mute, the Omarchy OSD
+  confirms the change, and unmuting never replays what arrived meanwhile. It
+  replaces the old right-click refresh, which the store watcher made
+  redundant.
 - Media, links and docs open in their own view (header button, or the counts
   in the chat details) with Media, Links and Docs tabs over the chat's whole
   local history: a photo grid that opens the viewer, links that open in the

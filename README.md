@@ -320,14 +320,18 @@ Add the `Super+Shift+W` binding from
 | Chat list hover button · chat menu `Mark as unread` | Mark a chat read or unread on your devices |
 
 Click the notification count in the dropdown header to clear every local badge
-after a confirmation. Middle-clicking the bar item does the same immediately;
-right-click refreshes. None of these actions marks messages read. Settings
+after a confirmation. Middle-clicking the bar item does the same immediately.
+None of these actions marks messages read. Right-clicking the bar item mutes
+every desktop notification and its sound, and shows a crossed bell beside the
+count until you right-click again; it is the same switch as Settings →
+Notifications. Settings
 control automatic reading, the badge,
 background sync, dropdown size, and the composer expansion limit.
 
-Desktop popups are a separate surface from the bar badge and are off until you
-turn them on. They need `notify-send` from libnotify, stay quiet for muted and
-archived chats, and never send a read receipt.
+Desktop popups are a separate surface from the bar badge and are on by
+default. They need `notify-send` from libnotify, stay quiet for muted and
+archived chats, and never send a read receipt. Unmuting starts from the
+current messages, so nothing that arrived while muted pops up afterwards.
 
 ### Dropdown IPC
 
