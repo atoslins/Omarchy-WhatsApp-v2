@@ -95,7 +95,7 @@ Column {
     enabled: !root.demoMode && root.updates.online && !root.updates.busy
     onClicked: {
       if (root.updates.release.standalone) root.updates.install()
-      else Qt.openUrlExternally("https://github.com/MoizIbnYousaf/Omarchy-Whatsapp#upgrading")
+      else Qt.openUrlExternally("https://github.com/atoslins/Omarchy-WhatsApp-v2#upgrading")
     }
   }
   Text {

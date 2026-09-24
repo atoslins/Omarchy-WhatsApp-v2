@@ -43,7 +43,10 @@
 - Chat photos refresh by themselves while every window is closed, in short
   batches, then once a day. wacli needs the store lock for photo lookups, so
   each batch still pauses sync for a few seconds.
-- In-app update checks look at this fork's releases, not upstream's.
+- In-app update checks and the release link in Settings look at this fork,
+  not upstream.
+- The dropdown footer just says "Open full app"; its key and the list keys
+  are explained in tooltips instead of a bare row of letters.
 - Download attachments with `media download --read-only --output` into
   OmaWhatsApp's own media folder, so opening media no longer pauses sync.
 - Save as… for attachments, from the message menu and the media viewer.

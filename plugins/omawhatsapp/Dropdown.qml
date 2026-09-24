@@ -785,6 +785,12 @@ Panel {
           Rectangle {
             width: parent.width
             height: Style.space(40)
+            HoverHandler { id: searchBoxHover }
+            PanelToolTip {
+              delay: 900
+              visible: searchBoxHover.hovered && !searchField.activeFocus
+              text: "/ to search · J/K or ↑/↓ to move · Enter opens the chat"
+            }
             radius: Style.cornerRadius
             color: root.subtle
             border.width: searchField.activeFocus ? 1 : 0
@@ -1021,26 +1027,16 @@ Panel {
             border.color: root.selected
             Text {
               textFormat: Text.PlainText
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(13)
-              anchors.verticalCenter: parent.verticalCenter
-              text: "Open full client"
+              objectName: "openFullAppLabel"
+              anchors.centerIn: parent
+              text: "Open full app"
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
               font.weight: Font.DemiBold
             }
-            Text {
-              textFormat: Text.PlainText
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(13)
-              anchors.verticalCenter: parent.verticalCenter
-              text: "O  ·  J/K  ·  /  ·  Enter"
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-            HoverHandler { id: openAllHover }
+            HoverHandler { id: openAllHover; cursorShape: Qt.PointingHandCursor }
+            PanelToolTip { visible: openAllHover.hovered; text: "Open the full app · O" }
             TapHandler { onTapped: root.openFullApp() }
           }
         }

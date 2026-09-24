@@ -117,4 +117,16 @@ TestCase {
     verify(!service.dropdownConversationVisible)
     dropdown.close()
   }
+
+  function test_footer_names_its_action_and_keeps_keys_in_tooltips() {
+    var dropdown = createTemporaryObject(dropdownComponent, testCase)
+    compare(findChild(dropdown, "openFullAppLabel").text, "Open full app")
+    function texts(item, found) {
+      if (typeof item.text === "string") found.push(item.text)
+      for (var i = 0; i < item.children.length; i++) texts(item.children[i], found)
+      return found
+    }
+    verify(texts(dropdown, []).every(function(text) { return text.indexOf("J/K  ·") < 0 }),
+      "no bare list of keys in the footer")
+  }
 }
