@@ -29,6 +29,7 @@ Item {
     value: root.opened && !root.settingsOpen && root.currentChatKey() !== ""
       && (!root.narrow || root.narrowConversation)
       && !(root.chatDetailsOpen && !root.chatDetailsBeside)
+      && !(root.mediaBrowserOpen && !root.mediaBrowserBeside)
   }
 
   UpdateController {
@@ -40,7 +41,6 @@ Item {
       root.showToast("OmaWhatsApp " + version + " available · open settings to update")
     }
   }
-  property string contentFilter: "all"
   property alias cursorIndex: keyboardNavigation.messageIndex
   property alias chatCursorIndex: keyboardNavigation.chatIndex
   readonly property alias keyboardContext: keyboardNavigation.context
@@ -217,8 +217,6 @@ Item {
   readonly property var visibleMessages: {
     var needle = messageSearchField ? String(messageSearchField.text || "").trim().toLowerCase() : ""
     var filtered = sourceItems.filter(function(item) {
-      if (root.contentFilter === "media" && !item.media_type) return false
-      if (root.contentFilter === "links" && String(item.text || "").indexOf("http") < 0) return false
       if (needle !== "" && String(item.text || "").toLowerCase().indexOf(needle) < 0) return false
       return true
     })
@@ -395,6 +393,25 @@ Item {
   // conversation when it is not.
   property bool chatDetailsOpen: false
   readonly property bool chatDetailsBeside: chatDetailsOpen && !narrow && width >= Style.space(1100)
+  // Media, links and docs: their own view, beside or over the conversation
+  // like the details. The conversation itself is never filtered.
+  property bool mediaBrowserOpen: false
+  property string mediaBrowserKind: "media"
+  readonly property bool mediaBrowserBeside: mediaBrowserOpen && !narrow && width >= Style.space(1100)
+  property var viewerItems: []
+  function openMediaBrowser(kind) {
+    var name = ["media", "links", "docs"].indexOf(String(kind || "")) >= 0 ? String(kind) : "media"
+    chatDetailsOpen = false
+    mediaBrowserKind = name
+    mediaBrowserOpen = true
+    if (!demoMode && service) service.browseMedia(name)
+    return true
+  }
+  function openBrowserMedia(item, gallery) {
+    viewerItems = gallery
+    var index = gallery.indexOf(item)
+    mediaViewer.openAt(index >= 0 ? index : 0)
+  }
   property var demoDetails: ({
     ok: true, kind: "chat-details", chat: { kind: "group", name: "OmaWhatsApp Lab" },
     since: 1780000000, counts: { total: 1284, media: 42, documents: 7, links: 19, starred: 3 },
@@ -465,6 +482,17 @@ Item {
     return true
   }
 
+  // The day of the topmost message on screen floats at the top while the
+  // conversation scrolls away from the newest message, and fades soon after.
+  property string floatingDayLabel: ""
+  function showFloatingDay() {
+    if (messageList.count === 0) return
+    var index = messageList.indexAt(messageList.width / 2, messageList.contentY + Style.space(12))
+    var item = index >= 0 ? root.visibleMessages[index] : null
+    floatingDayLabel = item ? TimeFormat.dayLabel(item.timestamp) : ""
+    floatingDayHold.restart()
+  }
+
   function oldestMessageInView() {
     if (messageList.count === 0) return false
     var item = messageList.itemAtIndex(messageList.count - 1)
@@ -474,7 +502,7 @@ Item {
   }
   function maybeLoadOlder() {
     if (demoMode || !service || !opened || typeof service.loadOlderMessages !== "function") return false
-    if (contentFilter !== "all" || messageSearchField.text.trim() !== "") return false
+    if (messageSearchField.text.trim() !== "") return false
     if (!oldestMessageInView()) return false
     return service.loadOlderMessages()
   }
@@ -596,6 +624,10 @@ Item {
   }
 
   function goBack() {
+    if (root.mediaBrowserOpen) {
+      root.mediaBrowserOpen = false
+      return
+    }
     if (root.chatDetailsOpen) {
       root.chatDetailsOpen = false
       return
@@ -1415,6 +1447,8 @@ Item {
       root.pendingWriteChatKey = ""
     }
     function onWriteCompleted(kind, chatRef, request, owner) {
+      if (kind === "media" && root.mediaBrowserOpen && root.service)
+        root.service.browseMedia(root.mediaBrowserKind)
       if (!ComposerModel.ownsOperation(owner, "app")) return
       var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey
@@ -2296,7 +2330,8 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: root.narrow ? parent.left : sidebar.right
-        anchors.right: root.chatDetailsBeside ? chatDetailsPanel.left : parent.right
+        anchors.right: root.chatDetailsBeside ? chatDetailsPanel.left
+          : (root.mediaBrowserBeside ? mediaBrowser.left : parent.right)
 
         Item {
           id: conversationHeader
@@ -2400,25 +2435,17 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(6)
 
-            Repeater {
-              model: root.compact ? [] : ["all", "media", "links"]
-              delegate: Rectangle {
-                required property string modelData
-                width: Style.space(46)
-                height: Style.space(28)
-                radius: Style.cornerRadius
-                color: root.contentFilter === modelData
-                  ? Style.selectedFillFor(root.foreground, root.accent) : "transparent"
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.centerIn: parent
-                  text: modelData
-                  color: root.contentFilter === modelData ? root.foreground : root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-                MouseArea { anchors.fill: parent; onClicked: root.contentFilter = modelData }
-              }
+            PanelActionButton {
+              objectName: "mediaBrowserButton"
+              iconText: "󰽌"
+              tooltipText: "Media, links and docs"
+              foreground: root.mediaBrowserOpen ? root.accent : root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.icon
+              size: Style.space(32)
+              onClicked: root.mediaBrowserOpen ? (root.mediaBrowserOpen = false)
+                : root.openMediaBrowser("media")
             }
 
             TextField {
@@ -2591,7 +2618,10 @@ Item {
           }
           // When the oldest loaded message is on screen, fetch the page
           // before it. Checked after scrolling and after the list changes.
-          onContentYChanged: olderCheck.restart()
+          onContentYChanged: {
+            olderCheck.restart()
+            root.showFloatingDay()
+          }
           onCountChanged: olderCheck.restart()
           Timer {
             id: olderCheck
@@ -2753,6 +2783,34 @@ Item {
           for (var i = 0; i < root.visibleMessages.length; i++)
             if (String(root.visibleMessages[i].id || "") === awayNewestId) return i
           return 0
+        }
+        Timer { id: floatingDayHold; interval: 1400; repeat: false }
+        Rectangle {
+          id: floatingDay
+          objectName: "floatingDay"
+          z: 68
+          readonly property bool shown: root.floatingDayLabel !== "" && jumpToLatest.parent.awayFromLatest
+            && (messageList.moving || floatingDayHold.running)
+          opacity: shown ? 1 : 0
+          visible: opacity > 0
+          Behavior on opacity { NumberAnimation { duration: 180 } }
+          anchors.top: messageList.top
+          anchors.topMargin: Style.space(6)
+          anchors.horizontalCenter: messageList.horizontalCenter
+          width: floatingDayText.implicitWidth + Style.space(22)
+          height: Style.space(26)
+          radius: height / 2
+          color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
+            root.foreground.b, 0.12))
+          Text {
+            textFormat: Text.PlainText
+            id: floatingDayText
+            anchors.centerIn: parent
+            text: root.floatingDayLabel
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
         // The shell button is transparent; over the conversation the text
         // would show through it, so it gets a solid backing.
@@ -3955,11 +4013,38 @@ Item {
         fontFamily: root.fontFamily
         onCloseRequested: root.chatDetailsOpen = false
         onActionRequested: function(action) { root.runChatDetailsAction(action) }
-        onFilterRequested: function(filter) {
-          root.contentFilter = filter
-          if (!root.chatDetailsBeside) root.chatDetailsOpen = false
-        }
+        onFilterRequested: function(filter) { root.openMediaBrowser(filter) }
         onOpenChatRequested: function(jid, name, phone) { root.openFromChatDetails(jid, name, phone) }
+      }
+
+      MediaBrowser {
+        id: mediaBrowser
+        visible: root.mediaBrowserOpen && !!root.selectedChat && !root.settingsOpen
+        z: root.mediaBrowserBeside ? 0 : 5
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        width: root.mediaBrowserBeside ? Style.space(380)
+          : (root.narrow ? parent.width : Math.max(Style.space(380), conversation.width))
+        kind: root.mediaBrowserKind
+        items: root.demoMode ? root.demoItems.filter(function(item) {
+            return root.mediaBrowserKind === "media" ? ["image", "video", "gif"].indexOf(String(item.media_type || "")) >= 0
+              : root.mediaBrowserKind === "links" ? String(item.text || "").indexOf("http") >= 0
+              : item.media_type === "document" })
+          : (root.service ? root.service.browserItems : [])
+        loading: !root.demoMode && !!root.service && root.service.browserLoading
+        foreground: root.foreground
+        surface: root.background
+        accent: root.accent
+        muted: root.dim
+        fontFamily: root.fontFamily
+        onCloseRequested: root.mediaBrowserOpen = false
+        onKindRequested: function(kind) { root.openMediaBrowser(kind) }
+        onOpenMediaRequested: function(item, gallery) { root.openBrowserMedia(item, gallery) }
+        onOpenDocumentRequested: function(item) { root.openMediaExternal(String(item.local_path || "")) }
+        onDownloadRequested: function(item) {
+          if (!root.demoMode && root.service) root.service.downloadMedia(root.currentChatRef(), item, "app")
+        }
       }
 
       QuickSwitcher {
@@ -3999,7 +4084,9 @@ Item {
         objectName: "mediaViewer"
         timeFormat: root.timeFormat
         anchors.fill: parent
-        items: root.mediaGallery
+        // The media browser opens the viewer on its own gallery.
+        items: root.viewerItems.length > 0 ? root.viewerItems : root.mediaGallery
+        onOpenedChanged: if (!opened) root.viewerItems = []
         surfaceActive: root.opened
         playback: root.playbackCoordinator
         chatRef: root.currentChatRef()

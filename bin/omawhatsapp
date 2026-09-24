@@ -3008,8 +3008,12 @@ class Backend:
                 "online": bool(online)}
 
     def messages(self, jid: str, query: str = "", limit: int = 160,
-                 before: Any = None) -> dict[str, Any]:
-        """Newest page of a chat, or the page older than ``before`` (ts and id)."""
+                 before: Any = None, kind: str = "") -> dict[str, Any]:
+        """Newest page of a chat, or the page older than ``before`` (ts and id).
+
+        ``kind`` narrows it to the chat's media, links or documents, over the
+        whole local history, for the media browser.
+        """
         chat = self._chat(jid)
         sent_media_hints = self._sent_media_hints()
         sent_reply_hints = self._sent_reply_hints()
@@ -3027,6 +3031,15 @@ class Backend:
             where += """ AND LOWER(COALESCE(NULLIF(base.text, ''), NULLIF(base.media_caption, ''),
               NULLIF(base.display_text, ''), NULLIF(base.filename, ''), '')) LIKE LOWER(?) ESCAPE '\\'"""
             parameters.append(self._like(cleaned))
+        if kind == "media":
+            where += " AND base.media_type IN ('image', 'video', 'gif')"
+        elif kind == "docs":
+            where += " AND base.media_type = 'document'"
+        elif kind == "links":
+            where += """ AND (base.text LIKE '%http://%' OR base.text LIKE '%https://%'
+              OR base.text LIKE '%www.%' OR base.media_caption LIKE '%http%')"""
+        elif kind:
+            raise OmaWhatsAppError("Choose media, links or docs.")
         cursor = before if isinstance(before, dict) else None
         if cursor is not None:
             before_ts = bounded_int(cursor.get("ts"), 0, 0, 2**63 - 1)
@@ -5233,7 +5246,8 @@ def main() -> int:
         if args.command == "messages":
             return emit(backend.messages(str(payload.get("jid") or ""),
                                          str(payload.get("query") or ""), args.limit,
-                                         payload.get("before")))
+                                         payload.get("before"),
+                                         str(payload.get("kind") or "")))
         if args.command == "stickers":
             return emit(backend.stickers())
         if args.command == "fetch-stickers":

@@ -65,7 +65,7 @@ TestCase {
     compare(filters.signalArguments[0][0], "media")
     var docs = findChild(panel, "chatDetailsCount-documents")
     mouseClick(docs, docs.width / 2, docs.height / 2)
-    compare(filters.count, 1, "documents have no conversation filter")
+    compare(filters.signalArguments[1][0], "docs", "documents open in the media browser too")
   }
 
   Component { id: spyComponent; SignalSpy {} }

@@ -147,6 +147,10 @@ TestCase {
       property int olderRequests: 0
       function loadOlderMessages() { olderRequests += 1; return true }
       property bool chatDetailsWanted: false
+      property var browserItems: []
+      property bool browserLoading: false
+      property var browsed: []
+      function browseMedia(kind) { browsed = browsed.concat([kind]); return true }
       property bool chatDetailsLoading: false
       property var chatDetails: ({})
       function setChatRead(ref, read, owner) {
@@ -335,6 +339,27 @@ TestCase {
     verify(h.app.openFromChatDetails("15550009999@s.whatsapp.net", "Nobody yet", "15550009999"))
     verify(!h.app.chatDetailsOpen)
     tryCompare(findChild(h.app, "newChatDialog"), "opened", true)
+  }
+
+  function test_media_links_and_docs_open_in_their_own_view_and_esc_goes_back() {
+    // The owner could filter the conversation to media and then find no way
+    // back to it; the conversation is no longer filtered at all.
+    var h = createHarness()
+    h.service.browsed = []
+    var button = findChild(h.app, "mediaBrowserButton")
+    verify(button !== null)
+    button.clicked()
+    verify(h.app.mediaBrowserOpen)
+    compare(h.service.browsed[0], "media")
+    var browser = findChild(h.app, "mediaBrowser")
+    verify(browser.visible)
+    compare(h.service.appConversationVisible, false, "a view over the conversation is not reading it")
+    h.app.openMediaBrowser("links")
+    compare(h.app.mediaBrowserKind, "links")
+    compare(h.service.browsed[1], "links")
+    h.app.goBack()
+    verify(!h.app.mediaBrowserOpen)
+    compare(h.service.appConversationVisible, true)
   }
 
   function test_the_rail_line_says_why_this_app_paused_sync() {

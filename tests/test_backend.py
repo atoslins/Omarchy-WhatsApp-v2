@@ -1009,6 +1009,22 @@ class BackendTests(unittest.TestCase):
              self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
             self.backend.fetch_stickers()
 
+    def test_the_media_browser_reads_media_links_and_docs_over_the_whole_history(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, filename, local_path)
+                   VALUES ('team@g.us', '', ?, '', 'Sam', ?, 0, ?, '', ?, ?, ?, '')""",
+                [("d1", 5, "", "document", "application/pdf", "plan.pdf"),
+                 ("l1", 6, "see https://example.test/page", "", "", ""),
+                 ("v1", 7, "", "video", "video/mp4", "")])
+        ids = lambda kind: [m["id"] for m in self.backend.messages("team@g.us", "", 50, None, kind)["messages"]]
+        self.assertEqual(ids("media"), ["t2", "v1"], "newest first")
+        self.assertEqual(ids("docs"), ["d1"])
+        self.assertEqual(ids("links"), ["l1"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "media, links or docs"):
+            self.backend.messages("team@g.us", "", 50, None, "stickers")
+
     def test_messages_never_cross_chat_boundary(self) -> None:
         values = self.backend.messages("team@g.us")["messages"]
         self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])

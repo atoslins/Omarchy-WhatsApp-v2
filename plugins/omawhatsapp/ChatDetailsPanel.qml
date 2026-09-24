@@ -244,7 +244,7 @@ Rectangle {
           model: [
             { key: "media", icon: "󰋩", label: "Media", count: root.counts.media, filter: "media" },
             { key: "links", icon: "󰌷", label: "Links", count: root.counts.links, filter: "links" },
-            { key: "documents", icon: "󰈙", label: "Docs", count: root.counts.documents, filter: "" }
+            { key: "documents", icon: "󰈙", label: "Docs", count: root.counts.documents, filter: "docs" }
           ]
           delegate: Rectangle {
             required property var modelData
@@ -282,8 +282,7 @@ Rectangle {
             TapHandler { onTapped: if (modelData.filter !== "") root.filterRequested(modelData.filter) }
             PanelToolTip {
               visible: countHover.hovered
-              text: modelData.filter !== "" ? "Show only " + modelData.label.toLowerCase() + " in the conversation"
-                : "Documents in this chat's local history"
+              text: "Open " + modelData.label.toLowerCase() + " of this chat"
             }
           }
         }

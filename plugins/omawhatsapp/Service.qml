@@ -96,6 +96,26 @@ Item {
     olderProcess.running = true
     return true
   }
+  // Media browser: the chat's media, links or documents over its whole local
+  // history. The conversation itself is never filtered.
+  property var browserItems: []
+  property string browserKind: ""
+  property bool browserLoading: false
+  function browseMedia(kind) {
+    var name = String(kind || "")
+    if (["media", "links", "docs"].indexOf(name) < 0 || selectedChatJid === "") return false
+    if (mediaBrowserProcess.running) { browserPendingKind = name; return false }
+    browserKind = name
+    browserLoading = true
+    mediaBrowserProcess.chatRef = selectedChatRef()
+    mediaBrowserProcess.kind = name
+    mediaBrowserProcess.payload = JSON.stringify({
+      account: mediaBrowserProcess.chatRef.account, jid: mediaBrowserProcess.chatRef.jid, kind: name })
+    mediaBrowserProcess.stdinEnabled = true
+    mediaBrowserProcess.running = true
+    return true
+  }
+  property string browserPendingKind: ""
   // Chat details panel: what the mirror knows about the selected chat.
   property var chatDetails: ({})
   property bool chatDetailsLoading: false
@@ -387,6 +407,7 @@ Item {
       members = []
       olderMessages = []
       hasOlderMessages = true
+      browserItems = []
       chatDetails = ({})
       errorText = ""
       refreshMessages()
@@ -1329,6 +1350,31 @@ Item {
         root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
+    }
+  }
+
+  Process {
+    id: mediaBrowserProcess
+    objectName: "mediaBrowserProcess"
+    property string payload: ""
+    property string kind: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    command: [root.helper, "messages", "--limit", "300"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: mediaBrowserOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.browserLoading = false
+      var payload = root.parseJson(mediaBrowserOutput.text)
+      if (exitCode === 0 && payload && payload.ok === true
+          && AccountModel.sameRef(chatRef, root.selectedChatRef()) && kind === root.browserKind)
+        root.browserItems = Array.isArray(payload.messages) ? payload.messages : []
+      if (root.browserPendingKind !== "") {
+        var next = root.browserPendingKind
+        root.browserPendingKind = ""
+        Qt.callLater(function() { root.browseMedia(next) })
+      }
     }
   }
 

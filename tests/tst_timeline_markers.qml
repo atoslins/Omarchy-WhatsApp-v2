@@ -108,6 +108,27 @@ TestCase {
     verify(!app.pageConversation(Qt.Key_A))
   }
 
+  function test_the_day_floats_at_the_top_while_scrolling_and_then_fades() {
+    var app = createTemporaryObject(appComponent, testCase)
+    app.opened = true
+    var list = findChild(app, "messageList")
+    tryVerify(function() { return list.count > 0 })
+    var pill = findChild(app, "floatingDay")
+    verify(pill !== null)
+    list.positionViewAtBeginning()
+    wait(50)
+    list.positionViewAtEnd()
+    tryVerify(function() { return findChild(app, "jumpToLatest").parent.awayFromLatest }, 2000)
+    app.showFloatingDay()
+    verify(app.floatingDayLabel !== "", "the topmost message's day")
+    tryVerify(function() { return pill.shown })
+    tryVerify(function() { return !pill.shown }, 3000, "it fades on its own after scrolling stops")
+    list.positionViewAtBeginning()
+    wait(50)
+    app.showFloatingDay()
+    verify(!pill.shown, "at the newest message the day header below is enough")
+  }
+
   function test_dropdown_marks_unread_and_days_too() {
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
     var unread = dropdown.demoChats.filter(function(chat) { return Number(chat.unread || 0) > 1 })[0]

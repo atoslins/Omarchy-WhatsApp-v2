@@ -335,6 +335,16 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // The day of the topmost message floats at the top while scrolling.
+  property string floatingDayLabel: ""
+  function showFloatingDay() {
+    if (messageList.count === 0) return
+    var index = messageList.indexAt(messageList.width / 2, messageList.contentY + Style.space(10))
+    var item = index >= 0 ? root.sourceMessages[index] : null
+    floatingDayLabel = item ? TimeFormat.dayLabel(item.timestamp) : ""
+    compactDayHold.restart()
+  }
+
   function openFullApp() {
     if (sending) return
     var payload = DropdownModel.fullAppPayload(currentChat)
@@ -1217,6 +1227,7 @@ Panel {
             verticalLayoutDirection: ListView.BottomToTop
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            onContentYChanged: root.showFloatingDay()
             delegate: Item {
               id: compactRow
               required property var modelData
@@ -1344,6 +1355,34 @@ Panel {
             }
           }
 
+          Timer { id: compactDayHold; interval: 1400; repeat: false }
+          Rectangle {
+            id: compactFloatingDay
+            objectName: "floatingDay"
+            z: 18
+            readonly property bool shown: root.floatingDayLabel !== "" && compactJump.away
+              && (messageList.moving || compactDayHold.running)
+            opacity: shown ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 180 } }
+            anchors.top: messageList.top
+            anchors.topMargin: Style.space(4)
+            anchors.horizontalCenter: messageList.horizontalCenter
+            width: compactFloatingDayText.implicitWidth + Style.space(20)
+            height: Style.space(24)
+            radius: height / 2
+            color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
+              root.foreground.b, 0.12))
+            Text {
+              textFormat: Text.PlainText
+              id: compactFloatingDayText
+              anchors.centerIn: parent
+              text: root.floatingDayLabel
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
           Rectangle {
             objectName: "jumpToLatestBacking"
             z: 19

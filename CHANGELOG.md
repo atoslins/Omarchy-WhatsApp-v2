@@ -77,6 +77,14 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Media, links and docs open in their own view (header button, or the counts
+  in the chat details) with Media, Links and Docs tabs over the chat's whole
+  local history: a photo grid that opens the viewer, links that open in the
+  browser, and documents that open or download. The conversation is no
+  longer filtered; before, the all/media/links chips hid in compact windows
+  and left a filtered conversation with no way back.
+- While scrolling, the day of the topmost message floats at the top of the
+  conversation and fades a moment after scrolling stops, in both clients.
 - Stickers look like stickers: no bubble behind them, about 160 px, animated
   ones play while the conversation is on screen, and a click no longer opens
   an external viewer.
