@@ -103,6 +103,21 @@ omarchy-shell io.github.moizibnyousaf.omawhatsapp openApp '{"demo":true,"voice":
 
 Capture only that window. Never publish a real conversation timeline.
 
+## Agent server
+
+`tests/test_mcp.py` drives the MCP server three ways. Protocol tests cover the
+handshake, notifications, batches, schemas, and honest annotations. Tool tests
+replace the helper with a recorder and check each of the 44 tools' request,
+authorization class, and answer shape. End-to-end tests run the real server
+and helper over a synthetic mirror and a fake wacli that records its
+arguments, which proves the helper accepts every token the server sends and
+that a guessed recipient never reaches wacli.
+
+Live checks of the write tools use only a chat the owner names for the
+purpose, with every text marked as a test, and undo what they create (a test
+group is emptied and left, an alias and a tag are removed). Never run them
+against other contacts.
+
 ## Store refresh regression
 
 `tests/test_store_watcher.py` runs the event mask from the resident service against disposable SQLite databases and a real `inotifywait`. It checks that read-only queries settle without another refresh, both with and without a persistent WAL writer, while committed writes, checkpoints, atomic replacement, deletion, and rollback-journal commits still produce relevant events. Repeated write/read cycles must show fresh rows and then go quiet. These tests reproduce the feedback loop against the pre-0.13.1 mask without using a private chat store.

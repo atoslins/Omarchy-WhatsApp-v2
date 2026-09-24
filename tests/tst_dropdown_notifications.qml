@@ -30,6 +30,18 @@ TestCase {
       function stopVoiceForSurfaceClose() {}
       function refreshMessages() {}
       function refreshChats() {}
+      property bool offlineMode: false
+      property var sentTexts: []
+      property int pastes: 0
+      signal pasteFailed(string message, var chatRef, string owner)
+      signal textPasted(string text, var chatRef, string owner)
+      signal attachmentPasted(string path, var chatRef, string owner)
+      function sendText(ref, text) {
+        if (writing) return false
+        sentTexts = sentTexts.concat([text])
+        return true
+      }
+      function pasteClipboard(ref, owner) { pastes += 1; return true }
     }
   }
 
@@ -144,5 +156,30 @@ TestCase {
     }
     verify(texts(dropdown, []).every(function(text) { return text.indexOf("J/K  ·") < 0 }),
       "no bare list of keys in the footer")
+  }
+
+  function test_a_reply_during_a_background_read_mark_waits_and_then_goes() {
+    // The same report as in the full app: a read mark in flight made the
+    // reply do nothing at all.
+    var service = createTemporaryObject(serviceStub, testCase)
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+    var composer = findChild(dropdown, "composerInput")
+    verify(composer !== null)
+    verify(!composer.readOnly, "typing never waits for a WhatsApp action")
+    composer.text = "on my way"
+    dropdown.sendDraft()
+    compare(service.sentTexts.length, 0)
+    verify(dropdown.sendQueued)
+    service.writing = false
+    tryVerify(function() { return service.sentTexts.length === 1 }, 1000)
+    compare(service.sentTexts[0], "on my way")
+    verify(!dropdown.sendQueued)
+    service.writing = true
+    dropdown.pasteClipboard()
+    compare(service.pastes, 1, "Ctrl+V runs beside the read mark")
+    dropdown.close()
   }
 }

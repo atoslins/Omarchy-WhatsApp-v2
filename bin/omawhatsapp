@@ -241,7 +241,22 @@ def valid_ui_preference(name: str, setting: Any) -> bool:
     return isinstance(setting, str) and setting in allowed
 
 
-SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
+def chat_kind_sql(table: str = "chats") -> str:
+    """A chat's kind, repairing the one wacli 0.18.3 breaks.
+
+    wacli files an outgoing poll or poll vote under the person's phone chat
+    but takes the kind and the name from the @lid WhatsApp answered with, so
+    the chat turns 'unknown' and drops out of the rail. A phone JID is always
+    a person.
+    """
+    # Only a chat with messages: wacli also leaves bare 'unknown' rows behind
+    # when it marks a chat read, and those are not conversations.
+    return (f"(CASE WHEN {table}.kind = 'unknown' AND {table}.jid GLOB '*@s.whatsapp.net' "
+            f"AND EXISTS (SELECT 1 FROM messages WHERE messages.chat_jid = {table}.jid) "
+            f"THEN 'dm' ELSE {table}.kind END)")
+
+
+SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
   AND COALESCE(groups.linked_parent_jid, '') = ''
@@ -1917,7 +1932,11 @@ class Backend:
 
     @staticmethod
     def _chat_name_sql() -> str:
-        return """COALESCE(NULLIF(chats.name, ''), NULLIF(groups.name, ''),
+        # A person's chat shows the name saved in the phone's address book,
+        # as the phone does; wacli can overwrite chats.name with a push name.
+        return """COALESCE(
+          NULLIF(CASE WHEN chats.jid GLOB '*@s.whatsapp.net' THEN contacts.full_name END, ''),
+          NULLIF(chats.name, ''), NULLIF(groups.name, ''),
           NULLIF(contacts.business_name, ''), NULLIF(contacts.full_name, ''),
           NULLIF(contacts.push_name, ''), NULLIF(contacts.system_name, ''),
           NULLIF(latest.chat_name, ''), 'WhatsApp chat')"""
@@ -1931,7 +1950,7 @@ class Backend:
             with closing(self._connect()) as connection:
                 row = connection.execute(
                     f"""
-                    SELECT chats.jid, chats.kind, {name_sql} AS name
+                    SELECT chats.jid, {chat_kind_sql()} AS kind, {name_sql} AS name
                     FROM chats
                     LEFT JOIN groups ON groups.jid = chats.jid
                     LEFT JOIN contacts ON contacts.jid = chats.jid
@@ -2008,7 +2027,8 @@ class Backend:
         try:
             with closing(self._connect()) as connection:
                 row = connection.execute(
-                    "SELECT jid, kind, COALESCE(NULLIF(name, ''), 'WhatsApp chat') AS name "
+                    f"SELECT jid, {chat_kind_sql()} AS kind, "
+                    "COALESCE(NULLIF(name, ''), 'WhatsApp chat') AS name "
                     "FROM chats WHERE jid = ?",
                     [target],
                 ).fetchone()
@@ -2337,7 +2357,7 @@ class Backend:
             with closing(self._connect()) as connection:
                 rows = connection.execute(
                     f"""
-                    SELECT chats.jid, chats.kind, chats.last_message_ts, chats.archived,
+                    SELECT chats.jid, {chat_kind_sql()} AS kind, chats.last_message_ts, chats.archived,
                       chats.pinned, chats.muted_until, chats.unread_count,
                       chats.unread AS unread_flag,
                       {name_sql} AS name,
@@ -3794,38 +3814,68 @@ class Backend:
             raise OmaWhatsAppError("Type a phone number with its country code.")
         return digits
 
-    def contacts_search(self, query: str = "", limit: int = 40) -> dict[str, Any]:
-        """Local only: the people this account's mirror knows, for a new chat."""
+    @staticmethod
+    def _has_table(connection: sqlite3.Connection, name: str) -> bool:
+        return connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [name]
+        ).fetchone() is not None
+
+    def contacts_search(self, query: str = "", limit: int = 40,
+                        tag: str = "") -> dict[str, Any]:
+        """Local only: the people this account's mirror knows, for a new chat.
+
+        ``tag`` keeps the people carrying one wacli contact tag. Each person
+        also reports the alias and tags you gave them.
+        """
         cleaned = " ".join(str(query or "").split())[:128]
+        wanted_tag = " ".join(str(tag or "").split())[:64]
         limit = max(1, min(int(limit), 80))
         digits = re.sub(r"\D", "", cleaned)
         phone_sql = """COALESCE(NULLIF(contacts.phone, ''),
           SUBSTR(people.jid, 1, INSTR(people.jid, '@') - 1))"""
-        name_sql = """COALESCE(NULLIF(chats.name, ''), NULLIF(contacts.business_name, ''),
-          NULLIF(contacts.full_name, ''), NULLIF(contacts.push_name, ''),
-          NULLIF(contacts.system_name, ''), NULLIF(contacts.first_name, ''), '')"""
         try:
             with closing(self._connect()) as connection:
+                has_aliases = self._has_table(connection, "contact_aliases")
+                has_tags = self._has_table(connection, "contact_tags")
+                if wanted_tag and not has_tags:
+                    return {"ok": True, "query": cleaned, "tag": wanted_tag, "people": []}
+                alias_sql = ("(SELECT alias FROM contact_aliases WHERE jid = people.jid)"
+                             if has_aliases else "''")
+                tags_sql = ("(SELECT GROUP_CONCAT(tag, char(10)) FROM contact_tags "
+                            "WHERE jid = people.jid)" if has_tags else "''")
+                name_sql = f"""COALESCE(NULLIF({alias_sql}, ''), NULLIF(contacts.full_name, ''),
+                  NULLIF(chats.name, ''), NULLIF(contacts.business_name, ''),
+                  NULLIF(contacts.push_name, ''), NULLIF(contacts.system_name, ''),
+                  NULLIF(contacts.first_name, ''), '')"""
+                tag_where = ("AND EXISTS (SELECT 1 FROM contact_tags WHERE "
+                             "contact_tags.jid = people.jid AND LOWER(contact_tags.tag) = LOWER(?))"
+                             if wanted_tag else "")
+                parameters: list[Any] = [cleaned, self._like(cleaned), digits, self._like(digits)]
+                if wanted_tag:
+                    parameters.append(wanted_tag)
+                parameters.append(limit)
                 rows = connection.execute(
                     f"""
                     WITH people(jid) AS (
                       SELECT jid FROM contacts WHERE jid LIKE '%@s.whatsapp.net'
                       UNION
                       SELECT jid FROM chats
-                      WHERE kind = 'dm' AND jid LIKE '%@s.whatsapp.net')
+                      WHERE kind IN ('dm', 'unknown') AND jid LIKE '%@s.whatsapp.net')
                     SELECT people.jid AS jid, {name_sql} AS name, {phone_sql} AS phone,
                       chats.jid IS NOT NULL AS has_chat,
+                      COALESCE({alias_sql}, '') AS alias, COALESCE({tags_sql}, '') AS tags,
                       COALESCE(chats.last_message_ts, 0) AS ts
                     FROM people
                     LEFT JOIN contacts ON contacts.jid = people.jid
                     LEFT JOIN chats ON chats.jid = people.jid
-                    WHERE ? = ''
+                    WHERE (? = ''
                       OR LOWER({name_sql}) LIKE LOWER(?) ESCAPE '\\'
-                      OR (? <> '' AND {phone_sql} LIKE ? ESCAPE '\\')
+                      OR (? <> '' AND {phone_sql} LIKE ? ESCAPE '\\'))
+                      {tag_where}
                     ORDER BY {name_sql} = '', LOWER({name_sql}), {phone_sql}
                     LIMIT ?
                     """,
-                    [cleaned, self._like(cleaned), digits, self._like(digits), limit],
+                    parameters,
                 ).fetchall()
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
@@ -3834,8 +3884,138 @@ class Backend:
             "name": str(row["name"] or "")[:128],
             "phone": str(row["phone"] or "")[:32],
             "has_chat": bool(row["has_chat"]),
+            "alias": str(row["alias"] or "")[:128],
+            "tags": sorted(tag for tag in str(row["tags"] or "").split("\n") if tag),
         } for row in rows]
-        return {"ok": True, "query": cleaned, "people": people}
+        result: dict[str, Any] = {"ok": True, "query": cleaned, "people": people}
+        if wanted_tag:
+            result["tag"] = wanted_tag
+        return result
+
+    def contact_tags(self) -> dict[str, Any]:
+        """Local only: every contact tag in this account and how many carry it."""
+        try:
+            with closing(self._connect()) as connection:
+                if not self._has_table(connection, "contact_tags"):
+                    return {"ok": True, "tags": []}
+                rows = connection.execute(
+                    "SELECT MIN(tag) AS tag, COUNT(*) AS people FROM contact_tags "
+                    "GROUP BY LOWER(tag) ORDER BY LOWER(tag) LIMIT 200"
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        return {"ok": True, "tags": [
+            {"tag": str(row["tag"])[:64], "people": int(row["people"])} for row in rows]}
+
+    ATTACHMENT_KINDS: dict[str, tuple[str, ...]] = {
+        "image": ("image", "gif"), "video": ("video",), "audio": ("audio",),
+        "document": ("document",), "sticker": ("sticker",), "location": ("location",),
+    }
+
+    def attachments(self, jid: str = "", sender: str = "", kinds: Any = None,
+                    direction: str = "any", after: Any = None, before: Any = None,
+                    limit: Any = 40, missing_only: bool = False) -> dict[str, Any]:
+        """Local only: attachments newest first, in one chat or across the rail.
+
+        ``after`` and ``before`` are epoch seconds. ``missing_only`` keeps the
+        ones not yet on this computer, which ``media`` can then download.
+        """
+        count = bounded_int(limit, 40, 1, 200)
+        requested = kinds if isinstance(kinds, list) else ([kinds] if kinds else [])
+        types: list[str] = []
+        for kind in requested:
+            key = str(kind or "").strip().lower()
+            if key not in self.ATTACHMENT_KINDS:
+                raise OmaWhatsAppError(
+                    "Choose attachment kinds among image, video, audio, document, sticker and location.")
+            types.extend(self.ATTACHMENT_KINDS[key])
+        if not types:
+            types = [kind for group in self.ATTACHMENT_KINDS.values() for kind in group]
+        if direction not in ("any", "received", "sent"):
+            raise OmaWhatsAppError("Choose received, sent or any.")
+        aliases = self._lid_aliases()
+        where = [f"base.media_type IN ({','.join('?' for _ in types)})",
+                 "base.deleted_at IS NULL", "COALESCE(base.reaction_to_id, '') = ''"]
+        parameters: list[Any] = list(types)
+        if jid:
+            chat_jids = self._chat_jids(self._chat(jid)["jid"])
+            where.append(f"base.chat_jid IN ({','.join('?' for _ in chat_jids)})")
+            parameters.extend(chat_jids)
+        if sender:
+            target = str(sender).strip()[:160]
+            senders = [target] + [lid for lid, phone in aliases.items() if phone == target]
+            where.append(f"base.sender_jid IN ({','.join('?' for _ in senders)})")
+            parameters.extend(senders)
+        if direction != "any":
+            where.append("base.from_me = ?")
+            parameters.append(1 if direction == "sent" else 0)
+        if after not in (None, ""):
+            where.append("base.ts > ?")
+            parameters.append(bounded_int(after, 0, 0, 2**63 - 1))
+        if before not in (None, ""):
+            where.append("base.ts < ?")
+            parameters.append(bounded_int(before, 2**63 - 1, 0, 2**63 - 1))
+        if missing_only:
+            where.append("COALESCE(base.local_path, '') = ''")
+        # A few extra rows cover the ones whose chat sits outside the rail.
+        parameters.append(count * 3)
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    f"""SELECT base.chat_jid, base.msg_id, base.sender_jid, base.sender_name,
+                      base.ts, base.from_me, base.media_type, base.media_caption,
+                      base.filename, base.mime_type, base.local_path, base.file_length,
+                      base.media_unavailable_at,
+                      location.latitude, location.longitude, location.name AS location_name,
+                      location.address AS location_address
+                    FROM messages AS base
+                    LEFT JOIN message_locations AS location
+                      ON location.chat_jid = base.chat_jid AND location.msg_id = base.msg_id
+                    WHERE {" AND ".join(where)}
+                    ORDER BY base.ts DESC, base.rowid DESC
+                    LIMIT ?""",
+                    parameters,
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        chats: dict[str, dict[str, str] | None] = {}
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            stored = str(row["chat_jid"])
+            folded = aliases.get(stored, stored)
+            if folded not in chats:
+                try:
+                    chats[folded] = self._chat(folded)
+                except OmaWhatsAppError:
+                    chats[folded] = None
+            chat = chats[folded]
+            if chat is None:
+                continue
+            target = str(row["msg_id"])
+            local_path = self._local_media_path(chat, target, row)
+            if missing_only and local_path:
+                continue
+            item: dict[str, Any] = {
+                "chat_jid": chat["jid"], "chat_name": chat["name"], "chat_kind": chat["kind"],
+                "id": target, "timestamp": int(row["ts"] or 0), "from_me": bool(row["from_me"]),
+                "sender_jid": str(row["sender_jid"] or ""),
+                "sender": str(row["sender_name"] or ""),
+                "media_type": str(row["media_type"] or ""),
+                "filename": str(row["filename"] or ""),
+                "mime_type": str(row["mime_type"] or ""),
+                "caption": str(row["media_caption"] or ""),
+                "file_size": int(row["file_length"] or 0),
+                "local_path": local_path,
+                "available": row["media_unavailable_at"] is None,
+            }
+            if row["latitude"] is not None:
+                item.update(latitude=row["latitude"], longitude=row["longitude"],
+                            location_name=str(row["location_name"] or ""),
+                            location_address=str(row["location_address"] or ""))
+            items.append(item)
+            if len(items) >= count:
+                break
+        return {"ok": True, "kind": "attachments", "attachments": items}
 
     def _known_person(self, jid: str) -> dict[str, Any] | None:
         try:
@@ -4062,21 +4242,47 @@ class Backend:
         self._envelope(self._write(command, timeout=45))
         return {"ok": True, "kind": "chat-action", "action": action}
 
+    # wacli-sync.service runs with PrivateTmp, and a delegated send is opened
+    # by that service, so it cannot see a file under /tmp or /var/tmp.
+    PRIVATE_TMP_ROOTS = (Path("/tmp").resolve(), Path("/var/tmp").resolve())
+
+    @contextmanager
+    def _sync_visible_file(self, path: Path) -> Iterator[Path]:
+        """The file itself, or a private copy the sync service can open."""
+        resolved = path.resolve()
+        if not any(root == resolved or root in resolved.parents
+                   for root in self.PRIVATE_TMP_ROOTS):
+            yield path
+            return
+        folder = self.state_dir / "outgoing"
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        copy = folder / f"{secrets.token_hex(8)}{path.suffix[:16]}"
+        try:
+            try:
+                shutil.copyfile(resolved, copy)
+                copy.chmod(0o600)
+            except OSError as exc:
+                raise OmaWhatsAppError("That file could not be prepared for sending.") from exc
+            yield copy
+        finally:
+            copy.unlink(missing_ok=True)
+
     def send_file(self, jid: str, path: Path, mime: str = "", caption: str = "",
                   reply_id: str = "", album_id: str = "", album_index: int = 0,
                   album_count: int = 1) -> dict[str, Any]:
         chat = self._chat(jid)
         self._validate_file(path)
-        command = ["--json", "send", "file", "--to", chat["jid"], "--file", str(path),
-                   "--filename", path.name, "--as", "auto"]
-        if mime:
-            command.extend(["--mime", mime])
-        if caption.strip():
-            command.extend(["--caption", caption.strip()[:1024]])
         quoted_id, reply_args = self._reply_args(chat, reply_id)
-        command.extend(reply_args)
-        command.extend(["--post-send-wait", "0"])
-        envelope = self._envelope(self._write(command, timeout=120))
+        with self._sync_visible_file(path) as sendable:
+            command = ["--json", "send", "file", "--to", chat["jid"], "--file", str(sendable),
+                       "--filename", path.name, "--as", "auto"]
+            if mime:
+                command.extend(["--mime", mime])
+            if caption.strip():
+                command.extend(["--caption", caption.strip()[:1024]])
+            command.extend(reply_args)
+            command.extend(["--post-send-wait", "0"])
+            envelope = self._envelope(self._write(command, timeout=120))
         data = envelope.get("data") if isinstance(envelope, dict) else None
         data = data if isinstance(data, dict) else {}
         message_id = self._sent_message_id(envelope)
@@ -4268,8 +4474,8 @@ class Backend:
         for choice in choices:
             command.extend(["--option", choice])
         command.extend(["--post-send-wait", "0"])
-        self._envelope(self._write(command, timeout=90))
-        return {"ok": True, "kind": "poll"}
+        envelope = self._envelope(self._write(command, timeout=90))
+        return {"ok": True, "kind": "poll", "message_id": self._sent_message_id(envelope)}
 
     def open_media_external(self, value: Any) -> dict[str, Any]:
         path = self._local_path(value)
@@ -5277,6 +5483,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("fetch-stickers")
     commands.add_parser("send")
     commands.add_parser("contacts-search")
+    commands.add_parser("contact-tags")
+    commands.add_parser("attachments")
     commands.add_parser("check-number")
     commands.add_parser("send-new")
     commands.add_parser("paste")
@@ -5400,7 +5608,18 @@ def main() -> int:
                                      str(payload.get("reply_id") or ""),
                                      payload.get("mentions")))
         if args.command == "contacts-search":
-            return emit(backend.contacts_search(str(payload.get("query") or "")))
+            return emit(backend.contacts_search(
+                str(payload.get("query") or ""),
+                bounded_int(payload.get("limit"), 40, 1, 80),
+                str(payload.get("tag") or "")))
+        if args.command == "contact-tags":
+            return emit(backend.contact_tags())
+        if args.command == "attachments":
+            return emit(backend.attachments(
+                str(payload.get("jid") or ""), str(payload.get("sender") or ""),
+                payload.get("kinds"), str(payload.get("direction") or "any"),
+                payload.get("after"), payload.get("before"), payload.get("limit", 40),
+                payload.get("missing_only") is True))
         if args.command == "check-number":
             return emit(backend.check_number(payload.get("phone"),
                                              str(payload.get("authorization") or "")))

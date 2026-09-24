@@ -699,6 +699,21 @@ Item {
     else root.requestClose()
   }
 
+  // A send while another WhatsApp action runs (often the read mark of a chat
+  // just opened from a notification) waits for it instead of being dropped.
+  property string queuedSendKey: ""
+  readonly property bool sendQueued: queuedSendKey !== "" && queuedSendKey === currentChatKey()
+  function runQueuedSend() {
+    if (queuedSendKey === "" || !service || service.writing) return false
+    if (queuedSendKey !== currentChatKey()) {
+      queuedSendKey = ""
+      return false
+    }
+    queuedSendKey = ""
+    sendDraft()
+    return true
+  }
+
   function sendDraft() {
     var value = composer.text.trim()
     if (value === "" && pendingAttachments.length === 0) return
@@ -714,7 +729,12 @@ Item {
       cancelComposerContext(false)
       return
     }
-    if (!service || service.writing) return
+    if (!service) return
+    if (service.writing) {
+      queuedSendKey = currentChatKey()
+      return
+    }
+    queuedSendKey = ""
     pendingWriteChatKey = currentChatKey()
     var chatRef = currentChatRef()
     var mentionJids = activeMentionJids()
@@ -861,10 +881,9 @@ Item {
 
   function pasteDraft() {
     if (demoMode) return
-    if (service && !service.writing) {
-      pendingWriteChatKey = currentChatKey()
-      service.pasteClipboard(currentChatRef(), "app")
-    }
+    // The helper also pastes images and files; plain text still pastes when
+    // it cannot run.
+    if (!service || !service.pasteClipboard(currentChatRef(), "app")) composer.paste()
   }
 
   function currentChatRef() {
@@ -1450,9 +1469,17 @@ Item {
     function onChatsChanged() {
       if (root.opened && root.pendingOpenChatJid !== "") root.selectPendingOpenChat()
     }
+    function onPasteFailed(message, chatRef, owner) {
+      if (!ComposerModel.ownsOperation(owner, "app")) return
+      if (String(chatRef && chatRef.key || "") === root.composerChatKey) composer.paste()
+    }
+    function onWritingChanged() {
+      if (root.service && !root.service.writing && root.queuedSendKey !== "")
+        Qt.callLater(root.runQueuedSend)
+    }
     function onTextPasted(text, chatRef, owner) {
       if (!ComposerModel.ownsOperation(owner, "app")) return
-      var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
+      var key = String(chatRef && chatRef.key || "")
       if (key === root.composerChatKey) {
         composer.insert(composer.cursorPosition, String(text || ""))
         root.focusComposer()
@@ -1463,11 +1490,10 @@ Item {
         states[key] = state
         root.composerStates = states
       }
-      root.pendingWriteChatKey = ""
     }
     function onAttachmentPasted(path, chatRef, owner) {
       if (!ComposerModel.ownsOperation(owner, "app")) return
-      var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
+      var key = String(chatRef && chatRef.key || "")
       if (key === root.composerChatKey) root.addAttachments([path])
       else {
         var states = Object.assign({}, root.composerStates)
@@ -1480,7 +1506,6 @@ Item {
         states[key] = state
         root.composerStates = states
       }
-      root.pendingWriteChatKey = ""
     }
     function onWriteCompleted(kind, chatRef, request, owner) {
       if (kind === "media" && root.mediaBrowserOpen && root.service)
@@ -3546,12 +3571,12 @@ Item {
             radius: width / 2
             color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
               || root.currentChatKey() !== "" ? root.accent : "transparent"
-            opacity: root.service && root.service.writing ? 0.45 : 1
+            opacity: root.service && root.service.writing && !root.sendQueued ? 0.45 : 1
             Text {
               textFormat: Text.PlainText
               anchors.centerIn: parent
-              text: composer.text.trim() !== "" || root.pendingAttachments.length > 0
-                ? "󰒊" : "󰍬"
+              text: root.sendQueued ? "󰔟"
+                : (composer.text.trim() !== "" || root.pendingAttachments.length > 0 ? "󰒊" : "󰍬")
               color: root.currentChatKey() !== "" ? root.background : root.dimmer
               font.family: root.fontFamily
               font.pixelSize: Style.font.icon
@@ -3569,7 +3594,8 @@ Item {
             }
             PanelToolTip {
               visible: sendButtonMouse.containsMouse
-              text: composer.text.trim() !== "" || root.pendingAttachments.length > 0
+              text: root.sendQueued ? "Sends as soon as the current WhatsApp action finishes"
+                : composer.text.trim() !== "" || root.pendingAttachments.length > 0
                 ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
                 : "Record a voice note · Ctrl+Shift+V"
             }

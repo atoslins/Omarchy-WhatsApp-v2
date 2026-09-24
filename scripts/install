@@ -32,6 +32,7 @@ shell_source="/usr/share/omarchy/shell"
 user_service_root="$xdg_config_home/systemd/user"
 helper_target="$user_home/.local/bin/omawhatsapp"
 assets_helper_target="$user_home/.local/bin/omawhatsapp_assets.py"
+mcp_target="$user_home/.local/bin/omawhatsapp-mcp"
 transaction_parent="$xdg_state_home/omawhatsapp-installer"
 transaction_journal="$transaction_parent/transaction.json"
 check_only=false
@@ -164,6 +165,7 @@ staged_plugin="$staging_root/plugin"
 staged_skill="$staging_root/skill"
 staged_helper="$staging_root/helper"
 staged_assets_helper="$staging_root/omawhatsapp_assets.py"
+staged_mcp="$staging_root/omawhatsapp-mcp"
 staged_service="$staging_root/wacli-sync.service"
 staged_template="$staging_root/wacli-sync@.service"
 install -d "$staged_plugin"
@@ -182,6 +184,7 @@ while IFS= read -r -d '' source_file; do
 done < <(find "$repo_root/skills/$skill_dir" -type f -print0)
 install -m755 "$repo_root/bin/omawhatsapp" "$staged_helper"
 install -m644 "$repo_root/bin/omawhatsapp_assets.py" "$staged_assets_helper"
+install -m755 "$repo_root/bin/omawhatsapp-mcp" "$staged_mcp"
 install -m644 "$repo_root/systemd/user/wacli-sync.service" "$staged_service"
 install -m644 "$repo_root/systemd/user/wacli-sync@.service" "$staged_template"
 initial_shell_digest=$(sha256sum "$shell_config" | cut -d ' ' -f 1)
@@ -213,6 +216,9 @@ if $check_only; then
   [[ -f "$staged_plugin/ChatAvatar.qml" ]]
   [[ -f "$staged_plugin/LICENSE" ]]
   [[ -f "$staged_assets_helper" ]]
+  [[ -x "$staged_mcp" ]]
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+    | python3 "$staged_mcp" | jq -e '.result.tools | length > 40' >/dev/null
   rg -q '^name: omawhatsapp$' "$staged_skill/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staged_skill/SKILL.md"
   python3 "$repo_root/bin/omawhatsapp" capabilities \
@@ -310,6 +316,7 @@ jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
   --arg staged_helper "$staged_helper" \
   --arg assets_helper "$assets_helper_target" \
   --arg staged_assets_helper "$staged_assets_helper" \
+  --arg mcp "$mcp_target" --arg staged_mcp "$staged_mcp" \
   --arg plugin "$plugin_root/$install_plugin_dir" --arg staged_plugin "$staged_plugin" \
   --arg skill "$skill_root/$skill_dir" --arg staged_skill "$staged_skill" \
   --arg service "$user_service_root/wacli-sync.service" --arg staged_service "$staged_service" \
@@ -326,6 +333,7 @@ jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
     targets:[
       {operation:"replace", staged:$staged_assets_helper, target:$assets_helper},
       {operation:"replace", staged:$staged_helper, target:$helper},
+      {operation:"replace", staged:$staged_mcp, target:$mcp},
       {operation:"replace", staged:$staged_plugin, target:$plugin,
         artifact_parent:$plugin_artifacts},
       {operation:"replace", staged:$staged_skill, target:$skill},
@@ -391,6 +399,8 @@ done
     >/dev/null
 jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
   "$plugin_root/$install_plugin_dir/manifest.json" >/dev/null
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | "$mcp_target" | jq -e '.result.tools | length > 40' >/dev/null
 if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell 9>&-
   shell_stopped=false
@@ -402,3 +412,5 @@ echo "OmaWhatsApp installed as one resident service/bar plugin with a shared age
 echo "To link WhatsApp, run:"
 echo "~/.local/bin/omawhatsapp wacli --interactive --authorize interactive -- auth"
 echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."
+echo "To let Claude Code use WhatsApp, run:"
+echo "claude mcp add --scope user whatsapp -- ~/.local/bin/omawhatsapp-mcp"

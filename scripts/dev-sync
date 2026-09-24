@@ -37,6 +37,10 @@ if ! cmp -s "$repo_root/bin/omawhatsapp" "$bin_target/omawhatsapp"; then
   install -m755 "$repo_root/bin/omawhatsapp" "$bin_target/omawhatsapp"
   changed+=$'\n'"bin/omawhatsapp"
 fi
+if ! cmp -s "$repo_root/bin/omawhatsapp-mcp" "$bin_target/omawhatsapp-mcp"; then
+  install -m755 "$repo_root/bin/omawhatsapp-mcp" "$bin_target/omawhatsapp-mcp"
+  changed+=$'\n'"bin/omawhatsapp-mcp"
+fi
 if ! cmp -s "$repo_root/bin/omawhatsapp_assets.py" "$bin_target/omawhatsapp_assets.py"; then
   install -m644 "$repo_root/bin/omawhatsapp_assets.py" "$bin_target/omawhatsapp_assets.py"
   changed+=$'\n'"bin/omawhatsapp_assets.py"

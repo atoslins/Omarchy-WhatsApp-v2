@@ -26,9 +26,20 @@ app-state change that syncs the read state to the user's own devices. wacli
 has no path that sends a read receipt, so the other side is not told.
 
 Desktop popups leave the process: chat names, senders, and message previews
-reach the notification daemon and its history. They are off by default, the
-preview can be dropped so only chat names travel, and every field is truncated
+reach the notification daemon and its history. They are on by default, can be
+muted from the bar icon, the preview can be dropped so only chat names travel, and every field is truncated
 to one printable, markup-inert line before it is handed to `notify-send`.
+
+An agent connected through `omawhatsapp-mcp` reads what its tools return:
+chat names, message text, contacts, and attachment paths. That content goes
+wherever the agent sends its prompts, which for a hosted model means the
+model provider. Nothing is read until the agent calls a tool for a request,
+the server keeps no copy, and every tool that changes WhatsApp is marked so the
+host asks first. An export writes one private file where the user asked,
+refused inside a repository unless separately authorized. A file sent from
+`/tmp` is copied to the mode-`0700` `~/.local/state/omawhatsapp/outgoing`
+folder, because the sandboxed sync service cannot see `/tmp`, and the copy is
+removed as soon as the send returns.
 
 Voice drafts are created under the mode-`0700`
 `~/.local/state/omawhatsapp/voice-drafts` directory and finalized to mode

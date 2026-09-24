@@ -141,6 +141,15 @@ class InstallTransactionTests(unittest.TestCase):
         entrypoint = '{operation:"replace", staged:$staged_helper'
         self.assertLess(source.index(module), source.index(entrypoint))
 
+    def test_the_agent_server_publishes_after_the_helper_it_calls(self) -> None:
+        source = INSTALL.read_text(encoding="utf-8")
+        helper = '{operation:"replace", staged:$staged_helper'
+        server = '{operation:"replace", staged:$staged_mcp'
+        self.assertLess(source.index(helper), source.index(server))
+        uninstall = (INSTALL.parent / "uninstall").read_text(encoding="utf-8")
+        self.assertLess(uninstall.index('{operation:"remove", target:$mcp}'),
+                        uninstall.index('{operation:"remove", target:$helper}'))
+
     def test_every_begin_kill_point_recovers_exact_originals(self) -> None:
         points = {
             "begin": ["after-initial-journal", "after-begin"],
@@ -557,7 +566,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
         helper = home / ".local" / "bin" / "omawhatsapp"
         helper.parent.mkdir(parents=True)
         helper.write_text("synthetic\n", encoding="utf-8")
-        for name in ("omawhatsapp_assets.py",):
+        for name in ("omawhatsapp_assets.py", "omawhatsapp-mcp"):
             (helper.parent / name).write_text("synthetic\n", encoding="utf-8")
         service_root.mkdir(parents=True, exist_ok=True)
         for name in ("wacli-sync.service", "wacli-sync@.service"):
@@ -637,6 +646,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
             self.assertFalse((service_root / "wacli-sync.service").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp_assets.py").exists())
+            self.assertFalse((home / ".local" / "bin" / "omawhatsapp-mcp").exists())
 
     def test_unit_discovery_accepts_a_machine_without_sync_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -167,6 +167,27 @@ Installer upgrades preserve that choice.
 - Search is debounced and scoped to the selected conversation.
 - Window opening performs no network request.
 
+## Agent server
+
+`bin/omawhatsapp-mcp` is a Model Context Protocol server over stdio, written
+against the standard library like the helper. Each tool is one helper command
+or one guarded gateway leaf with the authorization class the helper demands
+(`remote-read`, `local-write`, `sync`, `whatsapp-write`, `destructive`, or an
+exact `private-export:` path). The server resolves names to chats for reads,
+requires exact JIDs for writes, turns times into the local zone, and trims
+answers; it never opens `wacli.db`. Writes are annotated as not read-only, and
+destructive ones as destructive, so hosts can ask before each call. A write is
+never retried: a timeout may still have been delivered.
+
+Three helper commands exist for it: `attachments` (attachments across the
+rail, folding @lid rows into the phone chat), `contact-tags`, and a `tag`
+filter on `contacts-search`. Two helper repairs came out of its live tests:
+wacli 0.18.3 files an outgoing poll or vote under the phone chat but takes its
+kind and name from the @lid, so a person's chat with messages and kind
+`unknown` is read as a DM under the name saved on the phone; and a file under
+`/tmp` is sent from a private copy, since the delegated send is opened by
+`wacli-sync.service`, whose `PrivateTmp` hides the user's `/tmp`.
+
 ## Extension boundary
 
 OmaWhatsApp has no special chat names, task semantics, or personal capture

@@ -1706,9 +1706,12 @@ class BackendTests(unittest.TestCase):
             self.backend.send_voice("team@g.us", external)
 
     def test_poll_is_validated_and_transport_is_exact(self) -> None:
-        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"id":"POLL-ID"}}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:
-            self.backend.send_poll("team@g.us", "Ship it?", ["Yes", "No"], 1)
+            result = self.backend.send_poll("team@g.us", "Ship it?", ["Yes", "No"], 1)
+        self.assertEqual(result["message_id"], "POLL-ID",
+                         "an agent needs the id to read the results or vote")
         command = write.call_args.args[0]
         self.assertEqual(command[1:3], ["send", "poll"])
         self.assertEqual(command.count("--option"), 2)
@@ -2403,6 +2406,132 @@ class BackendTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)["ok"])
+
+
+    def test_a_person_chat_wacli_turned_unknown_stays_in_the_rail(self) -> None:
+        # Found after sending a poll: wacli 0.18.3 filed it under the phone chat
+        # but took kind and name from the @lid, so the chat became 'unknown',
+        # got the push name instead of the saved one, and left the rail.
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES "
+                               "('member@s.whatsapp.net', 'unknown', 'Sam push name', 60, 0, 0, 0, 0, 0)")
+            connection.execute("INSERT INTO chats VALUES "
+                               "('99887766@lid', 'unknown', 'Sam push name', 59, 0, 0, 0, 0, 0)")
+        self._insert("member@s.whatsapp.net", "poll1", 60, from_me=1, text="Poll: Day?")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertIn("member@s.whatsapp.net", rail)
+        self.assertEqual(rail["member@s.whatsapp.net"]["kind"], "dm")
+        self.assertEqual(rail["member@s.whatsapp.net"]["name"], "Sam Rivera",
+                         "the name saved on the phone, not the push name")
+        self.assertNotIn("99887766@lid", rail, "a hidden @lid chat is still not a rail row")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES "
+                               "('bare@s.whatsapp.net', 'unknown', '', 0, 0, 0, 0, 0, 0)")
+        self.assertNotIn("bare@s.whatsapp.net",
+                         {chat["jid"] for chat in self.backend.chats()["chats"]},
+                         "a bare row wacli left after a mark-read is not a conversation")
+        self.assertNotIn("legacy@newsletter", rail)
+        self.assertEqual(self.backend._chat("member@s.whatsapp.net")["kind"], "dm")
+        self.assertEqual(self.backend._chat_any("member@s.whatsapp.net")["kind"], "dm")
+        person = next(p for p in self.backend.contacts_search("Sam")["people"]
+                      if p["jid"] == "member@s.whatsapp.net")
+        self.assertTrue(person["has_chat"])
+        self.assertEqual(person["name"], "Sam Rivera")
+
+    def test_a_file_under_tmp_is_sent_from_a_copy_the_sync_service_sees(self) -> None:
+        # Found sending a file from /tmp: the delegated send is opened by
+        # wacli-sync.service, whose PrivateTmp hides the user's /tmp.
+        seen: dict[str, object] = {}
+
+        def write(command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+            sent = Path(command[command.index("--file") + 1])
+            seen.update(path=sent, exists=sent.is_file(), content=sent.read_bytes())
+            return subprocess.CompletedProcess([], 0, '{"success":true,"data":{"id":"F1"}}', "")
+
+        self.assertTrue(str(self.document.resolve()).startswith(("/tmp/", "/var/tmp/")),
+                        "the fixture lives in the system temporary directory")
+        with mock.patch.object(self.backend, "_write", side_effect=write) as call:
+            result = self.backend.send_file("alex@s.whatsapp.net", self.document,
+                                            "application/pdf")
+        command = call.call_args.args[0]
+        sent = seen["path"]
+        self.assertTrue(seen["exists"])
+        self.assertEqual(seen["content"], b"pdf")
+        self.assertNotEqual(sent, self.document)
+        self.assertEqual(sent.parent, self.backend.state_dir / "outgoing",
+                         "the helper's own folder, which the service can read")
+        self.assertEqual(command[command.index("--filename") + 1], "notes.pdf",
+                         "the contact still sees the original name")
+        self.assertFalse(sent.exists(), "the private copy is removed after the send")
+        self.assertEqual(result["local_path"], str(self.document))
+
+    def test_a_file_outside_tmp_is_sent_as_it_is(self) -> None:
+        home_file = Path(self.backend.state_dir) / "home-file.pdf"
+        home_file.parent.mkdir(parents=True, exist_ok=True)
+        home_file.write_bytes(b"pdf")
+        with mock.patch.object(self.backend, "PRIVATE_TMP_ROOTS", (Path("/nonexistent"),)), \
+                mock.patch.object(self.backend, "_write", return_value=subprocess.CompletedProcess(
+                    [], 0, '{"success":true,"data":{"id":"F2"}}', "")) as call:
+            self.backend.send_file("alex@s.whatsapp.net", home_file, "application/pdf")
+        command = call.call_args.args[0]
+        self.assertEqual(command[command.index("--file") + 1], str(home_file))
+
+    def test_attachments_list_every_rail_chat_newest_first(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, media_type, mime_type, filename, local_path)
+                   VALUES (?, '', ?, ?, ?, ?, ?, '', ?, ?, ?, ?)""",
+                [("alex@s.whatsapp.net", "d1", "alex@s.whatsapp.net", "Alex", 45, 0,
+                  "document", "application/pdf", "quote.pdf", str(self.document)),
+                 ("team@g.us", "d2", "member@s.whatsapp.net", "Sam", 46, 0,
+                  "document", "application/pdf", "plan.pdf", ""),
+                 ("news@newsletter", "n1", "", "", 47, 0, "image", "image/png", "", "")])
+        everything = self.backend.attachments()["attachments"]
+        self.assertEqual([item["id"] for item in everything], ["d2", "d1", "t2"],
+                         "newest first, and a channel outside the rail is left out")
+        self.assertEqual(everything[1]["local_path"], str(self.document))
+        self.assertEqual(everything[0]["chat_name"], "Design team")
+        documents = self.backend.attachments(kinds=["document"], direction="received")
+        self.assertEqual([item["id"] for item in documents["attachments"]], ["d2", "d1"])
+        from_sam = self.backend.attachments(sender="member@s.whatsapp.net")
+        self.assertEqual([item["id"] for item in from_sam["attachments"]], ["d2"])
+        in_team = self.backend.attachments(jid="team@g.us", after=21)
+        self.assertEqual([item["id"] for item in in_team["attachments"]], ["d2"])
+        missing = self.backend.attachments(missing_only=True)
+        self.assertEqual([item["id"] for item in missing["attachments"]], ["d2"],
+                         "files already on this computer are not pending")
+        with self.assertRaises(backend_module.OmaWhatsAppError):
+            self.backend.attachments(kinds=["spreadsheet"])
+
+    def test_contact_search_reports_alias_and_tags_and_filters_by_tag(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("""CREATE TABLE contact_tags (
+                jid TEXT NOT NULL, tag TEXT NOT NULL, updated_at INTEGER NOT NULL,
+                PRIMARY KEY (jid, tag))""")
+            connection.executemany("INSERT INTO contact_tags VALUES (?, ?, 1)", [
+                ("member@s.whatsapp.net", "suppliers"), ("member@s.whatsapp.net", "team"),
+                ("admin@s.whatsapp.net", "Suppliers")])
+            connection.execute(
+                "INSERT INTO contact_aliases VALUES ('member@s.whatsapp.net', 'Sammy', '', 1)")
+        people = {person["jid"]: person for person in self.backend.contacts_search()["people"]}
+        self.assertEqual(people["member@s.whatsapp.net"]["alias"], "Sammy")
+        self.assertEqual(people["member@s.whatsapp.net"]["name"], "Sammy",
+                         "your own name for someone wins")
+        self.assertEqual(people["member@s.whatsapp.net"]["tags"], ["suppliers", "team"])
+        tagged = self.backend.contacts_search(tag="SUPPLIERS")["people"]
+        self.assertEqual(sorted(person["jid"] for person in tagged),
+                         ["admin@s.whatsapp.net", "member@s.whatsapp.net"],
+                         "tags match without regard to case")
+        self.assertEqual(self.backend.contact_tags()["tags"],
+                         [{"tag": "Suppliers", "people": 2}, {"tag": "team", "people": 1}],
+                         "one row per tag whatever its case, with a stable spelling")
+
+    def test_contact_search_works_on_a_mirror_without_tags(self) -> None:
+        self.assertEqual(self.backend.contact_tags(), {"ok": True, "tags": []})
+        self.assertEqual(self.backend.contacts_search(tag="suppliers")["people"], [])
+        self.assertTrue(all(person["tags"] == []
+                            for person in self.backend.contacts_search()["people"]))
 
 
 class MultiAccountTests(unittest.TestCase):

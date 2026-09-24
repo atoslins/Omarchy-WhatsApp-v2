@@ -5,6 +5,10 @@ description: Inspect, search, summarize, sync, and operate WhatsApp through OmaW
 
 # OmaWhatsApp
 
+When the `whatsapp` MCP server (`~/.local/bin/omawhatsapp-mcp`) is connected,
+prefer its tools: they call this helper with the right authorization classes
+and apply the same boundaries below. Otherwise use the helper directly.
+
 Use the installed `~/.local/bin/omawhatsapp` helper. Its focused commands keep
 ordinary chat work inside the locally indexed DM/standalone-group boundary.
 Its guarded `wacli` gateway covers every command leaf in the supported wacli

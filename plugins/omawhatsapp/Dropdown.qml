@@ -428,8 +428,25 @@ Panel {
       focusComposer()
       return
     }
-    if (!service || sending) return
-    service.pasteClipboard(currentChatRef(), "dropdown")
+    // Pasting never waits for a WhatsApp action; plain text still pastes
+    // when the helper cannot run.
+    if (!service || !service.pasteClipboard(currentChatRef(), "dropdown")) composer.paste()
+  }
+
+  // A send while another WhatsApp action runs waits for it instead of being
+  // dropped, as in the full app.
+  property string queuedSendKey: ""
+  readonly property bool sendQueued: queuedSendKey !== ""
+    && queuedSendKey === String(currentChatRef().key || "")
+  function runQueuedSend() {
+    if (queuedSendKey === "" || !service || service.writing) return false
+    if (queuedSendKey !== String(currentChatRef().key || "")) {
+      queuedSendKey = ""
+      return false
+    }
+    queuedSendKey = ""
+    sendDraft()
+    return true
   }
 
   function localFileUrl(path) {
@@ -457,7 +474,12 @@ Panel {
       replyTarget = null
       return
     }
-    if (!service || sending || offline) return
+    if (!service || offline) return
+    if (service.writing) {
+      queuedSendKey = String(currentChatRef().key || "")
+      return
+    }
+    queuedSendKey = ""
     errorText = ""
     var kind = pendingAttachments.length > 0 ? "files" : "send"
     var request = pendingAttachments.length > 0 ? {
@@ -555,6 +577,14 @@ Panel {
     }
     function onSelectedChatAccountChanged() {
       Qt.callLater(root.validateServiceSelection)
+    }
+    function onPasteFailed(message, chatRef, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      if (AccountModel.sameRef(chatRef, root.currentChatRef())) composer.paste()
+    }
+    function onWritingChanged() {
+      if (root.service && !root.service.writing && root.queuedSendKey !== "")
+        Qt.callLater(root.runQueuedSend)
     }
     function onTextPasted(text, chatRef, owner) {
       if (!ComposerModel.ownsOperation(owner, "dropdown")) return
@@ -1596,31 +1626,32 @@ Panel {
                   width: composerRowItem.controlSize
                   height: width
                   radius: width / 2
-                  color: root.sending ? root.subtle : root.accent
-                  opacity: root.sending ? 0.5 : 1
+                  readonly property bool busy: root.sending && !root.sendQueued
+                  color: busy ? root.subtle : root.accent
+                  opacity: busy ? 0.5 : 1
                   Text {
                     textFormat: Text.PlainText
                     anchors.centerIn: parent
-                    text: root.sending ? "…"
+                    text: root.sendQueued ? "󰔟" : root.sending ? "…"
                       : (String(composer.text || "").trim() !== ""
                           || root.pendingAttachments.length > 0 ? "󰒊" : "󰍬")
-                    color: root.sending ? root.muted : root.background
+                    color: sendButton.busy ? root.muted : root.background
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                   }
                   HoverHandler { id: sendHover; cursorShape: Qt.PointingHandCursor }
                   PanelToolTip {
-                    visible: sendHover.hovered && !root.sending
-                    text: String(composer.text || "").trim() !== "" || root.pendingAttachments.length > 0
+                    visible: sendHover.hovered && (!root.sending || root.sendQueued)
+                    text: root.sendQueued ? "Sends as soon as the current WhatsApp action finishes"
+                      : String(composer.text || "").trim() !== "" || root.pendingAttachments.length > 0
                       ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
                       : "Record a voice note · Ctrl+Shift+V"
                   }
                   TapHandler {
-                    enabled: !root.sending
                     onTapped: {
                       if (String(composer.text || "").trim() !== ""
                           || root.pendingAttachments.length > 0) root.sendDraft()
-                      else root.toggleVoiceRecording()
+                      else if (!root.sending) root.toggleVoiceRecording()
                     }
                   }
                 }
@@ -1700,7 +1731,7 @@ Panel {
                     selectByMouse: true
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
-                    readOnly: root.offline || root.sending
+                    readOnly: root.offline
                     onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
                     Text {
                       textFormat: Text.PlainText

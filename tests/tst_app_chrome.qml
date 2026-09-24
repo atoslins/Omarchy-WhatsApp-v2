@@ -121,10 +121,15 @@ TestCase {
       function toggleVoicePlayback() {}
       function discardVoice() {}
       function sendVoiceDraft() { return false }
-      function pasteClipboard() { return false }
+      property int pastes: 0
+      property bool pasteAccepts: true
+      signal pasteFailed(string message, var chatRef, string owner)
+      function pasteClipboard(ref, owner) { pastes += 1; return pasteAccepts }
       function sendFilesReply() { return false }
       function sendSticker() { return false }
-      function sendText() { return false }
+      property var sentTexts: []
+      property bool acceptSends: false
+      function sendText(ref, text) { sentTexts = sentTexts.concat([text]); return acceptSends }
       function editMessage() { return false }
       function search() {}
       function closeApp() {}
@@ -451,6 +456,67 @@ TestCase {
     }
     verify(clicked >= 3, "enough rows were on screen to test")
   }
+
+  function test_a_reply_while_another_action_runs_waits_and_then_goes() {
+    // The owner's report: after opening a chat from a notification its read
+    // mark was still running, the send button stayed dim and nothing went out.
+    var h = createHarness()
+    h.service.acceptSends = true
+    var composer = findChild(h.app, "composerInput")
+    composer.text = "on my way"
+    h.service.writing = true
+    h.app.sendDraft()
+    compare(h.service.sentTexts.length, 0, "nothing starts while the read mark runs")
+    verify(h.app.sendQueued)
+    var button = findChild(h.app, "composerSendButton")
+    compare(button.opacity, 1, "the button shows a wait, not a disabled look")
+    h.service.writing = false
+    tryVerify(function() { return h.service.sentTexts.length === 1 }, 1000)
+    compare(h.service.sentTexts[0], "on my way")
+    verify(!h.app.sendQueued)
+  }
+
+  function test_a_queued_send_is_dropped_when_the_chat_changes() {
+    var h = createHarness()
+    h.service.acceptSends = true
+    findChild(h.app, "composerInput").text = "for the first chat"
+    h.service.writing = true
+    h.app.sendDraft()
+    verify(h.app.sendQueued)
+    h.service.selectChat(otherChat)
+    h.service.writing = false
+    wait(100)
+    compare(h.service.sentTexts.length, 0, "a draft never goes to another chat")
+    compare(h.app.queuedSendKey, "")
+  }
+
+  function test_paste_runs_while_a_send_is_in_flight() {
+    var h = createHarness()
+    h.service.writing = true
+    h.app.pasteDraft()
+    compare(h.service.pastes, 1, "Ctrl+V is never swallowed by a running send")
+  }
+
+  function test_text_pastes_by_itself_when_the_helper_cannot() {
+    var h = createHarness()
+    var source = createTemporaryObject(copySourceComponent, testCase)
+    source.selectAll()
+    source.copy()
+    h.service.pasteAccepts = false
+    var composer = findChild(h.app, "composerInput")
+    composer.text = ""
+    h.app.pasteDraft()
+    compare(composer.text, "clipboard words")
+    composer.text = ""
+    h.service.pasteAccepts = true
+    h.app.pasteDraft()
+    h.app.syncComposerToSelectedChat()
+    compare(h.app.composerChatKey, AccountModel.refOf(workChat).key)
+    h.service.pasteFailed("wl-paste is missing", AccountModel.refOf(workChat), "app")
+    compare(composer.text, "clipboard words", "a failed helper paste falls back to plain text")
+  }
+
+  Component { id: copySourceComponent; TextEdit { text: "clipboard words" } }
 
   function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {
     var h = createHarness()

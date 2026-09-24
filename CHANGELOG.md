@@ -95,6 +95,30 @@
   because the panel's mouse guard did not stop tap handlers. The conversation
   under a covering panel is now disabled, and the draft gets its focus back
   when the panel closes.
+- Add `omawhatsapp-mcp`, a Model Context Protocol server that lets Claude
+  Code and other MCP clients use WhatsApp through 44 named tools: unread
+  messages with context, chats awaiting a reply, reading by period, full-text
+  search with filters, attachments across chats, contacts and tags, calls,
+  polls, sending, replying, files, groups, profile, status, channels, exports,
+  and older history. Writes are annotated so the host asks first; the server
+  calls the helper and never opens the store. The installer places it and
+  prints the `claude mcp add` line.
+- The helper lists attachments across chats (`attachments`), contact tags
+  (`contact-tags`), and people by tag (`contacts-search` with `tag`), and a
+  sent poll now returns its message id.
+- A person's chat no longer disappears after you send a poll or vote: wacli
+  0.18.3 stored it with the kind and push name of the hidden @lid. The chat is
+  read as a person again, under the name saved on the phone.
+- Files under `/tmp` send again. The sync service that performs the send
+  cannot see `/tmp`, so such a file goes from a private copy that is removed
+  right after.
+- A reply typed while another WhatsApp action runs (such as the read mark of a
+  chat opened from a notification) waits for it and then goes, with an
+  hourglass on the send button, instead of doing nothing. The bar dropdown
+  does the same, and typing there never waits.
+- Ctrl+V no longer waits behind a running send or read mark; it has its own
+  process, and plain text still pastes when the helper cannot read the
+  clipboard.
 - Right-click the bar icon to mute or unmute every desktop notification and
   its sound. A crossed bell beside the count shows the mute, the Omarchy OSD
   confirms the change, and unmuting never replays what arrived meanwhile. It

@@ -302,6 +302,7 @@ Item {
 
   signal textPasted(string text, var chatRef, string owner)
   signal attachmentPasted(string path, var chatRef, string owner)
+  signal pasteFailed(string message, var chatRef, string owner)
   signal writeCompleted(string kind, var chatRef, var request, string owner)
   signal writeFailed(string message, var chatRef, var details, string owner)
   signal controlCompleted(string kind)
@@ -533,7 +534,7 @@ Item {
     // refuses the download part while offline.
     var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
       || kind === "save-media"
-    if (offlineMode && kind !== "paste" && !isLocalAction) {
+    if (offlineMode && !isLocalAction) {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
       writeFailed(message, targetRef, ({}), origin)
@@ -608,8 +609,19 @@ Item {
     })
     if (next.length !== pendingSends.length) pendingSends = next
   }
+  // Pasting only reads the clipboard and stages an image, so it runs on its
+  // own process: a send or a read mark in flight never swallows Ctrl+V.
   function pasteClipboard(chatRef, owner) {
-    return runWriteForChat("paste", {}, chatRef, owner)
+    var targetRef = AccountModel.chatRef(
+      chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    if (pasteProcess.running || targetRef.jid === "") return false
+    pasteProcess.chatRef = targetRef
+    pasteProcess.owner = ["app", "dropdown"].indexOf(String(owner || "")) >= 0
+      ? String(owner) : "service"
+    pasteProcess.payload = JSON.stringify({ account: targetRef.account, jid: targetRef.jid })
+    pasteProcess.stdinEnabled = true
+    pasteProcess.running = true
+    return true
   }
   function discardStages(paths) {
     var values = Array.isArray(paths) ? paths : []
@@ -1743,6 +1755,33 @@ Item {
   }
 
   Process {
+    id: pasteProcess
+    objectName: "pasteProcess"
+    property string payload: ""
+    property var chatRef: AccountModel.chatRef("", "")
+    property string owner: "service"
+    command: [root.helper, "paste"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: pasteOutput }
+    stderr: StdioCollector { id: pasteError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var result = root.parseJson(pasteOutput.text)
+      if (exitCode === 0 && result && result.ok === true && result.kind === "text") {
+        root.textPasted(String(result.text || ""), chatRef, owner)
+        return
+      }
+      if (exitCode === 0 && result && result.ok === true
+          && (result.kind === "file" || result.kind === "image")) {
+        root.attachmentPasted(String(result.path || ""), chatRef, owner)
+        return
+      }
+      root.pasteFailed((result && result.error)
+        || String(pasteError.text || "The clipboard could not be read.").trim(), chatRef, owner)
+    }
+  }
+
+  Process {
     id: writeProcess
     objectName: "writeProcess"
     property string kind: ""
@@ -1789,18 +1828,6 @@ Item {
         details.kind = finishedKind
         details.request = finishedRequest
         root.writeFailed(message, finishedChat, details, finishedOwner)
-        return
-      }
-      if (kind === "paste" && payload.kind === "text") {
-        if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
-          root.errorText = ""
-        root.textPasted(String(payload.text || ""), finishedChat, finishedOwner)
-        return
-      }
-      if (kind === "paste" && (payload.kind === "file" || payload.kind === "image")) {
-        if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
-          root.errorText = ""
-        root.attachmentPasted(String(payload.path || ""), finishedChat, finishedOwner)
         return
       }
       if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
