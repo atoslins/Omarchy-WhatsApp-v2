@@ -52,6 +52,7 @@ Item {
   readonly property bool video: !gifVideo && MediaModel.isVideo(message)
   readonly property bool previewableVideo: gifVideo || video
   readonly property bool animatedImage: MediaModel.isAnimatedImage(message)
+  readonly property bool sticker: mediaType === "sticker"
   readonly property bool staticImage: MediaModel.isImage(message)
   readonly property bool audio: MediaModel.isAudio(message)
   readonly property bool location: mediaType === "location"
@@ -129,6 +130,7 @@ Item {
       if (root.location) return locationComponent
       if (!root.hasLocal) return missingComponent
       if (root.gifVideo || root.video) return videoComponent
+      if (root.sticker) return stickerComponent
       if (root.animatedImage) return animatedImageComponent
       if (root.staticImage) return imageComponent
       if (root.audio) return audioComponent
@@ -281,6 +283,37 @@ Item {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         onClicked: root.openRequested(root.localPath)
+      }
+    }
+  }
+
+  // A sticker: transparent, about 160 px, animated while the conversation is
+  // on screen (WhatsApp loops them too); no card, no label, no external viewer.
+  Component {
+    id: stickerComponent
+    Item {
+      implicitHeight: Style.space(160)
+      AnimatedImage {
+        id: stickerImage
+        objectName: "stickerSurface"
+        width: Style.space(160)
+        height: Style.space(160)
+        source: root.localUrl()
+        fillMode: Image.PreserveAspectFit
+        asynchronous: true
+        cache: true
+        smooth: true
+        mipmap: true
+        playing: root.surfaceActive && frameCount > 1
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: stickerImage.status === Image.Error
+        anchors.centerIn: stickerImage
+        text: "Sticker"
+        color: root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
   }

@@ -290,6 +290,9 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+N` | Start a new chat (also the rail's new chat button) |
 | `Ctrl+K` | Go to a chat by typing part of its name |
 | Conversation photo or name | Open the chat details panel; `Esc` closes it |
+| `Page Up` / `Page Down` | Scroll the conversation a screen, even while typing |
+| `Home` / `End` | Oldest loaded message / newest message |
+| Emoji button → Stickers | Send a recent sticker |
 | Chat list edge | Drag to resize the list; double-click for the automatic width |
 | `Ctrl+B` | Hide or show the chat list without losing context (also the rail's hide button, and the show button in the conversation while it is hidden) |
 | Chat list `/` | Focus chat search; `Esc` returns to list navigation |

@@ -969,6 +969,46 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("SENT-FILE", ids, "a row is never shown in a chat it cannot be tied to")
         self.assertEqual(first.call_count, 1)
 
+    def _insert_sticker(self, msg_id: str, ts: int, sha: bytes, path: str = "") -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path, file_sha256)
+                   VALUES ('team@g.us', '', ?, '', '', ?, 0, '', '', 'sticker', 'image/webp', ?, ?)""",
+                [msg_id, ts, path, sha])
+
+    def test_the_sticker_picker_lists_each_sticker_once_newest_first(self) -> None:
+        webp = self.root / "synthetic.webp"
+        webp.write_bytes(b"RIFF....WEBP")
+        self._insert_sticker("s1", 50, b"same", str(webp))
+        self._insert_sticker("s2", 60, b"same", str(webp))
+        self._insert_sticker("s3", 40, b"other", "")
+        stickers = self.backend.stickers()["stickers"]
+        self.assertEqual([s["id"] for s in stickers], ["s2", "s3"], "the same file appears once")
+        self.assertEqual(stickers[0]["path"], str(webp))
+        self.assertEqual(stickers[1]["path"], "", "not on this computer yet")
+
+    def test_expired_stickers_are_fetched_once_and_then_skipped(self) -> None:
+        self._insert_sticker("s1", 50, b"gone", "")
+        calls = []
+
+        def fetch(*args):
+            calls.append(args)
+            raise backend_module.OmaWhatsAppError("download failed with status code 403")
+
+        with mock.patch.object(self.backend, "_fetch_media_file", side_effect=fetch):
+            first = self.backend.fetch_stickers()
+            second = self.backend.fetch_stickers()
+        self.assertEqual((first["fetched"], first["failed"]), (0, 1))
+        self.assertEqual(second["failed"], 0, "an expired sticker is not asked for again")
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(second["stickers"][0]["unavailable"])
+
+    def test_fetching_stickers_respects_offline_mode(self) -> None:
+        with mock.patch.object(self.backend, "online", return_value=False), \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
+            self.backend.fetch_stickers()
+
     def test_messages_never_cross_chat_boundary(self) -> None:
         values = self.backend.messages("team@g.us")["messages"]
         self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])

@@ -90,6 +90,24 @@ TestCase {
     verify(!jump.visible)
   }
 
+  function test_the_conversation_has_a_scroll_bar_and_page_keys() {
+    var app = createTemporaryObject(appComponent, testCase)
+    app.opened = true
+    var list = findChild(app, "messageList")
+    tryVerify(function() { return list.count > 0 })
+    verify(findChild(app, "messageScrollBar") !== null, "a draggable scroll bar, not only the wheel")
+    list.positionViewAtBeginning()
+    wait(50)
+    var newest = list.contentY
+    verify(app.pageConversation(Qt.Key_PageUp))
+    verify(list.contentY < newest, "Page Up moves toward older messages")
+    verify(app.pageConversation(Qt.Key_End))
+    wait(50)
+    verify(!findChild(app, "jumpToLatest").visible, "End goes back to the newest message")
+    verify(app.pageConversation(Qt.Key_Home))
+    verify(!app.pageConversation(Qt.Key_A))
+  }
+
   function test_dropdown_marks_unread_and_days_too() {
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
     var unread = dropdown.demoChats.filter(function(chat) { return Number(chat.unread || 0) > 1 })[0]

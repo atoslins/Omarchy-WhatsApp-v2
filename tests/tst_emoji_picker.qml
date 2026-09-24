@@ -13,6 +13,7 @@ TestCase {
 
   Component { id: editComponent; TextEdit { width: 200; height: 40 } }
   Component { id: pickerComponent; Oma.EmojiPicker {} }
+  Component { id: spyComponent; SignalSpy {} }
   Component { id: appComponent; Oma.App { width: 900; height: 700; demoMode: true } }
   Component { id: dropdownComponent; Oma.Dropdown { demoMode: true; viewMode: "conversation" } }
 
@@ -61,5 +62,27 @@ TestCase {
     verify(button !== null)
     var picker = findChild(button, "emojiPicker")
     compare(picker.target, findChild(dropdown, "composerInput"))
+  }
+
+  function test_the_stickers_tab_lists_and_sends_stickers() {
+    var picker = createTemporaryObject(pickerComponent, testCase, { stickersEnabled: true,
+      stickers: [{ id: "s1", path: "/nonexistent/synthetic-sticker.webp" }] })
+    var opened = createTemporaryObject(spyComponent, testCase, { target: picker, signalName: "stickersOpened" })
+    var picked = createTemporaryObject(spyComponent, testCase, { target: picker, signalName: "stickerPicked" })
+    picker.open()
+    tryCompare(picker, "opened", true)
+    picker.showTab("stickers")
+    compare(picker.tab, "stickers")
+    compare(opened.count, 1, "opening the tab asks the service for stickers")
+    verify(picker.chooseSticker("/nonexistent/synthetic-sticker.webp"))
+    compare(picked.signalArguments[0][0], "/nonexistent/synthetic-sticker.webp")
+    tryCompare(picker, "opened", false)
+  }
+
+  function test_without_a_sticker_handler_there_is_no_stickers_tab() {
+    var picker = createTemporaryObject(pickerComponent, testCase)
+    picker.showTab("stickers")
+    compare(picker.tab, "emoji")
+    verify(!findChild(picker.contentItem, "pickerTabs").visible)
   }
 }

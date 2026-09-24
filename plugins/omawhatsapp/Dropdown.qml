@@ -1522,6 +1522,16 @@ Panel {
                     accent: root.accent
                     muted: root.muted
                     fontFamily: root.fontFamily
+                    stickersEnabled: !root.demoMode && !!root.service
+                    stickers: root.service && root.service.stickers ? root.service.stickers : []
+                    stickersLoading: !!root.service && root.service.stickersLoading === true
+                    onStickersOpened: if (root.service) root.service.refreshStickers(true)
+                    onStickerPicked: function(path) {
+                      if (root.demoMode || !root.service) return
+                      var replyId = root.replyTarget ? String(root.replyTarget.id || "") : ""
+                      if (root.service.sendSticker(root.currentChatRef(), path, replyId, "dropdown"))
+                        root.replyTarget = null
+                    }
                   }
                 }
                 Rectangle {

@@ -93,4 +93,30 @@ TestCase {
     messageBubble.width = 480
     compare(surface.width, 364.8)
   }
+
+  Component {
+    id: stickerBubbleComponent
+    Oma.MessageBubble {
+      width: 800
+      message: ({ id: "synthetic-sticker", text: "", sender: "Demo", timestamp: 1787540100,
+        from_me: false, media_type: "sticker", mime_type: "image/webp",
+        local_path: "/nonexistent/synthetic-sticker.webp", reactions: [] })
+      foreground: "#eeeeee"; background: "#111111"; accent: "#66ccaa"
+      dim: "#999999"; dimmer: "#777777"; fontFamily: "monospace"
+    }
+  }
+
+  function test_a_sticker_stands_alone_without_a_bubble() {
+    // The owner found stickers odd: a card with a "sticker" badge, frozen on
+    // the first frame, opening an external viewer on click.
+    var bubble = createTemporaryObject(stickerBubbleComponent, testCase)
+    verify(bubble.sticker)
+    var surface = findChild(bubble, "messageBubbleSurface")
+    compare(surface.color.a, 0, "no bubble behind a sticker")
+    compare(bubble.desiredWidth, 176)
+    var image = findChild(bubble, "stickerSurface")
+    verify(image !== null, "stickers get their own surface, not the GIF card")
+    compare(image.width, 160)
+    verify(findChild(bubble, "animatedMediaSurface") === null)
+  }
 }

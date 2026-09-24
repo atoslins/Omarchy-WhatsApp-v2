@@ -72,8 +72,10 @@ Item {
       return item.key === key && !(item.message_id !== "" && stored[item.message_id])
     }).map(function(item) {
       return { id: item.local_id, text: item.text, sender: "You", sender_jid: "",
-        timestamp: item.timestamp, from_me: true, done: false, media_type: "",
-        mime_type: "", local_path: "", tags: [], quoted_id: item.reply_id,
+        timestamp: item.timestamp, from_me: true, done: false,
+        media_type: String(item.media_type || ""),
+        mime_type: item.media_type === "sticker" ? "image/webp" : "",
+        local_path: String(item.local_path || ""), tags: [], quoted_id: item.reply_id,
         pending: true, send_state: item.state }
     })
     var page = older.length > 0 ? messages.concat(older) : messages
@@ -631,10 +633,37 @@ Item {
   }
   function toggleVoicePlayback() { return voiceRecorder.playPause() }
   function sendSticker(chatRef, path, replyId, owner) {
-    return runWriteForChat("sticker", {
-      path: String(path || ""),
-      reply_id: String(replyId || "")
+    var file = String(path || "")
+    pendingSendSerial += 1
+    var localId = "pending:" + pendingSendSerial
+    var started = runWriteForChat("sticker", {
+      path: file,
+      reply_id: String(replyId || ""),
+      local_id: localId
     }, chatRef, owner)
+    if (started && file !== "") {
+      var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+      pendingSends = pendingSends.concat([{
+        local_id: localId, key: ref.key, kind: "sticker", text: "", reply_id: String(replyId || ""),
+        media_type: "sticker", local_path: file.indexOf("file://") === 0 ? decodeURIComponent(file.slice(7)) : file,
+        timestamp: Math.floor(Date.now() / 1000), created: Date.now(),
+        state: "sending", message_id: ""
+      }])
+    }
+    return started
+  }
+  // Sticker picker: recent stickers of this account, fetched on first open.
+  property var stickers: []
+  property bool stickersLoading: false
+  function refreshStickers(fetchMissing) {
+    if (stickersProcess.running) return false
+    var fetch = fetchMissing === true && !offlineMode
+    stickersLoading = fetch
+    stickersProcess.command = [helper, fetch ? "fetch-stickers" : "stickers"]
+    stickersProcess.payload = JSON.stringify({ account: statusAccount })
+    stickersProcess.stdinEnabled = true
+    stickersProcess.running = true
+    return true
   }
   function sendPoll(chatRef, question, options, multi, owner) {
     return runWriteForChat("poll", {
@@ -1304,6 +1333,24 @@ Item {
   }
 
   Process {
+    id: stickersProcess
+    objectName: "stickersProcess"
+    property string payload: ""
+    command: [root.helper, "stickers"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: stickersOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.stickersLoading = false
+      var payload = root.parseJson(stickersOutput.text)
+      if (exitCode === 0 && payload && payload.ok === true)
+        root.stickers = (Array.isArray(payload.stickers) ? payload.stickers : [])
+          .filter(function(item) { return String(item.path || "") !== "" })
+    }
+  }
+
+  Process {
     id: olderProcess
     objectName: "olderProcess"
     property string payload: ""
@@ -1585,7 +1632,7 @@ Item {
         if (finishedKind === "voice")
           voiceRecorder.markSendFailed(message, finishedAccount, finishedJid)
         if (finishedKind === "voice") root.voiceOwner = "service"
-        if (finishedKind === "send" || finishedKind === "files")
+        if (finishedKind === "send" || finishedKind === "files" || finishedKind === "sticker")
           root.dropPendingSend(finishedRequest.local_id)
         if (finishedKind === "chat-action") {
           root.lastChatsRaw = ""
@@ -1621,7 +1668,7 @@ Item {
         root.lastStartedChatJid = String(payload.chat_jid || finishedJid)
       if (finishedKind === "files")
         root.updatePendingSend(finishedRequest.local_id, { state: "sent", created: Date.now() })
-      if (finishedKind === "send")
+      if (finishedKind === "send" || finishedKind === "sticker")
         root.updatePendingSend(finishedRequest.local_id, {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)

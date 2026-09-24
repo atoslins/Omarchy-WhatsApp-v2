@@ -130,6 +130,14 @@ NOTIFY_EXPIRE_MS = 8000
 LID_ALIASES_FILE = "lid-aliases.json"
 MAX_LID_ALIASES = 256
 MAX_LID_ALIASES_STATE = 64 * 1024
+# The sticker picker: recent distinct stickers, and how many missing files one
+# open may fetch (media download --read-only runs beside the live sync).
+MAX_STICKER_CHOICES = 60
+MAX_STICKER_FETCH = 24
+STICKER_FETCH_SECONDS = 25.0
+# Stickers WhatsApp answered 403/404/410 for: expired on the server, not retried.
+STICKERS_GONE_FILE = "stickers-gone.json"
+MAX_STICKERS_GONE = 512
 DOCTOR_CACHE_FILE = "doctor-cache.json"
 DOCTOR_CACHE_TTL = 60
 MAX_DOCTOR_CACHE = 16 * 1024
@@ -3407,6 +3415,117 @@ class Backend:
             name = re.sub(r"[^A-Za-z0-9]", "", target)[:32] + extension
         return name or "attachment"
 
+    def _fetch_media_file(self, hint_jid: str, stored_jid: str, target: str,
+                          row: sqlite3.Row) -> Path:
+        """Download one attachment beside the live sync into the private folder."""
+        folder = self.state_dir / "media" / hashlib.sha256(
+            self.active.key.encode("utf-8")).hexdigest()[:16]
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stem = hashlib.sha256(f"{hint_jid}\n{target}".encode("utf-8")).hexdigest()[:16]
+        destination = folder / f"{stem}-{self._safe_media_name(row, target)}"
+        result = self._run(
+            ["--read-only", "--json", "media", "download", "--chat", stored_jid,
+             "--id", target, "--output", str(destination)],
+            timeout=180,
+        )
+        envelope = self._envelope(result)
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        saved = Path(str(data.get("path") or destination))
+        try:
+            saved.resolve().relative_to(folder.resolve())
+        except ValueError as exc:
+            raise OmaWhatsAppError("wacli saved the attachment outside the media folder.") from exc
+        if not saved.is_file() or saved.is_symlink():
+            raise OmaWhatsAppError("The attachment download did not produce a file.")
+        saved.chmod(0o600)
+        self._remember_sent_media_best_effort(
+            hint_jid, target, saved, str(row["mime_type"] or ""), str(row["media_type"] or ""))
+        return saved
+
+    def stickers(self, limit: int = MAX_STICKER_CHOICES) -> dict[str, Any]:
+        """Recent stickers of this account, newest first, each file once."""
+        limit = max(1, min(int(limit), MAX_STICKER_CHOICES))
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """SELECT chat_jid, msg_id, local_path, from_me, ts, media_type,
+                         mime_type, filename, media_unavailable_at,
+                         COALESCE(hex(file_sha256), '') AS sha
+                       FROM messages
+                       WHERE media_type = 'sticker' AND deleted_at IS NULL
+                       ORDER BY ts DESC, rowid DESC LIMIT ?""",
+                    [limit * 8],
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        seen: set[str] = set()
+        gone = set(self._stickers_gone())
+        choices: list[dict[str, Any]] = []
+        for row in rows:
+            identity = str(row["sha"] or "") or f"{row['chat_jid']}\n{row['msg_id']}"
+            if identity in seen:
+                continue
+            seen.add(identity)
+            path = self._local_media_path({"jid": str(row["chat_jid"])}, str(row["msg_id"]), row)
+            if path and not path.casefold().endswith(".webp"):
+                path = ""
+            choices.append({
+                "id": str(row["msg_id"])[:256], "chat": str(row["chat_jid"])[:160],
+                "path": path, "from_me": bool(row["from_me"]),
+                "unavailable": row["media_unavailable_at"] is not None
+                or f"{row['chat_jid']}\n{row['msg_id']}" in gone,
+            })
+            if len(choices) >= limit:
+                break
+        return {"ok": True, "kind": "stickers", "stickers": choices}
+
+    def _stickers_gone(self) -> list[str]:
+        value = self._read_state_json(STICKERS_GONE_FILE, 128 * 1024, [])
+        return [str(item) for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    def fetch_stickers(self) -> dict[str, Any]:
+        """Download the recent stickers that are not on this computer yet."""
+        if not self.online():
+            raise OmaWhatsAppError("Offline mode is on. Go online to load stickers.")
+        started = time.monotonic()
+        fetched = failed = 0
+        gone = self._stickers_gone()
+        newly_gone: list[str] = []
+        try:
+            with closing(self._connect()) as connection:
+                for choice in self.stickers()["stickers"]:
+                    key = f"{choice['chat']}\n{choice['id']}"
+                    if choice["path"] or choice["unavailable"] or key in gone:
+                        continue
+                    if fetched + failed >= MAX_STICKER_FETCH \
+                            or time.monotonic() - started >= STICKER_FETCH_SECONDS:
+                        break
+                    row = connection.execute(
+                        """SELECT chat_jid, media_type, mime_type, filename, local_path
+                           FROM messages WHERE chat_jid = ? AND msg_id = ?""",
+                        [choice["chat"], choice["id"]]).fetchone()
+                    if row is None:
+                        continue
+                    try:
+                        self._fetch_media_file(choice["chat"], choice["chat"], choice["id"], row)
+                        fetched += 1
+                    except OmaWhatsAppError as exc:
+                        failed += 1
+                        if re.search(r"status code (403|404|410)", str(exc)):
+                            newly_gone.append(key)
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if newly_gone:
+            try:
+                with self._state_lock("stickers-gone.lock"):
+                    merged = list(dict.fromkeys(self._stickers_gone() + newly_gone))
+                    self._write_state_json(STICKERS_GONE_FILE, merged[-MAX_STICKERS_GONE:], 128 * 1024)
+            except (OmaWhatsAppError, OSError):
+                pass
+        result = self.stickers()
+        result.update({"kind": "fetch-stickers", "fetched": fetched, "failed": failed})
+        return result
+
     def download_media(self, jid: str, message_id: str) -> dict[str, Any]:
         """Fetch one attachment without taking wacli's store lock.
 
@@ -3427,28 +3546,7 @@ class Backend:
             raise OmaWhatsAppError("That older attachment is no longer available from WhatsApp.")
         if not self.online():
             raise OmaWhatsAppError("Offline mode is on. Go online to download attachments.")
-        folder = self.state_dir / "media" / hashlib.sha256(
-            self.active.key.encode("utf-8")).hexdigest()[:16]
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        stem = hashlib.sha256(f"{chat['jid']}\n{target}".encode("utf-8")).hexdigest()[:16]
-        destination = folder / f"{stem}-{self._safe_media_name(row, target)}"
-        result = self._run(
-            ["--read-only", "--json", "media", "download", "--chat", str(row["chat_jid"]),
-             "--id", target, "--output", str(destination)],
-            timeout=180,
-        )
-        envelope = self._envelope(result)
-        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
-        saved = Path(str(data.get("path") or destination))
-        try:
-            saved.resolve().relative_to(folder.resolve())
-        except ValueError as exc:
-            raise OmaWhatsAppError("wacli saved the attachment outside the media folder.") from exc
-        if not saved.is_file() or saved.is_symlink():
-            raise OmaWhatsAppError("The attachment download did not produce a file.")
-        saved.chmod(0o600)
-        self._remember_sent_media_best_effort(
-            chat["jid"], target, saved, str(row["mime_type"] or ""), str(row["media_type"] or ""))
+        saved = self._fetch_media_file(chat["jid"], str(row["chat_jid"]), target, row)
         return {"ok": True, "kind": "media", "local_path": str(saved)}
 
     def save_media(self, jid: str, message_id: str, destination: Any) -> dict[str, Any]:
@@ -3968,10 +4066,9 @@ class Backend:
         command.extend(reply_args)
         command.extend(["--post-send-wait", "0"])
         envelope = self._envelope(self._write(command, timeout=120))
-        self._remember_sent_reply_best_effort(
-            chat["jid"], self._sent_message_id(envelope), quoted_id
-        )
-        return {"ok": True, "kind": "sticker"}
+        message_id = self._sent_message_id(envelope)
+        self._remember_sent_reply_best_effort(chat["jid"], message_id, quoted_id)
+        return {"ok": True, "kind": "sticker", "message_id": message_id[:256]}
 
     def send_voice(self, jid: str, value: Any, reply_id: str = "") -> dict[str, Any]:
         """Send one helper-created OGG/Opus draft to one exact local chat."""
@@ -5034,6 +5131,8 @@ def parser() -> argparse.ArgumentParser:
     messages.add_argument("--limit", type=int, default=160)
     commands.add_parser("members")
     commands.add_parser("chat-details")
+    commands.add_parser("stickers")
+    commands.add_parser("fetch-stickers")
     commands.add_parser("send")
     commands.add_parser("contacts-search")
     commands.add_parser("check-number")
@@ -5135,6 +5234,10 @@ def main() -> int:
             return emit(backend.messages(str(payload.get("jid") or ""),
                                          str(payload.get("query") or ""), args.limit,
                                          payload.get("before")))
+        if args.command == "stickers":
+            return emit(backend.stickers())
+        if args.command == "fetch-stickers":
+            return emit(backend.fetch_stickers())
         if args.command == "chat-details":
             return emit(backend.chat_details(str(payload.get("jid") or "")))
         if args.command == "members":

@@ -77,6 +77,17 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Stickers look like stickers: no bubble behind them, about 160 px, animated
+  ones play while the conversation is on screen, and a click no longer opens
+  an external viewer.
+- Send stickers from a Stickers tab in the emoji picker, in both clients. It
+  lists the recent stickers of the account, each file once, fetches the ones
+  not on this computer yet on first open (beside the live sync), skips the
+  ones WhatsApp has expired, and sends on click with a pending bubble that
+  already shows the sticker.
+- The conversation has a scroll bar that shows while scrolling or hovered;
+  Page Up and Page Down move a screen even while typing, Home goes to the
+  oldest loaded message and End back to the newest.
 - A file sent to a contact no longer vanishes from the chat on the next
   refresh. wacli swaps the phone JID for the contact's `@lid` before a file
   send and files the message there; the helper folds those rows back into the

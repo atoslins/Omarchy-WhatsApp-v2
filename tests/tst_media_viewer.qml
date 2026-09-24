@@ -220,8 +220,11 @@ TestCase {
   }
 
   function test_timeline_animations_are_static_posters() {
+    // A GIF in the timeline stays on its first frame; stickers are the
+    // exception and animate, as on the phone.
     var bubble = createTemporaryObject(genericMediaBubbleComponent, testCase,
-      { message: animatedImage("__demo__") })
+      { message: Object.assign(animatedImage("__demo__"),
+        { media_type: "image", mime_type: "image/gif" }) })
     verify(bubble !== null)
     var animation = findChild(bubble, "animatedMediaSurface")
     verify(animation !== null)

@@ -86,6 +86,19 @@ TestCase {
     compare(service.selectedMessages.length, 1)
   }
 
+  function test_a_picked_sticker_shows_at_once_as_itself() {
+    var service = createService()
+    verify(service.sendSticker(target, "/tmp/synthetic-sticker.webp", "", "app"))
+    var pending = service.selectedMessages[0]
+    verify(pending.pending)
+    compare(pending.media_type, "sticker")
+    compare(pending.local_path, "/tmp/synthetic-sticker.webp", "the bubble shows the sticker, not a label")
+    finish(service, 0, { ok: true, kind: "sticker", message_id: "SYNTHETIC-STICKER" })
+    compare(service.selectedMessages[0].send_state, "sent")
+    service.messages = [{ id: "SYNTHETIC-STICKER", media_type: "sticker", from_me: true, timestamp: 30 }]
+    compare(service.selectedMessages.length, 1)
+  }
+
   function test_nothing_is_added_when_the_send_cannot_start() {
     var service = createService()
     service.offlineMode = true

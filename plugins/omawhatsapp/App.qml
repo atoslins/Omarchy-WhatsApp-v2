@@ -450,6 +450,21 @@ Item {
     { jid: "15552468101@s.whatsapp.net", name: "Nora Ali", phone: "15552468101", has_chat: false }
   ]
 
+  // Page Up/Down move a screen through the conversation, Home goes to the
+  // oldest loaded message and End back to the newest.
+  function pageConversation(key) {
+    if (messageList.count === 0) return false
+    var minY = messageList.originY
+    var maxY = messageList.originY + Math.max(0, messageList.contentHeight - messageList.height)
+    var step = messageList.height * 0.85
+    if (key === Qt.Key_PageUp) messageList.contentY = Math.max(minY, messageList.contentY - step)
+    else if (key === Qt.Key_PageDown) messageList.contentY = Math.min(maxY, messageList.contentY + step)
+    else if (key === Qt.Key_Home) messageList.positionViewAtEnd()
+    else if (key === Qt.Key_End) messageList.positionViewAtBeginning()
+    else return false
+    return true
+  }
+
   function oldestMessageInView() {
     if (messageList.count === 0) return false
     var item = messageList.itemAtIndex(messageList.count - 1)
@@ -464,6 +479,17 @@ Item {
     return service.loadOlderMessages()
   }
   onOpenedChanged: if (opened) Qt.callLater(maybeLoadOlder)
+
+  // A sticker from the picker goes at once, as on the phone, answering the
+  // message being replied to if there is one.
+  function sendPickedSticker(path) {
+    if (demoMode || !service || currentChatKey() === "") return false
+    var replyId = replyTarget ? String(replyTarget.id || "") : ""
+    var started = service.sendSticker(currentChatRef(), path, replyId, "app")
+    if (!started) attachmentError = "Finish the current WhatsApp action before sending a sticker."
+    else if (replyTarget) replyTarget = null
+    return started
+  }
 
   function openQuickSwitcher() {
     if (!opened) return false
@@ -1670,6 +1696,8 @@ Item {
         if (event.key === Qt.Key_Escape) {
           root.goBack()
           event.accepted = true
+        } else if (!root.textEntryActive && root.pageConversation(event.key)) {
+          event.accepted = true
         } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_F) {
           messageSearchField.forceActiveFocus()
           messageSearchField.selectAll()
@@ -2555,6 +2583,12 @@ Item {
           currentIndex: root.cursorIndex
           verticalLayoutDirection: ListView.BottomToTop
           boundsBehavior: Flickable.StopAtBounds
+          // A draggable scroll bar that shows while scrolling or hovered.
+          ScrollBar.vertical: ScrollBar {
+            objectName: "messageScrollBar"
+            policy: ScrollBar.AsNeeded
+            minimumSize: 0.06
+          }
           // When the oldest loaded message is on screen, fetch the page
           // before it. Checked after scrolling and after the list changes.
           onContentYChanged: olderCheck.restart()
@@ -3243,6 +3277,11 @@ Item {
               accent: root.accent
               muted: root.dim
               fontFamily: root.fontFamily
+              stickersEnabled: !root.demoMode && !!root.service
+              stickers: root.service && root.service.stickers ? root.service.stickers : []
+              stickersLoading: !!root.service && root.service.stickersLoading === true
+              onStickersOpened: if (root.service) root.service.refreshStickers(true)
+              onStickerPicked: function(path) { root.sendPickedSticker(path) }
             }
           }
 
@@ -3335,6 +3374,11 @@ Item {
                 onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
+                  // Page Up/Down scroll the conversation even while typing.
+                  if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                    event.accepted = root.pageConversation(event.key)
+                    return
+                  }
                   if (root.mentionCompletionVisible
                       && (event.key === Qt.Key_Down || event.key === Qt.Key_Up)) {
                     var delta = event.key === Qt.Key_Down ? 1 : -1

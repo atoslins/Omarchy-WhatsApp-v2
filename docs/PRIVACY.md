@@ -63,6 +63,11 @@ own history directory. The helper reads only the `dnd` flag of
 quiet under do not disturb; the sound is the freedesktop theme's
 `message-new-instant`, played with `pw-play`.
 
+The sticker picker fetches the recent stickers that are not on this computer
+yet into the same private media folder as other downloads, and remembers in
+`stickers-gone.json` the ones WhatsApp answered 403/404/410 for, so they are
+not requested again.
+
 `lid-aliases.json` (mode `0600`) maps each `@lid` chat found in the mirror to
 the contact's phone chat, as answered by `wacli --read-only contacts show`, so
 a file wacli filed under the `@lid` still shows in that contact's chat.

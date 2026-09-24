@@ -96,9 +96,12 @@ Item {
     senderMetrics.advanceWidth,
     metadataWidth)
   readonly property bool hasMedia: String(message.media_type || "") !== ""
+  // Stickers stand on their own, as on the phone: no bubble, a fixed size.
+  readonly property bool sticker: String(message.media_type || "") === "sticker"
+    && String(message.quoted_id || "") === ""
   readonly property real mediaWidth: Math.min(maximumWidth,
     MediaModel.isVisual(message) ? 560 : 520)
-  readonly property real desiredWidth: message.media_type
+  readonly property real desiredWidth: sticker ? Style.space(176) : message.media_type
       || String(message.quoted_id || "") !== ""
       || (Array.isArray(message.buttons) && message.buttons.length > 0)
     ? (hasMedia ? mediaWidth : maximumWidth)
@@ -174,7 +177,7 @@ Item {
     width: root.desiredWidth
     height: bubbleColumn.implicitHeight + Style.space(18)
     radius: Style.cornerRadius
-    color: root.message.from_me
+    color: root.sticker ? "transparent" : root.message.from_me
       ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
       : Style.normalFillFor(root.foreground, root.accent)
     border.width: root.selected ? 1 : 0
