@@ -391,8 +391,24 @@ Item {
         }
       }
 
-      Row {
+      // Time and marks; under a sticker they sit in a small pill, as on
+      // the phone, instead of floating on their own.
+      Item {
+        objectName: "messageMeta"
         anchors.right: parent.right
+        width: metaRow.implicitWidth + (root.sticker ? Style.space(14) : 0)
+        height: metaRow.implicitHeight + (root.sticker ? Style.space(6) : 0)
+        Rectangle {
+          objectName: "stickerTimePill"
+          visible: root.sticker
+          anchors.fill: parent
+          radius: height / 2
+          color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
+            root.foreground.b, 0.12))
+        }
+      Row {
+        id: metaRow
+        anchors.centerIn: parent
         spacing: Style.space(6)
         Text {
           textFormat: Text.PlainText
@@ -439,6 +455,7 @@ Item {
           HoverHandler { id: timestampHover }
           Ui.PanelToolTip { visible: timestampHover.hovered; text: root.fullTimestampText }
         }
+      }
       }
     }
 
