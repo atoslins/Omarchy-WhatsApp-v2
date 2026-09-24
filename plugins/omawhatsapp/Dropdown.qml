@@ -932,17 +932,46 @@ Panel {
                   anchors.rightMargin: Style.space(10)
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
-                  Text {
-                    textFormat: Text.PlainText
+                  Item {
                     width: parent.width
-                    text: String(chatRow.modelData.name || "WhatsApp chat")
-                    elide: Text.ElideRight
-                    maximumLineCount: 1
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                    font.weight: Number(chatRow.modelData.notification_unread || 0) > 0
-                      ? Font.DemiBold : Font.Normal
+                    height: dropdownChatName.implicitHeight
+                    Text {
+                      textFormat: Text.PlainText
+                      id: dropdownChatName
+                      anchors.left: parent.left
+                      anchors.right: dropdownChatFlags.left
+                      anchors.rightMargin: dropdownChatFlags.width > 0 ? Style.space(6) : 0
+                      text: String(chatRow.modelData.name || "WhatsApp chat")
+                      elide: Text.ElideRight
+                      maximumLineCount: 1
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.weight: Number(chatRow.modelData.notification_unread || 0) > 0
+                        ? Font.DemiBold : Font.Normal
+                    }
+                    Row {
+                      id: dropdownChatFlags
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(4)
+                      Text {
+                        textFormat: Text.PlainText
+                        visible: chatRow.modelData.muted === true
+                        text: "󰪑"
+                        color: root.muted
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                      Text {
+                        textFormat: Text.PlainText
+                        visible: chatRow.modelData.pinned === true
+                        text: "󰐃"
+                        color: root.muted
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
                   }
                   Text {
                     textFormat: Text.PlainText

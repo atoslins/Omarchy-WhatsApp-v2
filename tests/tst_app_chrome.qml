@@ -328,6 +328,28 @@ TestCase {
     verify(!harness.service.appConversationVisible, "a closed app shows nothing")
   }
 
+  function test_list_shows_pinned_muted_and_unsent_drafts() {
+    var harness = createHarness()
+    var flagged = Object.assign({}, otherChat, { pinned: true, muted: true })
+    harness.service.chats = [workChat, flagged]
+    var app = harness.app
+    verify(app.draftFor(flagged) === "")
+    app.composerStates = { "work\nother@example": { text: "see you\nsoon", attachments: [] } }
+    compare(app.draftFor(flagged), "see you soon", "one line, drafts of other chats only")
+    compare(app.draftFor(workChat), "", "the open chat shows its draft in the composer")
+    wait(0)
+    var pinned = []
+    var muted = []
+    function walk(item) {
+      if (item.objectName === "chatPinnedIcon" && item.visible) pinned.push(item)
+      if (item.objectName === "chatMutedIcon" && item.visible) muted.push(item)
+      for (var i = 0; i < item.children.length; i++) walk(item.children[i])
+    }
+    walk(app)
+    compare(pinned.length, 1)
+    compare(muted.length, 1)
+  }
+
   function test_desktop_notifications_live_in_settings() {
     var harness = createHarness({ notificationsEnabled: true, notificationsPreview: true })
     var app = harness.app

@@ -51,6 +51,9 @@
   "N unread messages" divider where unread messages start, and a jump-to-latest
   button with the count of messages that arrived while you read above; the
   bar dropdown gets the headers, the divider and the button too.
+- Clicking a desktop notification opens that chat in the full app.
+- The chat list shows pinned and muted icons, and "Draft: …" for chats with an
+  unsent message.
 - Links in messages open from chips under the text, and the message menu gains
   Copy link; the text itself stays plain. Hovering a time shows the full date.
 - Download attachments with `media download --read-only --output` into

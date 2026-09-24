@@ -887,6 +887,19 @@ Item {
     selectChat(visibleChats[chatCursorIndex], "composer")
   }
 
+  // An unsent draft shows in the list, as on the phone; the open chat shows
+  // it in its own composer instead.
+  function draftFor(chat) {
+    if (!chat) return ""
+    var key = AccountModel.refOf(chat).key
+    if (key === "" || key === root.currentChatKey()) return ""
+    var state = root.composerStates[key]
+    if (!state) return ""
+    var text = String(state.text || "").replace(/\s+/g, " ").trim()
+    if (text !== "") return text
+    return Array.isArray(state.attachments) && state.attachments.length > 0 ? "attachment" : ""
+  }
+
   function chatIsUnread(chat) {
     return !!chat && Number(chat.unread || 0) > 0
   }
@@ -1769,22 +1782,57 @@ Item {
                 anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(3)
-                Text {
-                  textFormat: Text.PlainText
+                Item {
                   width: parent.width
-                  text: String(modelData.name || "WhatsApp chat")
-                  color: root.foreground
-                  elide: Text.ElideRight
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
+                  height: chatName.implicitHeight
+                  Text {
+                    textFormat: Text.PlainText
+                    id: chatName
+                    anchors.left: parent.left
+                    anchors.right: chatFlags.left
+                    anchors.rightMargin: chatFlags.width > 0 ? Style.space(6) : 0
+                    text: String(modelData.name || "WhatsApp chat")
+                    color: root.foreground
+                    elide: Text.ElideRight
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                  }
+                  Row {
+                    id: chatFlags
+                    objectName: "chatFlags"
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(4)
+                    Text {
+                      textFormat: Text.PlainText
+                      objectName: "chatMutedIcon"
+                      visible: modelData.muted === true
+                      text: "󰪑"
+                      color: root.dimmer
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      textFormat: Text.PlainText
+                      objectName: "chatPinnedIcon"
+                      visible: modelData.pinned === true
+                      text: "󰐃"
+                      color: root.dimmer
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
                 }
                 Text {
                   textFormat: Text.PlainText
+                  objectName: "chatPreview"
                   width: parent.width
-                  text: AccountModel.previewPrefix(modelData, root.multiAccount)
-                    + (modelData.last_from_me ? "You · " : "")
-                    + String(modelData.preview || "No local messages yet")
-                  color: root.dim
+                  readonly property string draft: root.draftFor(modelData)
+                  text: draft !== "" ? "Draft: " + draft
+                    : AccountModel.previewPrefix(modelData, root.multiAccount)
+                      + (modelData.last_from_me ? "You · " : "")
+                      + String(modelData.preview || "No local messages yet")
+                  color: draft !== "" ? root.accent : root.dim
                   elide: Text.ElideRight
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption

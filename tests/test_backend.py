@@ -418,7 +418,9 @@ class BackendTests(unittest.TestCase):
                 mock.patch.object(self.backend, "_deliver_notification",
                                   return_value=True) as deliver:
             result = self.backend.notify(skip_jid)
-        return result, [call.args for call in deliver.call_args_list]
+        self.last_targets = [call.args[2] if len(call.args) > 2 else None
+                             for call in deliver.call_args_list]
+        return result, [call.args[:2] for call in deliver.call_args_list]
 
     def test_desktop_notifications_are_off_until_notify_send_exists(self) -> None:
         self.assertEqual(self.backend._preferences()["notifications"],
@@ -509,6 +511,54 @@ class BackendTests(unittest.TestCase):
         result, sent = self._notify()
         self.assertEqual(result["pending"], 0)
         self.assertEqual(sent, [])
+
+    def test_each_popup_carries_the_chat_it_opens(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 5, text="ship it now", sender="Sam")
+        self._notify()
+        self.assertEqual(self.last_targets[0]["jid"], "team@g.us")
+
+    def test_a_clickable_popup_is_handed_to_a_detached_notify_open_child(self) -> None:
+        with mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            popen.return_value.stdin = mock.MagicMock()
+            self.assertTrue(self.backend._deliver_notification(
+                "Design team", "hi", {"account": "", "jid": "team@g.us"}))
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv[-1], "notify-open")
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        request = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
+        self.assertIn("--action=default=Open chat", request["command"])
+        self.assertEqual(request["command"][-2:], ["Design team", "hi"])
+        self.assertEqual(request["target"]["jid"], "team@g.us")
+
+    def test_clicking_the_popup_opens_that_chat_and_dismissing_does_nothing(self) -> None:
+        command = [str(backend_module.NOTIFY_SEND), "--action=default=Open chat", "--", "X"]
+        calls = []
+
+        def run(argv, **_kwargs):
+            calls.append(list(argv))
+            output = "default\n" if argv[0] == str(backend_module.NOTIFY_SEND) else ""
+            return subprocess.CompletedProcess(argv, 0, output, "")
+
+        shell = self.root / "omarchy-shell"
+        shell.write_text("#!/bin/sh\n", encoding="utf-8")
+        with mock.patch.object(backend_module, "run_bounded", side_effect=run), \
+                mock.patch.object(backend_module, "OMARCHY_SHELL", shell):
+            opened = backend_module.Backend.notify_open(
+                {"command": command, "target": {"account": "work", "jid": "team@g.us"}})
+        self.assertTrue(opened["opened"])
+        self.assertEqual(calls[1][:3], [str(shell), backend_module.PLUGIN_ID, "openApp"])
+        self.assertEqual(json.loads(calls[1][3]), {"account": "work", "jid": "team@g.us"})
+
+        def dismissed(argv, **_kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(backend_module, "run_bounded", side_effect=dismissed) as run2:
+            self.assertFalse(backend_module.Backend.notify_open(
+                {"command": command, "target": {"jid": "team@g.us"}})["opened"])
+        self.assertEqual(run2.call_count, 1, "closing the popup opens nothing")
+        with self.assertRaises(backend_module.OmaWhatsAppError):
+            backend_module.Backend.notify_open({"command": ["/bin/sh", "-c", "id"]})
 
     def test_popup_text_stays_one_markup_inert_line(self) -> None:
         self._enable_notifications()
