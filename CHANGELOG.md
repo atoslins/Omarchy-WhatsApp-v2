@@ -119,6 +119,17 @@
 - Ctrl+V no longer waits behind a running send or read mark; it has its own
   process, and plain text still pastes when the helper cannot read the
   clipboard.
+- Reactions show under their message again. Lists inside a message reach the
+  bubble as Qt sequences through the list model, so the reaction and button
+  rows had been empty.
+- Polls show as polls: the question, each option with its vote count, a bar
+  and who voted, and a tap votes (several choices when the poll allows).
+  Votes cast from this computer no longer appear as a "Voted: …" message.
+- A message deleted for everyone stays as "You deleted this message" or "This
+  message was deleted", as on the phone, without its old text in the chat,
+  the rail preview, searches or the media view.
+- A location shows its name, address and coordinates, and opens in the
+  browser map.
 - Right-click the bar icon to mute or unmute every desktop notification and
   its sound. A crossed bell beside the count shows the mute, the Omarchy OSD
   confirms the change, and unmuting never replays what arrived meanwhile. It

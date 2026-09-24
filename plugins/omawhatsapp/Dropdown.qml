@@ -1381,6 +1381,10 @@ Panel {
                 onDeleteRequested: root.openFullApp()
                 onForwardRequested: root.openFullApp()
                 onCopyRequested: function(text) { root.copyText(text) }
+                onPollVoteRequested: function(options) {
+                  if (!root.demoMode && root.service)
+                    root.service.votePoll(root.currentChatRef(), modelData, options, "dropdown")
+                }
                 onOptionRequested: function(optionIndex) {
                   if (!root.demoMode && root.service)
                     root.service.selectOption(

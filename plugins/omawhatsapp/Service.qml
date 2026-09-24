@@ -837,6 +837,12 @@ Item {
       id: String(item.id), to_jid: String(targetJid)
     }, chatRef, owner)
   }
+  function votePoll(chatRef, item, options, owner) {
+    if (!item || !item.id || !options || Number(options.length || 0) === 0) return false
+    var chosen = []
+    for (var i = 0; i < Number(options.length); i++) chosen.push(String(options[i]))
+    return runWriteForChat("poll-vote", { id: String(item.id), options: chosen }, chatRef, owner)
+  }
   function selectOption(chatRef, item, index, owner) {
     if (!item || !item.id) return false
     return runWriteForChat("select", {

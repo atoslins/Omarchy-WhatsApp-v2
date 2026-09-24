@@ -127,6 +127,11 @@ TestCase {
       function pasteClipboard(ref, owner) { pastes += 1; return pasteAccepts }
       function sendFilesReply() { return false }
       function sendSticker() { return false }
+      property var pollVotes: []
+      function votePoll(ref, item, options, owner) {
+        pollVotes = pollVotes.concat([{ id: item.id, options: options, owner: owner }])
+        return true
+      }
       property var sentTexts: []
       property bool acceptSends: false
       function sendText(ref, text) { sentTexts = sentTexts.concat([text]); return acceptSends }
@@ -517,6 +522,31 @@ TestCase {
   }
 
   Component { id: copySourceComponent; TextEdit { text: "clipboard words" } }
+
+  function findBubble(item) {
+    if (!item) return null
+    if (item.votePollOption !== undefined) return item
+    for (var i = 0; i < item.children.length; i++) {
+      var found = findBubble(item.children[i])
+      if (found) return found
+    }
+    return null
+  }
+
+  function test_tapping_a_poll_option_votes_for_the_open_chat() {
+    var h = createHarness({ messages: [{ id: "poll1", text: "", sender: "You", timestamp: 1790280000,
+      from_me: true, media_type: "", reactions: [], poll: { question: "Which day?", selectable: 1,
+      voters: 0, options: [{ text: "Monday", votes: 0, voters: [], mine: false },
+                           { text: "Tuesday", votes: 0, voters: [], mine: false }] } }] })
+    var list = findChild(h.app, "messageList")
+    tryVerify(function() { return list.count > 0 && list.itemAtIndex(0) !== null })
+    var bubble = findBubble(list.itemAtIndex(0))
+    verify(bubble.votePollOption("Monday"))
+    compare(h.service.pollVotes.length, 1)
+    compare(h.service.pollVotes[0].id, "poll1")
+    compare(h.service.pollVotes[0].options, ["Monday"])
+    compare(h.service.pollVotes[0].owner, "app")
+  }
 
   function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {
     var h = createHarness()

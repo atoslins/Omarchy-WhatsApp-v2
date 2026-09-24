@@ -43,6 +43,41 @@ Item {
   // Sent from here, not yet stored by the mirror: shown at once, with no
   // actions that need a WhatsApp message id.
   readonly property bool pending: message && message.pending === true
+  // Deleted for everyone: a placeholder, as on the phone, with no content.
+  readonly property bool revoked: message && message.revoked === true
+  // Lists inside a message reach the bubble as Qt sequences once they pass
+  // through a list model, so Array.isArray is false for them; copy them.
+  function listOf(value) {
+    if (!value || typeof value === "string") return []
+    var count = Number(value.length || 0)
+    var items = []
+    for (var i = 0; i < count; i++) items.push(value[i])
+    return items
+  }
+  readonly property var buttonItems: listOf(message ? message.buttons : null)
+  readonly property var poll: message && message.poll ? message.poll : null
+  readonly property var pollOptions: poll ? listOf(poll.options) : []
+  readonly property int pollMostVotes: pollOptions.reduce(function(most, option) {
+    return Math.max(most, Number(option.votes || 0)) }, 0)
+  signal pollVoteRequested(var options)
+  // A single-choice poll takes the tapped option; a multiple-choice one adds
+  // or drops it from your current choices. WhatsApp keeps at least one.
+  function votePollOption(text) {
+    if (!poll || pending) return false
+    var value = String(text || "")
+    var mine = pollOptions.filter(function(option) { return option.mine === true })
+      .map(function(option) { return String(option.text) })
+    var next = [value]
+    if (Number(poll.selectable || 1) > 1) {
+      var at = mine.indexOf(value)
+      next = at >= 0 ? mine.filter(function(option) { return option !== value })
+        : mine.concat([value])
+      if (next.length > Number(poll.selectable)) return false
+    } else if (mine.length === 1 && mine[0] === value) return false
+    if (next.length === 0) return false
+    pollVoteRequested(next)
+    return true
+  }
   // While its actions or menus are showing, the row must draw above its
   // neighbours: lists stack delegates in creation order, not by position.
   readonly property bool raised: actionSurface.visible || reactionPicker.opened
@@ -50,6 +85,7 @@ Item {
   // The message menu, as data: tests and the right-click path share it.
   readonly property var menuActions: pending
     ? [{ label: "Copy text", action: "copy", show: true }]
+    : revoked ? [{ label: "Delete for me", action: "delete-me", show: true }]
     : [
     { label: "Reply", action: "reply", show: true },
     { label: "React", action: "react", show: true },
@@ -103,13 +139,13 @@ Item {
     MediaModel.isVisual(message) ? 560 : 520)
   readonly property real desiredWidth: sticker ? Style.space(176) : message.media_type
       || String(message.quoted_id || "") !== ""
-      || (Array.isArray(message.buttons) && message.buttons.length > 0)
+      || buttonItems.length > 0 || poll !== null || revoked
     ? (hasMedia ? mediaWidth : maximumWidth)
     : Math.max(Style.space(88), Math.min(maximumWidth,
         naturalTextWidth + Style.space(22)))
   readonly property var reactionPills: {
     var grouped = ({})
-    var values = Array.isArray(message.reactions) ? message.reactions : []
+    var values = listOf(message ? message.reactions : null)
     for (var i = 0; i < values.length; i++) {
       var emoji = String(values[i].emoji || "")
       if (emoji === "") continue
@@ -359,12 +395,146 @@ Item {
         }
       }
 
+      Text {
+        textFormat: Text.PlainText
+        objectName: "messageRevoked"
+        visible: root.revoked
+        width: parent.width
+        text: "󰜺  " + (root.message.from_me ? "You deleted this message" : "This message was deleted")
+        color: root.dim
+        wrapMode: Text.Wrap
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.italic: true
+      }
+
       Column {
-        visible: Array.isArray(root.message.buttons) && root.message.buttons.length > 0
+        objectName: "messagePoll"
+        visible: root.poll !== null
+        width: parent.width
+        spacing: Style.space(6)
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          text: root.poll ? String(root.poll.question || "") : ""
+          color: root.foreground
+          wrapMode: Text.Wrap
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: root.poll && Number(root.poll.selectable || 1) > 1
+            ? "Select one or more" : "Select one"
+          color: root.dimmer
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Repeater {
+          model: root.pollOptions
+          delegate: Rectangle {
+            id: pollOptionRow
+            required property var modelData
+            objectName: "pollOption"
+            readonly property int votes: Number(modelData.votes || 0)
+            readonly property var voterNames: root.listOf(modelData.voters)
+            width: parent.width
+            height: optionColumn.implicitHeight + Style.space(12)
+            radius: Style.cornerRadius
+            color: pollHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+              : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
+            Column {
+              id: optionColumn
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(8)
+              anchors.rightMargin: Style.space(8)
+              spacing: Style.space(4)
+              Item {
+                width: parent.width
+                height: optionText.implicitHeight
+                Text {
+                  textFormat: Text.PlainText
+                  id: optionMark
+                  anchors.left: parent.left
+                  text: modelData.mine === true
+                    ? (root.poll && Number(root.poll.selectable || 1) > 1 ? "󰄲" : "󰄴")
+                    : (root.poll && Number(root.poll.selectable || 1) > 1 ? "󰄱" : "󰄰")
+                  color: modelData.mine === true ? root.accent : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  id: optionText
+                  anchors.left: optionMark.right
+                  anchors.leftMargin: Style.space(8)
+                  anchors.right: optionCount.left
+                  anchors.rightMargin: Style.space(8)
+                  text: String(modelData.text || "")
+                  color: root.foreground
+                  wrapMode: Text.Wrap
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  id: optionCount
+                  anchors.right: parent.right
+                  text: String(pollOptionRow.votes)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              Rectangle {
+                width: parent.width
+                height: Style.space(4)
+                radius: height / 2
+                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+                Rectangle {
+                  width: root.pollMostVotes > 0
+                    ? parent.width * pollOptionRow.votes / root.pollMostVotes : 0
+                  height: parent.height
+                  radius: height / 2
+                  color: root.accent
+                }
+              }
+              Text {
+                textFormat: Text.PlainText
+                visible: pollOptionRow.voterNames.length > 0
+                width: parent.width
+                text: pollOptionRow.voterNames.join(", ")
+                color: root.dimmer
+                elide: Text.ElideRight
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+            HoverHandler { id: pollHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: root.votePollOption(modelData.text) }
+          }
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: {
+            var count = root.poll ? Number(root.poll.voters || 0) : 0
+            return count === 1 ? "1 vote" : count + " votes"
+          }
+          color: root.dimmer
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      Column {
+        visible: root.buttonItems.length > 0
         width: parent.width
         spacing: Style.space(4)
         Repeater {
-          model: Array.isArray(root.message.buttons) ? root.message.buttons : []
+          model: root.buttonItems
           delegate: Rectangle {
             required property var modelData
             required property int index
@@ -468,7 +638,8 @@ Item {
       // A bubble as wide as the row gets them straddling its top edge, where
       // they cover only the padding.
       readonly property bool outside: root.width - bubble.width >= width + Style.space(16)
-      visible: !root.pending && (rowHover.hovered || reactionPicker.opened || actionMenu.opened)
+      visible: !root.pending && !root.revoked
+        && (rowHover.hovered || reactionPicker.opened || actionMenu.opened)
       // Positioned explicitly: conditional anchors keep the previous edge when
       // `outside` flips, which pinned both sides to the bubble's right edge.
       x: outside

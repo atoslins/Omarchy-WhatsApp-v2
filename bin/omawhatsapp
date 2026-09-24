@@ -181,6 +181,22 @@ MAX_CLIPBOARD_SENT_BYTES = 256 * 1024 * 1024
 # payloads it could not decode (protocol and placeholder messages) and the
 # "[Album: N images]" header that precedes an album's real media messages.
 # They are never shown as bubbles or used as a chat preview.
+def revoked_sql(table: str) -> str:
+    """A message deleted for everyone: the phone keeps a placeholder for it."""
+    return f"(COALESCE({table}.revoked, 0) = 1 AND COALESCE({table}.deleted_for_me, 0) = 0)"
+
+
+def poll_vote_sql(table: str) -> str:
+    """The row wacli stores for a vote cast from this computer.
+
+    Only ``wacli poll vote`` writes "Voted: …" rows; other people's votes go
+    straight to poll_votes. The phone shows a vote only inside its poll.
+    """
+    return f"""({table}.from_me = 1 AND COALESCE({table}.media_type, '') = ''
+      AND {table}.text GLOB 'Voted: *'
+      AND EXISTS (SELECT 1 FROM polls WHERE polls.chat_jid = {table}.chat_jid))"""
+
+
 def synthetic_message_sql(table: str) -> str:
     return f"""(COALESCE({table}.media_type, '') = ''
       AND COALESCE({table}.media_caption, '') = ''
@@ -2333,7 +2349,11 @@ class Backend:
 
     @staticmethod
     def _preview_sql(table: str) -> str:
-        return f"""CASE WHEN COALESCE({table}.media_type, '') <> '' THEN
+        # A deleted message never shows its old words, as on the phone.
+        return f"""CASE WHEN {revoked_sql(table)} THEN
+                        CASE WHEN {table}.from_me = 1 THEN 'You deleted this message'
+                          ELSE 'This message was deleted' END
+                      WHEN COALESCE({table}.media_type, '') <> '' THEN
                         COALESCE(NULLIF(CASE WHEN {table}.media_type = 'audio'
                             AND {table}.text = '[Audio]' THEN '' ELSE {table}.text END, ''),
                           NULLIF({table}.media_caption, ''),
@@ -2355,6 +2375,8 @@ class Backend:
         parameters.append(limit)
         try:
             with closing(self._connect()) as connection:
+                votes = (f"AND NOT {poll_vote_sql('messages')}"
+                         if self._has_table(connection, "polls") else "")
                 rows = connection.execute(
                     f"""
                     SELECT chats.jid, {chat_kind_sql()} AS kind, chats.last_message_ts, chats.archived,
@@ -2371,8 +2393,10 @@ class Backend:
                     LEFT JOIN contacts ON contacts.jid = chats.jid
                     LEFT JOIN messages AS latest ON latest.rowid = (
                       SELECT rowid FROM messages WHERE chat_jid = chats.jid
-                        AND deleted_at IS NULL AND COALESCE(reaction_to_id, '') = ''
-                        AND NOT {synthetic_message_sql("messages")}
+                        AND (deleted_at IS NULL OR {revoked_sql("messages")})
+                        AND COALESCE(reaction_to_id, '') = ''
+                        AND ({revoked_sql("messages")} OR NOT {synthetic_message_sql("messages")})
+                        {votes}
                       ORDER BY ts DESC, rowid DESC LIMIT 1)
                     WHERE {where}
                     ORDER BY chats.pinned DESC, chats.last_message_ts DESC, name COLLATE NOCASE
@@ -2480,9 +2504,10 @@ class Backend:
                         f"""SELECT latest.ts, latest.msg_id, latest.from_me, latest.sender_name,
                               {preview_sql} AS preview, COALESCE(latest.media_type, '') AS media
                             FROM messages AS latest
-                            WHERE latest.chat_jid = ? AND latest.deleted_at IS NULL
+                            WHERE latest.chat_jid = ?
+                              AND (latest.deleted_at IS NULL OR {revoked_sql("latest")})
                               AND COALESCE(latest.reaction_to_id, '') = ''
-                              AND NOT {synthetic_message_sql("latest")}
+                              AND ({revoked_sql("latest")} OR NOT {synthetic_message_sql("latest")})
                             ORDER BY latest.ts DESC, latest.rowid DESC LIMIT 1""",
                         [lid],
                     ).fetchone()
@@ -3040,12 +3065,19 @@ class Backend:
         cleaned = " ".join(query.split())[:256]
         limit = max(1, min(int(limit), 500))
         chat_jids = self._chat_jids(chat["jid"])
-        where = f"""base.chat_jid IN ({",".join("?" for _ in chat_jids)}) AND base.deleted_at IS NULL
+        # A message deleted for everyone stays as a placeholder, as on the
+        # phone; one deleted only on your devices is gone.
+        where = f"""base.chat_jid IN ({",".join("?" for _ in chat_jids)})
+          AND (base.deleted_at IS NULL OR {revoked_sql("base")})
           AND COALESCE(base.reaction_to_id, '') = ''
-          AND (COALESCE(base.text, '') <> '' OR COALESCE(base.media_caption, '') <> '' OR
-               COALESCE(base.display_text, '') <> '' OR COALESCE(base.filename, '') <> '' OR
-               COALESCE(base.media_type, '') <> '')
-          AND NOT """ + synthetic_message_sql("base")
+          AND ({revoked_sql("base")} OR (
+               (COALESCE(base.text, '') <> '' OR COALESCE(base.media_caption, '') <> '' OR
+                COALESCE(base.display_text, '') <> '' OR COALESCE(base.filename, '') <> '' OR
+                COALESCE(base.media_type, '') <> '')
+               AND NOT {synthetic_message_sql("base")}))"""
+        if cleaned or kind:
+            # A deleted message's words and files stay out of searches and views.
+            where += f" AND NOT {revoked_sql('base')}"
         parameters: list[Any] = list(chat_jids)
         if cleaned:
             where += """ AND LOWER(COALESCE(NULLIF(base.text, ''), NULLIF(base.media_caption, ''),
@@ -3072,9 +3104,13 @@ class Backend:
         parameters.append(limit + 1)
         try:
             with closing(self._connect()) as connection:
+                has_polls = self._has_table(connection, "polls")
+                if has_polls:
+                    where += f" AND NOT {poll_vote_sql('base')}"
                 rows = connection.execute(
                     f"""SELECT base.msg_id, base.sender_jid, base.sender_name,
                       base.ts, base.from_me, base.text, base.display_text,
+                      {revoked_sql("base")} AS is_revoked,
                       base.media_type, base.media_caption, base.filename,
                       base.mime_type, base.local_path, base.file_length,
                       base.media_unavailable_at, base.edited, base.is_forwarded,
@@ -3155,11 +3191,22 @@ class Backend:
                                 else str(reaction["sender_name"] or "WhatsApp"),
                             "sender_jid": str(reaction["sender_jid"] or ""),
                         })
+                polls = self._polls(connection, chat_jids, message_ids) \
+                    if has_polls and message_ids else {}
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         values = []
         for row in rows:
             message_id = str(row["msg_id"])
+            if bool(row["is_revoked"]):
+                values.append({
+                    "id": message_id, "text": "", "revoked": True,
+                    "sender": "You" if bool(row["from_me"]) else str(row["sender_name"] or "WhatsApp"),
+                    "sender_jid": str(row["sender_jid"] or ""),
+                    "timestamp": int(row["ts"]), "from_me": bool(row["from_me"]),
+                    "media_type": "", "reactions": [], "buttons": [],
+                })
+                continue
             quoted_id = quoted_by_message.get(message_id, "")
             quoted = quoted_rows.get(quoted_id)
             media_type = str(row["media_type"] or "")
@@ -3211,8 +3258,68 @@ class Backend:
                 "location_address": str(row["location_address"] or ""),
                 "location_live": bool(row["location_live"]),
             })
+            if message_id in polls:
+                values[-1]["poll"] = polls[message_id]
+                # "Poll: question" is wacli's text for the poll; the card shows it.
+                values[-1]["text"] = ""
         return {"ok": True, "chat": chat, "query": cleaned, "messages": values,
                 "has_more": has_more}
+
+    def _polls(self, connection: sqlite3.Connection, chat_jids: list[str],
+               message_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Each poll among these messages with its options and current votes."""
+        chat_marks = ",".join("?" for _ in chat_jids)
+        id_marks = ",".join("?" for _ in message_ids)
+        polls = connection.execute(
+            f"""SELECT msg_id, question, options_json, selectable_count FROM polls
+            WHERE chat_jid IN ({chat_marks}) AND msg_id IN ({id_marks})""",
+            [*chat_jids, *message_ids]).fetchall()
+        if not polls:
+            return {}
+        has_votes = self._has_table(connection, "poll_votes")
+        votes = connection.execute(
+            f"""SELECT poll_msg_id, voter_jid, selected_options_json FROM poll_votes
+            WHERE chat_jid IN ({chat_marks}) AND poll_msg_id IN ({id_marks})
+            ORDER BY ts""", [*chat_jids, *message_ids]).fetchall() if has_votes else []
+        aliases = self._lid_aliases()
+        own = self._own_jid()
+        voters = sorted({aliases.get(str(row["voter_jid"]), str(row["voter_jid"]))
+                         for row in votes})
+        names: dict[str, str] = {}
+        if voters:
+            marks = ",".join("?" for _ in voters)
+            for row in connection.execute(
+                    f"""SELECT jid, COALESCE(NULLIF(full_name, ''), NULLIF(push_name, ''),
+                      NULLIF(first_name, ''), NULLIF(business_name, ''), phone) AS name
+                    FROM contacts WHERE jid IN ({marks})""", voters).fetchall():
+                names[str(row["jid"])] = str(row["name"] or "")
+        result: dict[str, dict[str, Any]] = {}
+        for poll in polls:
+            options = [str(option) for option in self._json_list(poll["options_json"])
+                       if isinstance(option, str)][:12]
+            chosen: dict[str, list[dict[str, Any]]] = {option: [] for option in options}
+            for vote in votes:
+                if str(vote["poll_msg_id"]) != str(poll["msg_id"]):
+                    continue
+                voter = aliases.get(str(vote["voter_jid"]), str(vote["voter_jid"]))
+                mine = bool(own) and re.sub(r":[0-9]+@", "@", voter) == own
+                person = {"jid": voter, "mine": mine,
+                          "name": "You" if mine else (names.get(voter)
+                                                     or voter.split("@", 1)[0])}
+                for option in self._json_list(vote["selected_options_json"]):
+                    if isinstance(option, str) and option in chosen:
+                        chosen[option].append(person)
+            result[str(poll["msg_id"])] = {
+                "question": str(poll["question"] or "")[:512],
+                "selectable": bounded_int(poll["selectable_count"], 1, 1, 12),
+                "options": [{"text": option, "votes": len(chosen[option]),
+                             "voters": [item["name"] for item in chosen[option]][:50],
+                             "mine": any(item["mine"] for item in chosen[option])}
+                            for option in options],
+                "voters": len({vote["voter_jid"] for vote in votes
+                               if str(vote["poll_msg_id"]) == str(poll["msg_id"])}),
+            }
+        return result
 
     def _own_jid(self, ask: bool = False) -> str:
         """This account's own user JID, without the device part.
@@ -4200,6 +4307,36 @@ class Backend:
             "--post-send-wait", "0"]
         self._envelope(self._write(command, timeout=90))
         return {"ok": True, "kind": "forward", "target": target["name"]}
+
+    def vote_poll(self, jid: str, message_id: str, options: Any) -> dict[str, Any]:
+        """Vote in one stored poll with option texts exactly as written."""
+        chat, message = self._message(jid, message_id)
+        stored = str(message["chat_jid"])
+        try:
+            with closing(self._connect()) as connection:
+                poll = connection.execute(
+                    "SELECT options_json, selectable_count FROM polls "
+                    "WHERE chat_jid = ? AND msg_id = ?", [stored, str(message["msg_id"])]
+                ).fetchone() if self._has_table(connection, "polls") else None
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if poll is None:
+            raise OmaWhatsAppError("That message is not a poll.")
+        allowed = [str(option) for option in self._json_list(poll["options_json"])]
+        chosen = list(dict.fromkeys(
+            str(option) for option in (options if isinstance(options, list) else [options])))
+        if not chosen:
+            raise OmaWhatsAppError("Choose at least one option.")
+        if any(option not in allowed for option in chosen):
+            raise OmaWhatsAppError("That option is not in this poll.")
+        if len(chosen) > bounded_int(poll["selectable_count"], 1, 1, 12):
+            raise OmaWhatsAppError("This poll takes fewer choices.")
+        command = ["--json", "poll", "vote", "--to", stored, "--id", str(message["msg_id"]),
+                   "--post-send-wait", "0"]
+        for option in chosen:
+            command.extend(["--option", option])
+        self._envelope(self._write(command, timeout=60))
+        return {"ok": True, "kind": "poll-vote", "options": chosen}
 
     def select_option(self, jid: str, message_id: str, index: Any) -> dict[str, Any]:
         chat, message = self._message(jid, message_id)
@@ -5501,6 +5638,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("delete")
     commands.add_parser("forward")
     commands.add_parser("select")
+    commands.add_parser("poll-vote")
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
     commands.add_parser("notify")
@@ -5671,6 +5809,10 @@ def main() -> int:
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),
                                                 str(payload.get("to_jid") or "")))
+        if args.command == "poll-vote":
+            return emit(backend.vote_poll(str(payload.get("jid") or ""),
+                                          str(payload.get("id") or ""),
+                                          payload.get("options")))
         if args.command == "select":
             return emit(backend.select_option(str(payload.get("jid") or ""),
                                               str(payload.get("id") or ""),

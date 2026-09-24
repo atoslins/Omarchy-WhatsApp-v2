@@ -2822,6 +2822,10 @@ Item {
               onForwardRequested: root.startForward(modelData)
               onCopyRequested: function(text) { root.copyText(text) }
               onSaveRequested: root.saveMediaAs(modelData)
+              onPollVoteRequested: function(options) {
+                if (!root.demoMode && root.service)
+                  root.service.votePoll(root.currentChatRef(), modelData, options, "app")
+              }
               onOptionRequested: function(optionIndex) {
                 if (!root.demoMode && root.service)
                   root.service.selectOption(

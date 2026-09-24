@@ -292,6 +292,19 @@ class ReadToolTests(ToolCase):
         self.assertEqual([item["id"] for item in dated["messages"]], ["m6", "m7", "m8", "m9"])
         self.assertFalse(dated["older_messages"])
 
+    def test_read_chat_shows_polls_with_votes_and_deleted_messages(self) -> None:
+        page = [message("p1", 30, from_me=True, poll={
+                    "question": "Which day?", "selectable": 1, "voters": 2,
+                    "options": [{"text": "Mon", "votes": 2, "voters": ["You", "Sam"], "mine": True},
+                                {"text": "Tue", "votes": 0, "voters": [], "mine": False}]}),
+                message("gone", 20, from_me=True, revoked=True)]
+        self.chats(messages={"messages": page, "has_more": False})
+        rows = {row["id"]: row for row in self.run_tool("read_chat", chat="sam@s.whatsapp.net")["messages"]}
+        self.assertEqual(rows["p1"]["poll"]["options"][0],
+                         {"text": "Mon", "votes": 2, "voters": ["You", "Sam"], "mine": True})
+        self.assertEqual(rows["p1"]["poll"]["choices_allowed"], 1)
+        self.assertTrue(rows["gone"]["deleted_for_everyone"])
+
     def test_global_search_goes_to_wacli_with_every_filter(self) -> None:
         rows = [{"ChatJID": "sam@s.whatsapp.net", "ChatName": "Sam", "MsgID": "x1",
                  "Timestamp": "2026-09-20T12:00:00Z", "FromMe": False, "Text": "watch Dune",

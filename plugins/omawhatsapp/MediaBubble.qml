@@ -660,28 +660,81 @@ Item {
 
   Component {
     id: locationComponent
+    // The pin as on the phone: its name, address and coordinates, and a tap
+    // opens it in the browser. No map tile is fetched just to draw the card.
     Rectangle {
-      implicitHeight: Style.space(58)
+      id: locationCard
+      objectName: "locationCard"
+      readonly property real latitude: Number(root.message.latitude)
+      readonly property real longitude: Number(root.message.longitude)
+      readonly property bool placed: isFinite(latitude) && isFinite(longitude)
+        && root.message.latitude !== undefined && root.message.latitude !== null
+      readonly property string mapUrl: placed
+        ? "https://www.openstreetmap.org/?mlat=" + latitude.toFixed(6) + "&mlon="
+          + longitude.toFixed(6) + "#map=17/" + latitude.toFixed(6) + "/" + longitude.toFixed(6)
+        : ""
+      implicitHeight: locationRow.implicitHeight + Style.space(18)
       radius: Style.cornerRadius
-      color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
+      color: locationHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+        : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
       Row {
-        anchors.centerIn: parent
-        spacing: Style.space(8)
+        id: locationRow
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.margins: Style.space(10)
+        spacing: Style.space(10)
         Text {
           textFormat: Text.PlainText
-          text: "󰍎"
+          text: root.message.location_live === true ? "󰆣" : "󰍎"
           color: root.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.icon
         }
-        Text {
-          textFormat: Text.PlainText
-          text: "Location"
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+        Column {
+          width: parent.width - Style.space(40)
+          spacing: Style.space(2)
+          Text {
+            textFormat: Text.PlainText
+            objectName: "locationName"
+            width: parent.width
+            text: String(root.message.location_name || "")
+              || (root.message.location_live === true ? "Live location" : "Location")
+            color: root.foreground
+            wrapMode: Text.Wrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+          }
+          Text {
+            textFormat: Text.PlainText
+            visible: text !== ""
+            width: parent.width
+            text: String(root.message.location_address || "")
+            color: root.dim
+            wrapMode: Text.Wrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Text {
+            textFormat: Text.PlainText
+            objectName: "locationCoordinates"
+            visible: locationCard.placed
+            text: locationCard.placed
+              ? locationCard.latitude.toFixed(5) + ", " + locationCard.longitude.toFixed(5)
+                + "  ·  Open in maps"
+              : ""
+            color: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
       }
+      HoverHandler {
+        id: locationHover
+        cursorShape: locationCard.placed ? Qt.PointingHandCursor : Qt.ArrowCursor
+      }
+      TapHandler { onTapped: if (locationCard.placed) Qt.openUrlExternally(locationCard.mapUrl) }
     }
   }
 }

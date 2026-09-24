@@ -2476,6 +2476,82 @@ class BackendTests(unittest.TestCase):
         command = call.call_args.args[0]
         self.assertEqual(command[command.index("--file") + 1], str(home_file))
 
+    def _add_poll_tables(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executescript("""
+                CREATE TABLE polls (chat_jid TEXT NOT NULL, msg_id TEXT NOT NULL, sender_jid TEXT,
+                  question TEXT NOT NULL, options_json TEXT NOT NULL,
+                  selectable_count INTEGER NOT NULL DEFAULT 1, created_ts INTEGER NOT NULL,
+                  PRIMARY KEY (chat_jid, msg_id));
+                CREATE TABLE poll_votes (chat_jid TEXT NOT NULL, poll_msg_id TEXT NOT NULL,
+                  voter_jid TEXT NOT NULL, vote_msg_id TEXT NOT NULL,
+                  selected_options_json TEXT NOT NULL, ts INTEGER NOT NULL,
+                  PRIMARY KEY (chat_jid, poll_msg_id, voter_jid));""")
+
+    def test_a_poll_carries_its_options_votes_and_voters(self) -> None:
+        # The owner saw a poll as the text "Poll: …" and his vote as a bubble.
+        self._add_poll_tables()
+        self._insert("team@g.us", "poll1", 50, from_me=1, text="Poll: Which day?")
+        self._insert("team@g.us", "vote1", 51, from_me=1, text="Voted: Monday")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO polls VALUES ('team@g.us', 'poll1', '', 'Which day?', "
+                               "'[\"Monday\", \"Tuesday\"]', 1, 50)")
+            connection.executemany("INSERT INTO poll_votes VALUES ('team@g.us', 'poll1', ?, ?, ?, ?)", [
+                ("me@s.whatsapp.net", "vote1", '["Monday"]', 51),
+                ("member@s.whatsapp.net", "v2", '["Monday"]', 52),
+                ("admin@s.whatsapp.net", "v3", '["Tuesday"]', 53)])
+        with mock.patch.object(self.backend, "_own_jid", return_value="me@s.whatsapp.net"):
+            rows = {row["id"]: row for row in self.backend.messages("team@g.us")["messages"]}
+        self.assertNotIn("vote1", rows, "a vote shows inside its poll, not as a bubble")
+        poll = rows["poll1"]["poll"]
+        self.assertEqual(rows["poll1"]["text"], "")
+        self.assertEqual(poll["question"], "Which day?")
+        self.assertEqual(poll["voters"], 3)
+        monday, tuesday = poll["options"]
+        self.assertEqual((monday["text"], monday["votes"], monday["mine"]), ("Monday", 2, True))
+        self.assertEqual(monday["voters"], ["You", "Sam Rivera"])
+        self.assertEqual((tuesday["votes"], tuesday["voters"]), (1, ["Alex Kim"]))
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["team@g.us"]["preview"], "Poll: Which day?",
+                         "the rail preview skips the vote row")
+
+    def test_a_message_deleted_for_everyone_stays_as_a_placeholder(self) -> None:
+        self._insert("alex@s.whatsapp.net", "gone", 50, from_me=1, text="secret words")
+        self._insert("alex@s.whatsapp.net", "mine-only", 49, from_me=0, text="local delete")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE messages SET revoked = 1, deleted_at = 60, "
+                               "deletion_reason = 'whatsapp-revoke' WHERE msg_id = 'gone'")
+            connection.execute("UPDATE messages SET deleted_for_me = 1, deleted_at = 60, "
+                               "deletion_reason = 'whatsapp-delete-for-me' WHERE msg_id = 'mine-only'")
+        rows = {row["id"]: row for row in self.backend.messages("alex@s.whatsapp.net")["messages"]}
+        self.assertTrue(rows["gone"]["revoked"])
+        self.assertEqual(rows["gone"]["text"], "", "the old words never reach the app")
+        self.assertNotIn("mine-only", rows, "deleted on your devices is gone")
+        searched = self.backend.messages("alex@s.whatsapp.net", "secret")["messages"]
+        self.assertEqual(searched, [], "a search never finds what was deleted")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["alex@s.whatsapp.net"]["preview"], "You deleted this message")
+
+    def test_a_poll_vote_checks_the_options_and_sends_them_exactly(self) -> None:
+        self._add_poll_tables()
+        self._insert("team@g.us", "poll1", 50, from_me=0, text="Poll: Which day?")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO polls VALUES ('team@g.us', 'poll1', '', 'Which day?', "
+                               "'[\"Monday\", \"Tuesday\"]', 1, 50)")
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.assertEqual(self.backend.vote_poll("team@g.us", "poll1", ["Tuesday"])["options"],
+                             ["Tuesday"])
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["poll", "vote"])
+        self.assertEqual(command[command.index("--option") + 1], "Tuesday")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not in this poll"):
+            self.backend.vote_poll("team@g.us", "poll1", ["Friday"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "fewer choices"):
+            self.backend.vote_poll("team@g.us", "poll1", ["Monday", "Tuesday"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not a poll"):
+            self.backend.vote_poll("team@g.us", "t1", ["Monday"])
+
     def test_attachments_list_every_rail_chat_newest_first(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.executemany(

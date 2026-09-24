@@ -188,7 +188,18 @@ def shape_message(row: dict[str, Any]) -> dict[str, Any]:
         "edited": True if row.get("edited") else None,
         "forwarded": True if row.get("forwarded") else None,
         "starred": True if row.get("starred") else None,
+        "deleted_for_everyone": True if row.get("revoked") else None,
     }
+    poll = row.get("poll")
+    if isinstance(poll, dict):
+        shaped["poll"] = compact({
+            "question": poll.get("question"), "choices_allowed": poll.get("selectable"),
+            "voters": poll.get("voters"),
+            "options": [compact({"text": option.get("text"), "votes": option.get("votes"),
+                                 "voters": option.get("voters"),
+                                 "mine": True if option.get("mine") else None})
+                        for option in poll.get("options") or [] if isinstance(option, dict)],
+        })
     if row.get("quoted_id"):
         shaped["reply_to"] = compact({
             "id": row.get("quoted_id"), "sender": row.get("quoted_sender"),
