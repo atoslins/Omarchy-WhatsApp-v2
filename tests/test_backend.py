@@ -127,6 +127,10 @@ class BackendTests(unittest.TestCase):
                     ("team@g.us", "Design team", "t1", "member@s.whatsapp.net", "Sam", 30, 0, "ship it", "", "", ""),
                     ("alex@s.whatsapp.net", "Alex", "a1", "me@s.whatsapp.net", "", 40, 1, "hello", "", "", ""),
                     ("team@g.us", "Design team", "t2", "me@s.whatsapp.net", "", 20, 1, "mockup", "image", "image/png", str(self.preview)),
+                    # The chat's three unread messages are all stored after
+                    # your last message, as in a real mirror.
+                    ("team@g.us", "Design team", "t0a", "member@s.whatsapp.net", "Sam", 25, 0, "earlier", "", "", ""),
+                    ("team@g.us", "Design team", "t0b", "member@s.whatsapp.net", "Sam", 26, 0, "earlier too", "", "", ""),
                 ],
             )
             connection.executemany(
@@ -155,6 +159,53 @@ class BackendTests(unittest.TestCase):
         self.assertEqual({chat["name"] for chat in result["chats"]}, {"Design team", "Alex", "Archive"})
         self.assertEqual(result["chats"][0]["name"], "Design team")  # pinned first
         self.assertEqual(result["chats"][0]["unread"], 3)
+
+    def _unread(self, jid: str) -> int:
+        return next(chat for chat in self.backend.chats()["chats"] if chat["jid"] == jid)["unread"]
+
+    def _insert(self, jid: str, msg_id: str, ts: int, from_me: int = 0, text: str = "",
+                display: str = "", reaction: str = "") -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, display_text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES (?, '', ?, '', '', ?, ?, ?, ?, ?, '', '', '')""",
+                [jid, msg_id, ts, from_me, text, display, reaction])
+
+    def _set_unread(self, jid: str, count: int) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET unread_count = ?, unread = ? WHERE jid = ?",
+                               [count, 1 if count else 0, jid])
+
+    def test_a_placeholder_wacli_could_not_decode_is_not_unread(self) -> None:
+        # Found on the owner's mirror: four chats "unread" for months over a
+        # "(message)" row the app never shows; the phone counted none of them.
+        self._insert("archive@g.us", "p1", 12, display="(message)")
+        self._set_unread("archive@g.us", 1)
+        self.assertEqual(self._unread("archive@g.us"), 0)
+        self._insert("archive@g.us", "p2", 13, text="a real one")
+        self._set_unread("archive@g.us", 2)
+        self.assertEqual(self._unread("archive@g.us"), 1)
+
+    def test_a_reaction_is_not_an_unread_message(self) -> None:
+        self._insert("archive@g.us", "r1", 12, reaction="some-message")
+        self._set_unread("archive@g.us", 1)
+        self.assertEqual(self._unread("archive@g.us"), 0)
+
+    def test_your_reply_marks_the_chat_read(self) -> None:
+        self._insert("archive@g.us", "in1", 12, text="question")
+        self._insert("archive@g.us", "me1", 13, from_me=1, text="answer")
+        self._set_unread("archive@g.us", 1)
+        self.assertEqual(self._unread("archive@g.us"), 0, "a reply from the phone left wacli's count behind")
+        self._insert("archive@g.us", "in2", 14, text="thanks")
+        self._set_unread("archive@g.us", 2)
+        self.assertEqual(self._unread("archive@g.us"), 1, "only what came after the reply is waiting")
+
+    def test_a_count_from_the_phone_without_stored_messages_is_kept(self) -> None:
+        # History sync can report unread messages the mirror never received;
+        # with no reply to bound it, the count stands.
+        self._set_unread("archive@g.us", 4)
+        self.assertEqual(self._unread("archive@g.us"), 4)
 
     def test_a_chat_marked_unread_elsewhere_counts_as_one(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
@@ -413,18 +464,27 @@ class BackendTests(unittest.TestCase):
 
     def _arrive(self, jid: str, msg_id: str, timestamp: int, unread: int,
                 text: str = "new", sender: str = "Sam") -> None:
+        # wacli stores one row for every unread it adds, so a jump from 3 to 5
+        # unread lands two messages; the last one carries the given id.
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            previous = connection.execute(
+                "SELECT unread_count FROM chats WHERE jid = ?", [jid]).fetchone()[0] or 0
             connection.execute(
                 "UPDATE chats SET last_message_ts = ?, unread_count = ? WHERE jid = ?",
                 [timestamp, unread, jid],
             )
-            connection.execute(
-                """INSERT INTO messages
-                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
-                 text, reaction_to_id, media_type, mime_type, local_path)
-                VALUES (?, '', ?, 'member@s.whatsapp.net', ?, ?, 0, ?, '', '', '', '')""",
-                [jid, msg_id, sender, timestamp, text],
-            )
+            arrivals = max(1, unread - int(previous))
+            for index in range(arrivals):
+                last = index == arrivals - 1
+                connection.execute(
+                    """INSERT INTO messages
+                    (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                     text, reaction_to_id, media_type, mime_type, local_path)
+                    VALUES (?, '', ?, 'member@s.whatsapp.net', ?, ?, 0, ?, '', '', '', '')""",
+                    [jid, msg_id if last else f"{msg_id}-earlier-{index}", sender,
+                     timestamp,
+                     text if last else "earlier"],
+                )
 
     def _notify(self, skip_jid: str = "") -> tuple[dict, list]:
         with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
@@ -790,7 +850,7 @@ class BackendTests(unittest.TestCase):
 
     def test_messages_never_cross_chat_boundary(self) -> None:
         values = self.backend.messages("team@g.us")["messages"]
-        self.assertEqual([value["id"] for value in values], ["t1", "t2"])
+        self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])
         self.assertNotIn("a1", [value["id"] for value in values])
 
     def test_synthetic_placeholder_rows_are_neither_bubbles_nor_previews(self) -> None:
@@ -1190,7 +1250,7 @@ class BackendTests(unittest.TestCase):
             details = self.backend.chat_details("team@g.us")
         run.assert_not_called()
         self.assertEqual(details["chat"]["name"], "Design team")
-        self.assertEqual(details["counts"], {"total": 2, "media": 1, "documents": 0,
+        self.assertEqual(details["counts"], {"total": 4, "media": 1, "documents": 0,
                                              "links": 0, "starred": 1})
         self.assertEqual(details["since"], 20)
         self.assertEqual(details["group"], {"created_ts": 100, "left": False,

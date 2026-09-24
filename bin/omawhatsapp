@@ -2235,6 +2235,44 @@ class Backend:
                     """,
                     parameters,
                 ).fetchall()
+                # wacli counts every new incoming row as unread, including
+                # reactions and payloads it cannot decode ("(message)"), and a
+                # reply from another device does not always clear it. The
+                # phone counts neither, and a reply marks the chat read.
+                real_unread: dict[str, int] = {}
+                synthetic = synthetic_message_sql("messages")
+                for row in rows:
+                    count = int(row["unread_count"] or 0)
+                    if count <= 0:
+                        continue
+                    jid = str(row["jid"])
+                    phantom, mine = connection.execute(
+                        f"""
+                        SELECT
+                          (SELECT COUNT(*) FROM (
+                             SELECT reaction_to_id, text, display_text, media_type,
+                               media_caption, filename
+                             FROM messages
+                             WHERE chat_jid = ? AND from_me = 0 AND deleted_at IS NULL
+                             ORDER BY ts DESC, rowid DESC LIMIT ?) AS messages
+                           WHERE COALESCE(messages.reaction_to_id, '') <> ''
+                             OR {synthetic}),
+                          (SELECT MAX(ts) FROM messages WHERE chat_jid = ? AND from_me = 1)
+                        """,
+                        [jid, min(count, 999), jid],
+                    ).fetchone()
+                    remaining = max(0, count - int(phantom or 0))
+                    if mine is not None:
+                        # Everything after your own last message is stored, so
+                        # that bound never undercounts.
+                        after = connection.execute(
+                            f"""SELECT COUNT(*) FROM messages WHERE chat_jid = ?
+                                AND from_me = 0 AND deleted_at IS NULL AND ts > ?
+                                AND COALESCE(reaction_to_id, '') = '' AND NOT {synthetic}""",
+                            [jid, int(mine)],
+                        ).fetchone()[0]
+                        remaining = min(remaining, int(after or 0))
+                    real_unread[jid] = remaining
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         account = self.active
@@ -2243,10 +2281,10 @@ class Backend:
         for row in rows:
             jid = str(row["jid"])
             timestamp = int(row["last_message_ts"] or 0)
-            unread = int(row["unread_count"] or 0)
-            # "Mark as unread" on the phone (or here) sets only the flag;
-            # it counts as one, the way WhatsApp shows a dot.
-            if unread <= 0 and bool(row["unread_flag"]):
+            unread = real_unread.get(jid, 0)
+            # "Mark as unread" on the phone (or here) sets only the flag, with
+            # no count; it counts as one, the way WhatsApp shows a dot.
+            if int(row["unread_count"] or 0) <= 0 and bool(row["unread_flag"]):
                 unread = 1
             archived = bool(row["archived"])
             muted = muted_until_active(row["muted_until"])

@@ -63,6 +63,11 @@
   message and receipt that arrives meanwhile without storing it; that is how a
   chat read on another device could stay unread here. Settings says so.
 - A chat marked unread on the phone shows as unread (one) instead of read.
+- Unread counts match the phone: wacli counts reactions and the "(message)"
+  rows it cannot decode as unread, and a reply sent from another device can
+  leave its count behind. The helper subtracts those rows, treats your own last
+  message as reading the chat, and counts only what arrived after it. On the
+  owner's mirror this took twelve unread chats to the ten the phone showed.
 - When this app stops sync for something wacli cannot delegate, the rail line
   says why ("Sync paused · sending files") instead of "Reconnecting…", and its
   tooltip says messages arriving in those seconds may not reach this computer.
