@@ -138,6 +138,8 @@ TestCase {
       function selectOption() { return false }
       property var lastNotifications: null
       property var lastChatRead: null
+      property bool showAvatars: true
+      property string railDensity: "comfortable"
       function setChatRead(ref, read, owner) {
         lastChatRead = { ref: ref, read: read, owner: owner }
         return true
@@ -284,12 +286,33 @@ TestCase {
     compare(harness.service.lastChatRead.read, false)
   }
 
+  function test_chat_photos_setting_hides_every_photo() {
+    var harness = createHarness()
+    var photo = Object.assign({}, workChat, { avatar_path: "__demo_avatar__" })
+    harness.service.chats = [photo, otherChat]
+    var header = findChild(harness.app, "conversationAvatar")
+    tryVerify(function() { return header.avatarReady }, 5000)
+    harness.service.showAvatars = false
+    verify(!header.showPhoto)
+    verify(!header.avatarReady, "no photo loads with the setting off")
+  }
+
+  function test_compact_density_shortens_rail_rows() {
+    var harness = createHarness()
+    var row = findChild(harness.app, "chatReadToggle").parent.parent
+    var comfortable = row.height
+    harness.service.railDensity = "compact"
+    verify(row.height < comfortable)
+  }
+
   function test_desktop_notifications_live_in_settings() {
     var harness = createHarness({ notificationsEnabled: true, notificationsPreview: true })
     var app = harness.app
     app.settingsOpen = true
-    var notify = findChild(app, "notifySwitch")
-    var preview = findChild(app, "notifyPreviewSwitch")
+    findChild(app, "settingsView").openSection("notifications")
+    wait(0)
+    var notify = findChild(app, "setting-notify")
+    var preview = findChild(app, "setting-notify_preview")
     verify(notify !== null && preview !== null)
     verify(notify.checked)
     verify(preview.checked)

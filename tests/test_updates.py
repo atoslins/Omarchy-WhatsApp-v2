@@ -128,5 +128,12 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(proof.read_text(), "installed")
 
 
+class ForkRepositoryTests(unittest.TestCase):
+    def test_updates_come_from_the_fork_not_upstream(self) -> None:
+        self.assertEqual(updates.REPOSITORY, "atoslins/Omarchy-WhatsApp-v2")
+        self.assertTrue(updates.API.endswith("/repos/atoslins/Omarchy-WhatsApp-v2"))
+        self.assertNotIn("MoizIbnYousaf", updates.RELEASES)
+
+
 if __name__ == "__main__":
     unittest.main()

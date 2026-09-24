@@ -189,6 +189,15 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
     {operation:"replace", staged:$staged_shell, target:$shell,
       expected_sha256:$shell_digest}
   ]')
+# Settings → Media may have written drop-ins that empty the media flag; they
+# exist only if that option was ever turned off.
+for unit in wacli-sync.service wacli-sync@.service; do
+  media_dropin="$user_service_root/$unit.d/10-omawhatsapp-media.conf"
+  if [[ -e $media_dropin || -L $media_dropin ]]; then
+    targets=$(jq -c --arg dropin "$media_dropin" '. + [{operation:"remove", target:$dropin}]' \
+      <<<"$targets")
+  fi
+done
 if $purge_runtime; then
   targets=$(jq -c --arg runtime "$runtime" '. + [{operation:"remove", target:$runtime}]' \
     <<<"$targets")

@@ -559,7 +559,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
         helper.write_text("synthetic\n", encoding="utf-8")
         for name in ("omawhatsapp_assets.py",):
             (helper.parent / name).write_text("synthetic\n", encoding="utf-8")
-        service_root.mkdir(parents=True)
+        service_root.mkdir(parents=True, exist_ok=True)
         for name in ("wacli-sync.service", "wacli-sync@.service"):
             (service_root / name).write_text("synthetic\n", encoding="utf-8")
         shell = home / ".config" / "omarchy" / "shell.json"
@@ -660,6 +660,31 @@ class UninstallEnvironmentTests(unittest.TestCase):
             INSTALL.read_text(encoding="utf-8"),
             r"list-unit-files \\\n\s*'wacli-sync@",
         )
+
+    def test_uninstall_removes_the_media_drop_ins_it_wrote(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            service_root = home / ".config" / "systemd" / "user"
+            runtime = home / ".local" / "state" / "omawhatsapp"
+            dropins = []
+            for unit in ("wacli-sync.service", "wacli-sync@.service"):
+                folder = service_root / f"{unit}.d"
+                folder.mkdir(parents=True)
+                dropin = folder / "10-omawhatsapp-media.conf"
+                dropin.write_text("[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n", encoding="utf-8")
+                dropins.append(dropin)
+            unrelated = service_root / "wacli-sync.service.d" / "20-user.conf"
+            unrelated.write_text("[Service]\n", encoding="utf-8")
+            result = self.run_uninstall(
+                root, home, service_root, runtime,
+                xdg_config=str(home / ".config"),
+                xdg_state=str(home / ".local" / "state"),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for dropin in dropins:
+                self.assertFalse(dropin.exists(), dropin)
+            self.assertTrue(unrelated.exists(), "the user's own drop-ins stay")
 
     def test_unit_discovery_failure_preserves_installed_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

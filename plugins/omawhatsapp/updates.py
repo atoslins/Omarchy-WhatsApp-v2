@@ -15,7 +15,9 @@ import time
 import urllib.request
 import zipfile
 
-REPOSITORY = "MoizIbnYousaf/Omarchy-Whatsapp"
+# The fork publishes its own releases; checking the upstream repository would
+# offer to install upstream code over this fork.
+REPOSITORY = "atoslins/Omarchy-WhatsApp-v2"
 API = "https://api.github.com/repos/" + REPOSITORY
 RELEASES = "https://github.com/" + REPOSITORY + "/releases"
 VERSION = re.compile(r"v?(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\Z")

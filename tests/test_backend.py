@@ -1303,6 +1303,71 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(self.backend.settings()["read_on_reply"],
                          "a rejected update must not change the saved value")
 
+    def test_media_mode_writes_one_drop_in_per_sync_unit_and_restarts_running_sync(self) -> None:
+        units = self.root / "units"
+        backend = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state",
+            wacli=self.wacli, unit_dir=units,
+        )
+        calls: list[list[str]] = []
+
+        def systemctl(command, **_kwargs):
+            calls.append(list(command))
+            code = 0 if command[-2:] == ["--quiet", "wacli-sync.service"] else 0
+            return subprocess.CompletedProcess(command, code, "", "")
+
+        self.assertTrue(backend.auto_download_media())
+        with mock.patch.object(backend_module, "run_bounded", side_effect=systemctl):
+            off = backend.media_mode(False)
+        self.assertFalse(off["auto_download_media"])
+        for unit in ("wacli-sync.service", "wacli-sync@.service"):
+            dropin = units / f"{unit}.d" / "10-omawhatsapp-media.conf"
+            self.assertEqual(dropin.read_text(encoding="utf-8"),
+                             backend_module.MEDIA_DROPIN_OFF)
+            self.assertIn("Environment=OMAW_MEDIA_FLAGS=\n", dropin.read_text(encoding="utf-8"))
+        verbs = [call[2] for call in calls]
+        self.assertIn("daemon-reload", verbs)
+        self.assertIn("restart", verbs, "a running sync picks the change up")
+        self.assertFalse(backend.status()["auto_download_media"])
+
+        calls.clear()
+        with mock.patch.object(backend_module, "run_bounded", side_effect=systemctl):
+            on = backend.media_mode(True)
+        self.assertTrue(on["auto_download_media"])
+        self.assertFalse(any((units / f"{unit}.d" / "10-omawhatsapp-media.conf").exists()
+                             for unit in ("wacli-sync.service", "wacli-sync@.service")))
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "on or off"):
+            backend.media_mode("no")
+
+    def test_sync_units_route_media_download_through_the_drop_in_variable(self) -> None:
+        source = SCRIPT.parent.parent / "systemd" / "user"
+        for unit in ("wacli-sync.service", "wacli-sync@.service"):
+            text = (source / unit).read_text(encoding="utf-8")
+            self.assertIn("Environment=OMAW_MEDIA_FLAGS=--download-media", text)
+            exec_start = next(line for line in text.splitlines() if line.startswith("ExecStart="))
+            self.assertIn(" $OMAW_MEDIA_FLAGS ", exec_start)
+            self.assertNotIn("--download-media", exec_start)
+
+    def test_about_reports_versions_install_mode_and_disk_use(self) -> None:
+        self.wacli.write_text("#!/bin/sh\necho 'wacli 0.18.3'\n", encoding="utf-8")
+        plugin = self.root / "plugin"
+        plugin.mkdir()
+        (plugin / "manifest.json").write_text('{"version": "0.14.0"}', encoding="utf-8")
+        (plugin / "install-mode").write_text("standalone\n", encoding="utf-8")
+        media = self.store / "media" / "chat" / "message"
+        media.mkdir(parents=True)
+        (media / "photo.jpg").write_bytes(b"x" * 1000)
+        (self.store / "media" / "loop").symlink_to(self.store)
+        about = self.backend.about(plugin_dir=plugin)
+        self.assertEqual(about["app_version"], "0.14.0")
+        self.assertEqual(about["install_mode"], "standalone")
+        self.assertEqual(about["wacli_version"], "0.18.3")
+        self.assertEqual(about["wacli_minimum_version"], "0.17.1")
+        store = about["stores"][0]
+        self.assertEqual(store["media_bytes"], 1000, "symlinks are not followed")
+        self.assertEqual(store["media_files"], 1)
+        self.assertGreater(store["database_bytes"], 0)
+
     def test_oversized_message_is_rejected(self) -> None:
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
             self.backend.send("alex@s.whatsapp.net", "x" * 4097)

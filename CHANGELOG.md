@@ -32,6 +32,18 @@
   menu no longer offers "Mark read · send receipt", which was never a receipt.
 - Mark a chat read or unread from the rail row on hover, where the button takes
   the place of the unread count.
+- Rebuild Settings as a full view with sections for reading, notifications,
+  chats, media, sync and storage, accounts, updates, shortcuts and about. New
+  options: mark read on reply, Enter sends, chat photos, compact chat list,
+  automatic download of received media, and automatic chat-photo refresh.
+  Storage use and the installed wacli version are shown.
+- Turning automatic media download off writes a systemd drop-in that empties
+  `$OMAW_MEDIA_FLAGS`; the sync units now pass `--download-media` through that
+  variable. Uninstall removes the drop-ins it wrote.
+- Chat photos refresh by themselves while every window is closed, in short
+  batches, then once a day. wacli needs the store lock for photo lookups, so
+  each batch still pauses sync for a few seconds.
+- In-app update checks look at this fork's releases, not upstream's.
 - Right-click a chat in the list for read or unread, pin, mute, archive and
   remove, and right-click a message for its actions at the pointer; the
   message menu gains React.

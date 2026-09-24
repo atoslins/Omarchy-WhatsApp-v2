@@ -10,8 +10,10 @@ Item {
   required property color accent
   required property string fontFamily
   property bool selected: false
+  // Settings → Chats → Chat photos; off shows initials or the group icon.
+  property bool showPhoto: true
 
-  readonly property string localPath: String(chat && chat.avatar_path || "")
+  readonly property string localPath: showPhoto ? String(chat && chat.avatar_path || "") : ""
   readonly property bool localAvatar: localPath.charAt(0) === "/"
     || localPath === "__demo_avatar__"
   readonly property url avatarSource: localPath === "__demo_avatar__"

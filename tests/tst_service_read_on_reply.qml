@@ -124,4 +124,31 @@ TestCase {
     verify(!service.readOpenChatIfUnread(service.chats[0]),
       "a second refresh within the throttle window does nothing")
   }
+
+  function test_photo_refresh_runs_by_itself_only_with_every_window_closed() {
+    var service = createService(0)
+    service.autoAvatarNotBefore = 0
+    service.appOpen = true
+    verify(!service.maybeAutoRefreshAvatars(), "an open window is never interrupted")
+    service.appOpen = false
+    service.autoRefreshAvatars = false
+    verify(!service.maybeAutoRefreshAvatars(), "the setting turns it off")
+    service.autoRefreshAvatars = true
+    service.offlineMode = true
+    verify(!service.maybeAutoRefreshAvatars(), "offline never reaches WhatsApp")
+    service.offlineMode = false
+    verify(service.maybeAutoRefreshAvatars())
+    verify(service.accountOperations.avatarBusy)
+    verify(!service.maybeAutoRefreshAvatars(), "one batch at a time")
+  }
+
+  function test_photo_refresh_backs_off_once_nothing_more_is_due() {
+    var service = createService(0)
+    var before = Date.now()
+    service.accountOperations.avatarRefreshFinished(3)
+    verify(service.autoAvatarNotBefore - before >= service.autoAvatarQuietGap - 1000)
+    service.accountOperations.avatarRefreshFinished(service.accountOperations.avatarBatch)
+    verify(service.autoAvatarNotBefore - Date.now() <= service.autoAvatarBusyGap + 1000,
+      "a full batch means more is due soon")
+  }
 }

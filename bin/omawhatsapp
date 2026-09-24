@@ -62,6 +62,21 @@ WACLI = absolute_environment_path("WACLI_BIN", HOME / ".local/bin/wacli")
 # --store or WACLI_STORE_DIR points somewhere else.
 ACCOUNT_CONFIG = STATE_HOME / "wacli" / "config.yaml"
 SYSTEMCTL = Path("/usr/bin/systemctl")
+PLUGIN_ID = "io.github.moizibnyousaf.omawhatsapp"
+PLUGIN_DIR = absolute_environment_path(
+    "XDG_CONFIG_HOME", HOME / ".config") / "omarchy" / "plugins" / PLUGIN_ID
+MAX_ABOUT_FILES = 200_000
+USER_UNIT_DIR = absolute_environment_path(
+    "XDG_CONFIG_HOME", HOME / ".config") / "systemd" / "user"
+# The sync units pass --download-media through $OMAW_MEDIA_FLAGS. A drop-in
+# that empties it turns automatic media download off for every account; the
+# drop-in's presence is the setting, so it cannot drift from what runs.
+MEDIA_UNITS = ("wacli-sync.service", "wacli-sync@.service")
+MEDIA_DROPIN = "10-omawhatsapp-media.conf"
+MEDIA_DROPIN_OFF = (
+    "# Written by OmaWhatsApp: received media is downloaded only on request.\n"
+    "[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n"
+)
 WL_PASTE = Path("/usr/bin/wl-paste")
 XDG_OPEN = Path("/usr/bin/xdg-open")
 NOTIFY_SEND = Path("/usr/bin/notify-send")
@@ -584,7 +599,9 @@ class Backend:
         state_dir: Path = STATE_DIR,
         wacli: Path = WACLI,
         account_config: Path | None = None,
+        unit_dir: Path | None = None,
     ) -> None:
+        self.unit_dir = unit_dir or USER_UNIT_DIR
         self.store_dir = store_dir
         self.state_dir = state_dir
         self.wacli = wacli
@@ -1282,6 +1299,7 @@ class Backend:
             "composer_max_lines": value.get("composer_max_lines", 6),
             "time_format": value.get("time_format", "auto"),
             **{name: ui_preference(value, name) for name in UI_PREFERENCES},
+            "auto_download_media": self.auto_download_media(),
         }
 
     def _sent_hint_key(self, jid: str, message_id: str) -> str:
@@ -1431,6 +1449,115 @@ class Backend:
     def _locked(result: subprocess.CompletedProcess[str]) -> bool:
         text = f"{result.stdout}\n{result.stderr}".casefold()
         return "store is locked" in text or "another wacli is running" in text
+
+    @staticmethod
+    def _tree_size(path: Path) -> tuple[int, int, bool]:
+        """Bytes and files under path, without following links, bounded."""
+        total = files = 0
+        if not path.is_dir() or path.is_symlink():
+            return 0, 0, False
+        for root_dir, dirs, names in os.walk(path, followlinks=False):
+            dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root_dir, name))]
+            for name in names:
+                try:
+                    info = os.lstat(os.path.join(root_dir, name))
+                except OSError:
+                    continue
+                if stat.S_ISREG(info.st_mode):
+                    total += info.st_size
+                    files += 1
+                    if files >= MAX_ABOUT_FILES:
+                        return total, files, True
+        return total, files, False
+
+    def about(self, plugin_dir: Path = PLUGIN_DIR) -> dict[str, Any]:
+        """Versions, install mode and local disk use. Local reads only."""
+        app_version = ""
+        try:
+            manifest = json.loads((plugin_dir / "manifest.json").read_text(encoding="utf-8"))
+            app_version = str(manifest.get("version") or "")[:32]
+        except (OSError, ValueError):
+            pass
+        try:
+            install_mode = (plugin_dir / "install-mode").read_text(encoding="utf-8").strip()[:32]
+        except OSError:
+            install_mode = ""
+        wacli_version = ""
+        try:
+            result = run_bounded([str(self.wacli), "--version"], timeout=5,
+                                 stdout_limit=4096, stderr_limit=4096)
+            match = re.search(r"wacli\s+v?([0-9]+(?:\.[0-9]+)+)", result.stdout or result.stderr)
+            wacli_version = match.group(1) if match else ""
+        except (OSError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
+            pass
+        stores = []
+        for account in self.accounts():
+            database = sum(
+                (account.store_dir / name).stat().st_size
+                for name in ("wacli.db", "wacli.db-wal", "wacli.db-shm")
+                if (account.store_dir / name).is_file()
+            )
+            media_bytes, media_files, truncated = self._tree_size(account.store_dir / "media")
+            stores.append({
+                "account": account.name, "label": account.label,
+                "database_bytes": database, "media_bytes": media_bytes,
+                "media_files": media_files, "media_truncated": truncated,
+            })
+        avatar_bytes, avatar_files, _ = self._tree_size(self.state_dir / "avatars")
+        return {
+            "ok": True, "kind": "about",
+            "app_version": app_version,
+            "install_mode": install_mode,
+            "wacli_version": wacli_version,
+            "wacli_minimum_version": WACLI_MINIMUM_VERSION,
+            "wacli_tested_version": WACLI_PARITY_VERSION,
+            "stores": stores,
+            "avatar_cache_bytes": avatar_bytes,
+            "avatar_cache_files": avatar_files,
+        }
+
+    def auto_download_media(self) -> bool:
+        return not any(
+            (self.unit_dir / f"{unit}.d" / MEDIA_DROPIN).exists()
+            for unit in MEDIA_UNITS
+        )
+
+    def media_mode(self, enabled: Any) -> dict[str, Any]:
+        """Turn automatic download of received media on or off for every account."""
+        if not isinstance(enabled, bool):
+            raise OmaWhatsAppError("Automatic media download must be on or off.")
+        for unit in MEDIA_UNITS:
+            folder = self.unit_dir / f"{unit}.d"
+            target = folder / MEDIA_DROPIN
+            if folder.is_symlink() or target.is_symlink():
+                raise OmaWhatsAppError("The sync unit drop-in path is a symlink; refusing to write it.")
+            if enabled:
+                if target.exists():
+                    target.unlink()
+                continue
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            temporary = folder / f".{MEDIA_DROPIN}.{secrets.token_hex(8)}.tmp"
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                                 | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
+            try:
+                os.write(descriptor, MEDIA_DROPIN_OFF.encode("utf-8"))
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.replace(temporary, target)
+        self._systemctl_user(["daemon-reload"])
+        restarted = 0
+        for account in self.accounts():
+            if not account.unit or not self._unit_active(account.unit):
+                continue
+            with self._state_lock(self._lifecycle_lock_name(account)):
+                self._systemctl_user(["restart", account.unit])
+                restarted += 1
+        return {
+            "ok": True, "kind": "media-mode",
+            "auto_download_media": self.auto_download_media(),
+            "restarted": restarted,
+        }
 
     def _sync_active(self, account: Account | None = None) -> bool:
         unit = (account or self.active).unit
@@ -1853,6 +1980,7 @@ class Backend:
             "composer_max_lines": preferences.get("composer_max_lines", 6),
             "time_format": preferences.get("time_format", "auto"),
             **{name: ui_preference(preferences, name) for name in UI_PREFERENCES},
+            "auto_download_media": self.auto_download_media(),
             "fts_enabled": current["fts_enabled"],
             "error": current["error"],
         }
@@ -4101,6 +4229,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("acknowledge")
     commands.add_parser("notify")
     commands.add_parser("notify-mode")
+    commands.add_parser("media-mode")
+    commands.add_parser("about")
     commands.add_parser("sync-mode")
     commands.add_parser("settings")
     commands.add_parser("avatars")
@@ -4242,6 +4372,10 @@ def main() -> int:
         if args.command == "notify-mode":
             return emit(backend.set_notifications(payload.get("enabled"),
                                                   payload.get("preview")))
+        if args.command == "about":
+            return emit(backend.about())
+        if args.command == "media-mode":
+            return emit(backend.media_mode(payload.get("auto_download_media")))
         if args.command == "sync-mode":
             if not isinstance(payload.get("online"), bool):
                 raise OmaWhatsAppError("Online mode must be true or false.")

@@ -2,6 +2,10 @@
 
 **WhatsApp in Quickshell—not Chromium.**
 
+> Omarchy-WhatsApp-v2 is a fork of
+> [MoizIbnYousaf/Omarchy-Whatsapp](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp)
+> that follows current wacli releases and reworks the interface.
+
 OmaWhatsApp is a fast, local-first WhatsApp client made for Omarchy. It renders
 the private mirror maintained by [`wacli`](https://github.com/openclaw/wacli),
 opens without waiting on the network, and follows the active Omarchy theme. No
@@ -166,7 +170,7 @@ Paste this into your agent, then let it handle the rest:
 Install OmaWhatsApp for me.
 
 OmaWhatsApp is a native, local-first WhatsApp client for Omarchy. Read
-https://github.com/MoizIbnYousaf/Omarchy-Whatsapp and install it for this
+https://github.com/atoslins/Omarchy-WhatsApp-v2 and install it for this
 machine using the repository's installer. If you cannot run local commands in
 this chat, tell me to use Codex, Claude Code, OpenClaw, or another agent that
 can.
@@ -192,8 +196,8 @@ Requirements:
 - Optional: `libnotify` (`notify-send`) for desktop popups
 
 ```bash
-git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
-  cd Omarchy-Whatsapp && ./scripts/install
+git clone https://github.com/atoslins/Omarchy-WhatsApp-v2.git && \
+  cd Omarchy-WhatsApp-v2 && ./scripts/install
 ```
 
 ### Upgrading
@@ -346,5 +350,6 @@ OmaWhatsApp is independent and is not affiliated with WhatsApp or Meta.
 
 ## License
 
-MIT © 2026 MoizIbnYousaf. See the focused
+MIT © 2026 MoizIbnYousaf (upstream OmaWhatsApp) and Atos Lins (this fork,
+Omarchy-WhatsApp-v2). See the focused
 [third-party notices](THIRD_PARTY_NOTICES.md).

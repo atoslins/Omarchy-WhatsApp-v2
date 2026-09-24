@@ -32,6 +32,9 @@ Item {
   property bool showAvatars: true
   property bool autoRefreshAvatars: true
   property string railDensity: "comfortable"
+  property bool autoDownloadMedia: true
+  property var about: ({})
+  property bool aboutLoading: false
   property var pendingReplyReadRef: ({ account: "", jid: "", key: "" })
   // A chat the user explicitly marked unread stays unread while it is open;
   // choosing it again reads it.
@@ -104,6 +107,31 @@ Item {
     helper: root.helper
     accounts: root.accounts
     onRefreshRequested: { root.refreshStatus(); root.refreshChats() }
+    onAvatarRefreshFinished: function(checked) {
+      root.autoAvatarNotBefore = Date.now()
+        + (checked >= avatarBatch ? root.autoAvatarBusyGap : root.autoAvatarQuietGap)
+    }
+  }
+
+  // Automatic chat-photo refresh. wacli needs the store lock for photo
+  // lookups, so each batch pauses sync for a few seconds: run only while no
+  // window is open, and back off for a day once nothing more is due.
+  readonly property double autoAvatarBusyGap: 2 * 60 * 1000
+  readonly property double autoAvatarQuietGap: 24 * 60 * 60 * 1000
+  property double autoAvatarNotBefore: Date.now() + 10 * 60 * 1000
+  function maybeAutoRefreshAvatars() {
+    if (!root.autoRefreshAvatars || root.windowOpen || root.offlineMode) return false
+    if (!root.ready || !root.statusReady || accountOperations.busy) return false
+    if (Date.now() < root.autoAvatarNotBefore) return false
+    root.autoAvatarNotBefore = Date.now() + root.autoAvatarBusyGap
+    return accountOperations.refreshAvatars()
+  }
+  Timer {
+    id: autoAvatarTimer
+    interval: 60 * 1000
+    repeat: true
+    running: root.autoRefreshAvatars
+    onTriggered: root.maybeAutoRefreshAvatars()
   }
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
   readonly property string storeDirectory: AccountModel.defaultStoreDirectory(
@@ -547,6 +575,24 @@ Item {
     controlProcess.running = true
     return true
   }
+  function setAutoDownloadMedia(enabled) {
+    if (controlProcess.running || writing) return false
+    controlWriting = true
+    controlProcess.kind = "media-mode"
+    controlProcess.account = ""
+    controlProcess.payload = JSON.stringify({ auto_download_media: enabled === true })
+    controlProcess.command = [helper, "media-mode"]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
+  function refreshAbout() {
+    if (aboutProcess.running) return false
+    aboutLoading = true
+    aboutProcess.running = true
+    return true
+  }
+
   function setOnline(online) {
     if (controlProcess.running || writing) return false
     controlWriting = true
@@ -561,6 +607,8 @@ Item {
     return true
   }
   function applyInterfacePreferences(payload) {
+    if (payload.auto_download_media !== undefined)
+      root.autoDownloadMedia = payload.auto_download_media !== false
     root.readOnReply = payload.read_on_reply !== false
     root.enterSends = payload.enter_sends !== false
     root.showAvatars = payload.show_avatars !== false
@@ -941,6 +989,8 @@ Item {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
       }
+      if (finishedKind === "media-mode")
+        root.autoDownloadMedia = payload.auto_download_media !== false
       if (finishedKind === "notify-mode" && payload.notifications) {
         root.notificationsEnabled = payload.notifications.enabled === true
         root.notificationsPreview = payload.notifications.preview !== false
@@ -949,6 +999,21 @@ Item {
         root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
+    }
+  }
+
+  Process {
+    id: aboutProcess
+    command: [root.helper, "about"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: aboutOutput }
+    stderr: StdioCollector { id: aboutError }
+    onStarted: { write("{}\n"); stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.aboutLoading = false
+      stdinEnabled = true
+      var payload = root.parseJson(aboutOutput.text)
+      if (exitCode === 0 && payload && payload.ok === true) root.about = payload
     }
   }
 

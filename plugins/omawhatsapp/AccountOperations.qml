@@ -9,6 +9,10 @@ Item {
   required property string helper
   required property var accounts
   property bool avatarBusy: false
+  // Chats checked by the last refresh; a full batch means more may be due.
+  property int lastChecked: -1
+  readonly property int avatarBatch: 64
+  signal avatarRefreshFinished(int checked)
   property string statusMessage: ""
   property string linkPhase: "idle"
   property string linkTarget: ""
@@ -46,7 +50,7 @@ Item {
     avatarBusy = true
     statusMessage = "Refreshing recent chat photos…"
     avatarProcess.payload = JSON.stringify({
-      authorization: "remote-read", limit: 12
+      authorization: "remote-read", limit: root.avatarBatch
     })
     avatarProcess.stdinEnabled = true
     avatarProcess.running = true
@@ -116,6 +120,8 @@ Item {
       return
     }
     var checked = Math.max(0, Number(response.checked || 0))
+    lastChecked = checked
+    avatarRefreshFinished(checked)
     var failed = Math.max(0, Number(response.failed || 0))
     var refreshed = Math.max(0, Number(response.refreshed || 0))
     if (checked > 0 && failed >= checked) {

@@ -99,6 +99,8 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  readonly property bool showAvatars: root.demoMode || !root.service || root.service.showAvatars !== false
+  readonly property bool compactRail: !root.demoMode && !!root.service && root.service.railDensity === "compact"
   readonly property bool enterSends: root.demoMode || !root.service || root.service.enterSends !== false
   readonly property string composerHint: root.enterSends
     ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
@@ -274,6 +276,9 @@ Item {
     narrowConversation = payload.conversation === true
     narrowSearchOpen = false
     settingsOpen = demoMode && payload.settings === true
+    // Demo captures can open a given section: {"demo":true,"settings":true,"section":"media"}.
+    if (settingsOpen && typeof payload.section === "string")
+      Qt.callLater(function() { settingsView.openSection(payload.section) })
     replyTarget = null
     editTarget = null
     keyboardNavigation.enterComposer()
@@ -1452,531 +1457,24 @@ Item {
 
       // ---------------------------------------------------------- settings
 
-      Item {
+      SettingsView {
+        id: settingsView
         z: 400
         visible: root.settingsOpen
         anchors.fill: parent
-
-        Rectangle {
-          anchors.fill: parent
-          color: Qt.rgba(0, 0, 0, 0.58)
-          MouseArea {
-            anchors.fill: parent
-            onClicked: root.settingsOpen = false
-          }
-        }
-
-        Rectangle {
-          id: settingsCard
-          anchors.centerIn: parent
-          width: Math.min(parent.width - Style.space(28), Style.space(560))
-          height: Math.min(parent.height - Style.space(28), settingsContent.implicitHeight + Style.space(32))
-          radius: Style.cornerRadius
-          color: root.background
-          border.width: 1
-          border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.52)
-
-          MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            onClicked: function(mouse) { mouse.accepted = true }
-          }
-
-          Flickable {
-            id: settingsScroller
-            anchors.fill: parent
-            anchors.margins: Style.space(16)
-            contentWidth: width
-            contentHeight: settingsContent.implicitHeight
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-            Column {
-              id: settingsContent
-              width: settingsScroller.width
-              spacing: Style.space(10)
-
-            Item {
-              width: parent.width
-              height: Style.space(42)
-              Column {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(1)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "OmaWhatsApp settings"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.heading
-                  font.weight: Font.DemiBold
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Private, local, and explicit by default"
-                  color: root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              Rectangle {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(30)
-                height: width
-                radius: Style.cornerRadius
-                color: closeSettingsHover.hovered
-                  ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.centerIn: parent
-                  text: "×"
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title
-                }
-                HoverHandler { id: closeSettingsHover }
-                PanelToolTip { visible: closeSettingsHover.hovered; text: "Close settings · Esc" }
-                TapHandler { onTapped: root.settingsOpen = false }
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: privateReadingColumn.implicitHeight + Style.space(24)
-              radius: Style.cornerRadius
-              color: root.service && root.service.sendReadReceipts
-                ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.09)
-                : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
-              border.width: 1
-              border.color: root.service && root.service.sendReadReceipts
-                ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.45)
-                : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.45)
-              Column {
-                id: privateReadingColumn
-                anchors.left: parent.left
-                anchors.right: readReceiptSwitch.left
-                anchors.leftMargin: Style.space(12)
-                anchors.rightMargin: Style.space(12)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(3)
-                Text {
-                  textFormat: Text.PlainText
-                  text: root.service && root.service.sendReadReceipts
-                    ? "Read receipts enabled" : "Private reading enabled"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  font.weight: Font.DemiBold
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  width: parent.width
-                  wrapMode: Text.Wrap
-                  text: root.service && root.service.sendReadReceipts
-                    ? "Opening a conversation may tell the other side it was read."
-                    : "Read any locally synced message without telling the other side. Local badges still clear."
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              ToggleSwitch {
-                id: readReceiptSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: root.service ? root.service.sendReadReceipts : false
-                busy: root.service ? root.service.settingsWriting : false
-                foreground: root.foreground
-                accent: root.accent
-                onToggled: if (root.service)
-                  root.service.setPreference("send_read_receipts", !checked)
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: Style.space(62)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.right: unreadSwitch.left
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Unread count in the bar"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: "A local badge only—no desktop message popups"
-                  color: root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              ToggleSwitch {
-                id: unreadSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: root.service ? root.service.showUnreadCount : true
-                busy: root.service ? root.service.settingsWriting : false
-                foreground: root.foreground
-                accent: root.accent
-                onToggled: if (root.service)
-                  root.service.setPreference("show_unread_count", !checked)
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: Style.space(62)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.right: notifySwitch.left
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Desktop notifications"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: !root.notifyAvailable ? "Needs notify-send from libnotify"
-                    : (root.notifyOn ? "Muted and archived chats stay silent" : "Off; the bar badge still counts new messages")
-                  color: root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              ToggleSwitch {
-                id: notifySwitch
-                objectName: "notifySwitch"
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: root.notifyOn
-                enabled: !root.demoMode && (root.notifyAvailable || root.notifyOn)
-                busy: root.service ? root.service.controlWriting : false
-                foreground: root.foreground
-                accent: root.accent
-                onToggled: if (!root.demoMode && root.service)
-                  root.service.setNotifications(!checked, null)
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: Style.space(62)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.right: notifyPreviewSwitch.left
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Message text in notifications"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: root.notifyPreviewOn ? "Sender and message preview" : "Chat names only"
-                  color: root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              ToggleSwitch {
-                id: notifyPreviewSwitch
-                objectName: "notifyPreviewSwitch"
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: root.notifyPreviewOn
-                enabled: !root.demoMode && root.notifyOn
-                busy: root.service ? root.service.controlWriting : false
-                foreground: root.foreground
-                accent: root.accent
-                onToggled: if (!root.demoMode && root.service)
-                  root.service.setNotifications(null, !checked)
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: Style.space(62)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.right: onlineSwitch.left
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Background sync"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  text: root.offlineForSelectedAccount
-                    ? "Paused; your local archive remains readable"
-                    : "Keep the encrypted local mirror warm"
-                  color: root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-              ToggleSwitch {
-                id: onlineSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: root.demoMode || (root.selectedStatusReady
-                  && !root.offlineForSelectedAccount)
-                enabled: root.demoMode || root.selectedStatusReady
-                busy: root.service ? root.service.controlWriting : false
-                foreground: root.foreground
-                accent: root.accent
-                onToggled: if (!root.demoMode && root.service)
-                  root.service.setOnline(!checked)
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: dropdownSizeColumn.implicitHeight + Style.space(22)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                id: dropdownSizeColumn
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.margins: Style.space(11)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(8)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Recent chats in the bar dropdown"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Row {
-                  width: parent.width
-                  spacing: Style.space(7)
-                  Repeater {
-                    model: [5, 7, 9]
-                    delegate: Rectangle {
-                      required property int modelData
-                      width: (dropdownSizeColumn.width - Style.space(14)) / 3
-                      height: Style.space(32)
-                      radius: Style.cornerRadius
-                      color: root.service && root.service.dropdownRows === modelData
-                        ? Style.selectedFillFor(root.foreground, root.accent)
-                        : Style.normalFillFor(root.foreground, root.accent)
-                      border.width: 1
-                      border.color: root.service && root.service.dropdownRows === modelData
-                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
-                      Text {
-                        textFormat: Text.PlainText
-                        anchors.centerIn: parent
-                        text: String(modelData)
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.DemiBold
-                      }
-                      TapHandler {
-                        enabled: root.service && !root.service.settingsWriting
-                        onTapped: root.service.setPreference("dropdown_rows", modelData)
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: composerLinesColumn.implicitHeight + Style.space(22)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                id: composerLinesColumn
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.margins: Style.space(11)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(8)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Chat input expansion limit before scrolling"
-                  width: parent.width
-                  wrapMode: Text.Wrap
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Row {
-                  width: parent.width
-                  spacing: Style.space(7)
-                  Repeater {
-                    model: [4, 6, 8, 10]
-                    delegate: Rectangle {
-                      required property int modelData
-                      objectName: "composerLineLimit" + modelData
-                      width: (composerLinesColumn.width - Style.space(21)) / 4
-                      height: Style.space(32)
-                      radius: Style.cornerRadius
-                      color: ((root.service ? root.service.composerMaxLines : root.composerMaxLines) === modelData)
-                        ? Style.selectedFillFor(root.foreground, root.accent)
-                        : Style.normalFillFor(root.foreground, root.accent)
-                      border.width: 1
-                      border.color: ((root.service ? root.service.composerMaxLines : root.composerMaxLines) === modelData)
-                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
-                      Text {
-                        textFormat: Text.PlainText
-                        anchors.centerIn: parent
-                        text: String(modelData) + " lines"
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.DemiBold
-                      }
-                      TapHandler {
-                        enabled: !root.service || !root.service.settingsWriting
-                        onTapped: {
-                          if (root.service)
-                            root.service.setPreference("composer_max_lines", modelData)
-                          else
-                            root.composerMaxLines = modelData
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            Rectangle {
-              width: parent.width
-              height: timeFormatColumn.implicitHeight + Style.space(22)
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              Column {
-                id: timeFormatColumn
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.margins: Style.space(11)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(8)
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Time format"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  textFormat: Text.PlainText
-                  width: parent.width
-                  wrapMode: Text.Wrap
-                  text: "System follows your locale. Applies to all chats and media."
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-                Row {
-                  width: parent.width
-                  spacing: Style.space(7)
-                  Repeater {
-                    model: [
-                      { value: "auto", label: "System" },
-                      { value: "12h", label: "12-hour" },
-                      { value: "24h", label: "24-hour" }
-                    ]
-                    delegate: Rectangle {
-                      required property var modelData
-                      objectName: "timeFormatChoice" + modelData.value
-                      width: (timeFormatColumn.width - Style.space(14)) / 3
-                      height: Style.space(32)
-                      radius: Style.cornerRadius
-                      color: root.timeFormat === modelData.value
-                        ? Style.selectedFillFor(root.foreground, root.accent)
-                        : Style.normalFillFor(root.foreground, root.accent)
-                      border.width: 1
-                      border.color: root.timeFormat === modelData.value
-                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
-                      Text {
-                        textFormat: Text.PlainText
-                        anchors.centerIn: parent
-                        text: modelData.label
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.DemiBold
-                      }
-                      TapHandler {
-                        enabled: root.demoMode || (root.service && !root.service.settingsWriting)
-                        onTapped: {
-                          if (root.demoMode) root.demoTimeFormat = modelData.value
-                          else if (root.service) root.service.setPreference("time_format", modelData.value)
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-              MaintenanceSettings {
-                width: parent.width
-                service: root.service
-                updates: appUpdates
-                demoMode: root.demoMode
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-              }
-              Text {
-                textFormat: Text.PlainText
-                width: parent.width
-                wrapMode: Text.Wrap
-                text: "OmaWhatsApp stores these choices in a mode-0600 local preferences file. Private reading is the default and a read receipt is never sent unless you opt in or explicitly choose “Mark read · send receipt”."
-                color: root.dimmer
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-        }
+        app: root
+        service: root.service
+        updates: appUpdates
+        demoMode: root.demoMode
+        narrow: root.narrow
+        foreground: root.foreground
+        background: root.background
+        accent: root.accent
+        dim: root.dim
+        dimmer: root.dimmer
+        urgent: root.urgent
+        fontFamily: root.fontFamily
+        onCloseRequested: root.settingsOpen = false
       }
 
       // ------------------------------------------------------- chat sidebar
@@ -2172,7 +1670,7 @@ Item {
               required property var modelData
               required property int index
               width: chatList.width
-              height: Style.space(66)
+              height: root.compactRail ? Style.space(50) : Style.space(66)
               radius: Style.cornerRadius
               readonly property bool selected: String(modelData.account || "") === root.selectedAccount
                 && (root.demoMode
@@ -2189,11 +1687,12 @@ Item {
               HoverHandler { id: chatRowHover }
 
               ChatAvatar {
+                showPhoto: root.showAvatars
                 id: chatAvatar
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(38)
+                width: root.compactRail ? Style.space(30) : Style.space(38)
                 height: width
                 chat: modelData
                 selected: chatRow.selected
@@ -2408,6 +1907,7 @@ Item {
             }
 
             ChatAvatar {
+              showPhoto: root.showAvatars
               objectName: "conversationAvatar"
               width: Style.space(34)
               height: width

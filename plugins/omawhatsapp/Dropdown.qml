@@ -228,6 +228,7 @@ Panel {
   }
 
   readonly property bool enterSends: demoMode || !service || service.enterSends !== false
+  readonly property bool showAvatars: demoMode || !service || service.showAvatars !== false
   readonly property string composerHint: enterSends
     ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
 
@@ -867,6 +868,7 @@ Panel {
                     ? root.selected : "transparent"
                 }
                 ChatAvatar {
+                  showPhoto: root.showAvatars
                   id: avatar
                   anchors.left: parent.left
                   anchors.leftMargin: Style.space(9)
@@ -1043,6 +1045,7 @@ Panel {
               TapHandler { onTapped: root.backToChats() }
             }
             ChatAvatar {
+              showPhoto: root.showAvatars
               id: conversationAvatar
               anchors.left: backButton.right
               anchors.leftMargin: Style.space(7)

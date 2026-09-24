@@ -309,6 +309,7 @@ TestCase {
     var service = harness.service
     app.opened = true
     app.settingsOpen = true
+    findChild(app, "settingsView").openSection("chats")
     wait(0)
     var option = findChild(app, "composerLineLimit8")
     verify(option !== null)
@@ -334,6 +335,7 @@ TestCase {
     var service = harness.service
     app.opened = true
     app.settingsOpen = true
+    findChild(app, "settingsView").openSection("chats")
     wait(0)
     var option = findChild(app, "timeFormatChoice24h")
     verify(option !== null)
@@ -354,6 +356,10 @@ TestCase {
 
     app.demoMode = true
     service.lastPreference = null
+    // The settings rows are rebuilt from state, so find the option again.
+    wait(0)
+    option = findChild(app, "timeFormatChoice24h")
+    verify(option !== null)
     mouseClick(option, option.width / 2, option.height / 2)
     compare(app.timeFormat, "24h")
     compare(service.lastPreference, null)

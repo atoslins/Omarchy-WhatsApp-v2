@@ -11,11 +11,14 @@ Column {
   required property color accent
   required property string fontFamily
   property bool demoMode: false
+  // Settings → Media owns the chat-photo action; Updates embeds the rest.
+  property bool showChatPhotos: true
   spacing: Style.space(8)
   readonly property var operations: service ? service.accountOperations : null
 
   Ui.Button {
     objectName: "refreshChatPhotos"
+    visible: root.showChatPhotos
     width: parent.width
     foreground: root.foreground
     accent: root.accent
@@ -29,6 +32,7 @@ Column {
   }
   Text {
     textFormat: Text.PlainText
+    visible: root.showChatPhotos
     width: parent.width
     wrapMode: Text.Wrap
     text: root.operations && root.operations.statusMessage
