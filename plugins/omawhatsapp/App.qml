@@ -912,11 +912,45 @@ Item {
     return service.deleteMessage(origin, target, forMe, "app")
   }
 
-  function requestRemoveLocalChat() {
-    var chat = root.selectedChat
+  function requestRemoveLocalChat(target) {
+    var chat = target || root.selectedChat
     if (!chat || !chat.jid) return
-    removeLocalTargetRef = currentChatRef()
+    removeLocalTargetRef = target ? AccountModel.refOf(target) : currentChatRef()
     removeLocalConfirm.open()
+  }
+
+  // Right-click on a rail row: the same chat actions as the conversation menu,
+  // aimed at that exact row, plus read or unread.
+  property var contextChat: null
+  readonly property var contextChatActions: {
+    var chat = root.contextChat
+    if (!chat) return []
+    return [
+      { label: root.chatIsUnread(chat) ? "Mark as read" : "Mark as unread",
+        action: root.chatIsUnread(chat) ? "read" : "unread", destructive: false },
+      { label: chat.pinned ? "Unpin chat" : "Pin chat",
+        action: chat.pinned ? "unpin" : "pin", destructive: false },
+      { label: chat.muted ? "Unmute notifications" : "Mute notifications",
+        action: chat.muted ? "unmute" : "mute", destructive: false },
+      { label: chat.archived ? "Unarchive chat" : "Archive chat",
+        action: chat.archived ? "unarchive" : "archive", destructive: false },
+      { label: "Remove local chat…", action: "remove-local", destructive: true }
+    ]
+  }
+  function openChatContextMenu(chat, x, y) {
+    root.contextChat = chat
+    chatContextMenu.x = x
+    chatContextMenu.y = y
+    chatContextMenu.open()
+  }
+  function runChatContextAction(action) {
+    var chat = root.contextChat
+    chatContextMenu.close()
+    if (!chat) return false
+    if (action === "read" || action === "unread") return root.toggleChatRead(chat, action === "read")
+    if (action === "remove-local") { root.requestRemoveLocalChat(chat); return true }
+    if (root.demoMode || !root.service) return false
+    return root.service.chatAction(AccountModel.refOf(chat), action, "app")
   }
 
   function dismissRemoveLocalChat() {
@@ -1964,6 +1998,50 @@ Item {
         }
         Behavior on opacity { NumberAnimation { duration: 110 } }
 
+        Popup {
+          id: chatContextMenu
+          objectName: "chatContextMenu"
+          width: Style.space(230)
+          height: chatContextColumn.implicitHeight + Style.space(10)
+          padding: Style.space(5)
+          closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+          onClosed: root.contextChat = null
+          background: Rectangle {
+            radius: Style.cornerRadius
+            color: root.background
+            border.width: 1
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+          }
+          contentItem: Column {
+            id: chatContextColumn
+            spacing: Style.space(2)
+            Repeater {
+              model: root.contextChatActions
+              delegate: Rectangle {
+                required property var modelData
+                objectName: "chatContextAction-" + modelData.action
+                width: parent.width
+                height: Style.space(34)
+                radius: Style.cornerRadius
+                color: chatContextHover.hovered
+                  ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: modelData.label
+                  color: modelData.destructive ? root.urgent : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                HoverHandler { id: chatContextHover }
+                TapHandler { onTapped: root.runChatContextAction(modelData.action) }
+              }
+            }
+          }
+        }
+
         Rectangle {
           anchors.top: parent.top
           anchors.bottom: parent.bottom
@@ -2209,7 +2287,13 @@ Item {
                 id: chatMouse
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: function(mouse) {
+                  if (mouse.button === Qt.RightButton) {
+                    var point = chatRow.mapToItem(sidebar, mouse.x, mouse.y)
+                    root.openChatContextMenu(modelData, point.x, point.y)
+                    return
+                  }
                   root.chatCursorIndex = index
                   root.selectChat(modelData)
                 }

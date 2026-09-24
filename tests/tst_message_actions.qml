@@ -90,6 +90,18 @@ TestCase {
     verify(actions.x + actions.width <= bubble.width)
   }
 
+  function test_right_click_opens_the_actions_at_the_pointer() {
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    var surface = findChild(bubble, "messageBubbleSurface")
+    var menu = findChild(bubble, "messageActionMenu")
+    verify(menu !== null)
+    verify(!menu.opened)
+    mouseClick(surface, 30, 12, Qt.RightButton)
+    tryVerify(function() { return menu.opened })
+    verify(bubble.menuAtPointer)
+    compare(Math.round(menu.y), 12)
+  }
+
   function test_every_action_has_a_recognisable_icon_and_a_tooltip() {
     var bubble = createTemporaryObject(bubbleComponent, testCase)
     var expected = [

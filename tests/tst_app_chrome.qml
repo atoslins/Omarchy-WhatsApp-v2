@@ -256,6 +256,34 @@ TestCase {
     verify(harness.service.lastChatRead !== null)
   }
 
+  function test_right_click_on_a_chat_opens_its_actions() {
+    var harness = createHarness()
+    var app = harness.app
+    var row = findChild(app, "chatReadToggle").parent.parent
+    var menu = findChild(app, "chatContextMenu")
+    verify(menu !== null)
+    mouseMove(row, 40, 20)
+    wait(50)
+    mouseClick(row, 40, 20, Qt.RightButton)
+    tryVerify(function() { return menu.opened })
+    compare(app.contextChat.jid, workChat.jid)
+    compare(app.contextChatActions.map(function(item) { return item.action }),
+      ["unread", "pin", "mute", "archive", "remove-local"])
+    verify(app.runChatContextAction("pin"))
+    compare(harness.service.lastChatAction.action, "pin")
+    compare(harness.service.lastChatAction.ref.jid, workChat.jid)
+    verify(!menu.opened)
+  }
+
+  function test_chat_menu_read_toggle_targets_that_row() {
+    var harness = createHarness()
+    var app = harness.app
+    app.openChatContextMenu(otherChat, 10, 10)
+    verify(app.runChatContextAction("unread"))
+    compare(harness.service.lastChatRead.ref.jid, otherChat.jid)
+    compare(harness.service.lastChatRead.read, false)
+  }
+
   function test_desktop_notifications_live_in_settings() {
     var harness = createHarness({ notificationsEnabled: true, notificationsPreview: true })
     var app = harness.app

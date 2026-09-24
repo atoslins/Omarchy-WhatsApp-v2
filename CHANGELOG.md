@@ -32,6 +32,9 @@
   menu no longer offers "Mark read · send receipt", which was never a receipt.
 - Mark a chat read or unread from the rail row on hover, where the button takes
   the place of the unread count.
+- Right-click a chat in the list for read or unread, pin, mute, archive and
+  remove, and right-click a message for its actions at the pointer; the
+  message menu gains React.
 - Redo the message composer in the full app and the bar dropdown: attach,
   field and send share one height and one bottom edge, so one line reads as
   centred and a longer draft grows upward; the placeholder sits on the line

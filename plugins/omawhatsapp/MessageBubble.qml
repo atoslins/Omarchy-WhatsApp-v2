@@ -82,6 +82,17 @@ Item {
   // the bubble when there is room, and the pointer must be able to reach them.
   HoverHandler { id: rowHover }
 
+  // Right-click opens the same actions at the pointer; the hover "More"
+  // button opens them under the action strip.
+  property bool menuAtPointer: false
+  property point menuPoint: Qt.point(0, 0)
+  function openContextMenu(x, y) {
+    menuAtPointer = true
+    menuPoint = Qt.point(x, y)
+    root.selectedRequested()
+    actionMenu.open()
+  }
+
   TextMetrics {
     id: messageMetrics
     text: root.bodyText
@@ -362,7 +373,7 @@ Item {
               root.selectedRequested()
               if (modelData.action === "reply") root.replyRequested()
               else if (modelData.action === "react") reactionPicker.open()
-              else actionMenu.open()
+              else { root.menuAtPointer = false; actionMenu.open() }
             }
           }
         }
@@ -373,6 +384,13 @@ Item {
       anchors.fill: parent
       z: -1
       onClicked: root.selectedRequested()
+    }
+
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      onTapped: function(eventPoint) {
+        root.openContextMenu(eventPoint.position.x, eventPoint.position.y)
+      }
     }
 
     Popup {
@@ -422,8 +440,13 @@ Item {
 
     Popup {
       id: actionMenu
-      x: Math.max(0, bubble.width - width)
-      y: actionSurface.y + actionSurface.height + Style.space(3)
+      objectName: "messageActionMenu"
+      x: root.menuAtPointer
+        ? Math.max(-bubble.x, Math.min(root.width - bubble.x - width, root.menuPoint.x))
+        : Math.max(0, bubble.width - width)
+      y: root.menuAtPointer
+        ? root.menuPoint.y
+        : actionSurface.y + actionSurface.height + Style.space(3)
       width: Style.space(178)
       height: menuColumn.implicitHeight + Style.space(10)
       padding: Style.space(5)
@@ -440,6 +463,7 @@ Item {
         Repeater {
           model: [
             { label: "Reply", action: "reply", show: true },
+            { label: "React", action: "react", show: true },
             { label: "Copy text", action: "copy", show: root.bodyText !== "" },
             { label: "Edit", action: "edit", show: root.message.from_me && !root.message.media_type },
             { label: "Forward", action: "forward", show: true },
@@ -469,6 +493,7 @@ Item {
               onTapped: {
                 actionMenu.close()
                 if (modelData.action === "reply") root.replyRequested()
+                else if (modelData.action === "react") reactionPicker.open()
                 else if (modelData.action === "copy") root.copyRequested(root.bodyText)
                 else if (modelData.action === "edit") root.editRequested()
                 else if (modelData.action === "forward") root.forwardRequested()
