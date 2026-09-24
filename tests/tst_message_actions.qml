@@ -84,22 +84,37 @@ TestCase {
     verify(actions.x + actions.width <= 0, "actions must sit before the bubble")
   }
 
-  function test_narrow_layout_keeps_actions_inside_the_bubble() {
+  readonly property string longText: "A synthetic message long enough to fill the whole narrow row from one edge to the other, twice over"
+
+  function test_a_narrow_row_with_room_puts_the_actions_beside_the_bubble() {
+    // The dropdown is narrow; with the actions inside, they covered the text.
     var bubble = createTemporaryObject(bubbleComponent, testCase, { narrow: true, width: 340 })
+    var actions = findChild(bubble, "messageActions")
+    var surface = findChild(bubble, "messageBubbleSurface")
+    hoverRow(bubble)
+    verify(actions.outside)
+    verify(actions.x >= surface.width, "beside, not over, the text")
+  }
+
+  function test_a_full_width_bubble_gets_the_actions_on_its_top_edge() {
+    var bubble = createTemporaryObject(bubbleComponent, testCase, { narrow: true, width: 340 })
+    bubble.message = Object.assign({}, bubble.message, { text: longText })
     var actions = findChild(bubble, "messageActions")
     hoverRow(bubble)
     verify(!actions.outside)
+    verify(actions.y < 0, "straddling the edge covers only the top padding")
     verify(actions.x >= 0)
   }
 
   function test_actions_move_outside_when_the_layout_widens() {
     var bubble = createTemporaryObject(bubbleComponent, testCase, { narrow: true, width: 340 })
+    bubble.message = Object.assign({}, bubble.message, { text: longText })
     var actions = findChild(bubble, "messageActions")
     var surface = findChild(bubble, "messageBubbleSurface")
     hoverRow(bubble)
     verify(!actions.outside)
     bubble.narrow = false
-    bubble.width = 900
+    bubble.width = 1600
     hoverRow(bubble)
     verify(actions.outside)
     verify(actions.x >= surface.width, "a widened row must not keep the inside anchors")

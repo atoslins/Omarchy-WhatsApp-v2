@@ -84,9 +84,11 @@
 - Pin, mute and archive show in the chat list at once; wacli cannot delegate
   them, so the write itself still pauses sync for a few seconds. The pin icon
   is larger and in the accent colour.
-- The hover actions of a message have a solid background. The theme's fill is
-  about 4% opaque, so inside the bubble (the dropdown's layout) the message
-  text showed through and the buttons looked buried under it. The
+- The hover actions of a message have a solid background and no longer sit
+  inside the bubble: the theme's fill is about 4% opaque, so in the dropdown
+  the text showed through and the buttons looked buried under it. They now go
+  beside the bubble whenever the row has room, and straddle the top edge of a
+  bubble as wide as the row. The
   jump-to-latest button, which floats over the conversation, gets a solid
   backing for the same reason, and a row showing its actions draws above its
   neighbours.

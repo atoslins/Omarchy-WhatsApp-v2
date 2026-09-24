@@ -443,18 +443,18 @@ Item {
       id: actionSurface
       objectName: "messageActions"
       z: 5
-      // Beside the bubble (incoming: right, outgoing: left) when the row has
-      // room, so the actions never cover the text; inside its top corner in
-      // the narrow single-pane layout.
-      readonly property bool outside: !root.narrow
-        && root.width - bubble.width >= width + Style.space(16)
+      // Beside the bubble (incoming: right, outgoing: left) whenever the row
+      // has room, in the dropdown too, so the actions never cover the text.
+      // A bubble as wide as the row gets them straddling its top edge, where
+      // they cover only the padding.
+      readonly property bool outside: root.width - bubble.width >= width + Style.space(16)
       visible: !root.pending && (rowHover.hovered || reactionPicker.opened || actionMenu.opened)
       // Positioned explicitly: conditional anchors keep the previous edge when
       // `outside` flips, which pinned both sides to the bubble's right edge.
       x: outside
         ? (root.message.from_me ? -width - Style.space(6) : parent.width + Style.space(6))
         : (root.message.from_me ? Style.space(5) : parent.width - width - Style.space(5))
-      y: outside ? 0 : Style.space(5)
+      y: outside ? 0 : -Math.round(height / 2)
       width: actionRow.implicitWidth + Style.space(6)
       height: actionRow.implicitHeight + Style.space(4)
       radius: height / 2
