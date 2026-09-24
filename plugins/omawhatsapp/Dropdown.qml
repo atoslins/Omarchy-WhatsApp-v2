@@ -94,11 +94,9 @@ Panel {
   readonly property var filteredChats: {
     var needle = String(searchText || "").trim().toLowerCase()
     var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
-    var source = root.unreadOnly
-      ? root.sourceChats.filter(function(chat) { return Number(chat.unread || 0) > 0 })
-      : root.sourceChats
-    return AccountModel.filterChats(source, scope, needle,
-      Math.max(1, Number(maxRows || 7)))
+    // Archived chats stay out of the recent list, as on the phone.
+    return AccountModel.filterChats(root.sourceChats, scope, needle,
+      Math.max(1, Number(maxRows || 7)), root.unreadOnly ? "unread" : "all")
   }
   Binding {
     target: root.service

@@ -85,6 +85,20 @@ Item {
   property string demoSelectedAccount: "work"
   property string demoVoiceState: "idle"
   property string accountScope: ""
+  // Rail view: all, unread, groups or archived (archived chats live apart).
+  property string chatView: "all"
+  readonly property var chatViews: {
+    var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
+    var views = [
+      { id: "all", label: "All", count: 0 },
+      { id: "unread", label: "Unread", count: AccountModel.viewCount(root.sourceChats, scope, "unread") },
+      { id: "groups", label: "Groups", count: 0 }
+    ]
+    var archived = AccountModel.viewCount(root.sourceChats, scope, "archived")
+    if (archived > 0 || root.chatView === "archived")
+      views.push({ id: "archived", label: "Archived", count: archived })
+    return views
+  }
   property var demoChats: [
     { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
     { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
@@ -176,7 +190,7 @@ Item {
   readonly property var visibleChats: {
     var needle = chatSearchField ? String(chatSearchField.text || "").trim().toLowerCase() : ""
     var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
-    return AccountModel.filterChats(root.sourceChats, scope, needle, 0)
+    return AccountModel.filterChats(root.sourceChats, scope, needle, 0, root.chatView)
   }
   readonly property var visibleMessages: {
     var needle = messageSearchField ? String(messageSearchField.text || "").trim().toLowerCase() : ""
@@ -1813,6 +1827,43 @@ Item {
             }
           }
 
+          Row {
+            id: railViews
+            objectName: "railViews"
+            width: parent.width
+            spacing: Style.space(6)
+            Repeater {
+              model: root.chatViews
+              delegate: Rectangle {
+                required property var modelData
+                objectName: "railView-" + modelData.id
+                readonly property bool active: root.chatView === modelData.id
+                width: viewLabel.implicitWidth + Style.space(20)
+                height: Style.space(26)
+                radius: height / 2
+                color: active ? Style.selectedFillFor(root.foreground, root.accent)
+                  : (viewHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+                    : Style.normalFillFor(root.foreground, root.accent))
+                Text {
+                  textFormat: Text.PlainText
+                  id: viewLabel
+                  anchors.centerIn: parent
+                  text: modelData.label + (modelData.count > 0 ? " " + modelData.count : "")
+                  color: parent.active ? root.foreground : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                HoverHandler { id: viewHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                  onTapped: {
+                    root.chatView = parent.active && modelData.id !== "all" ? "all" : modelData.id
+                    root.chatCursorIndex = 0
+                  }
+                }
+              }
+            }
+          }
+
           AccountSwitcher {
             id: appAccountSwitcher
             width: parent.width
@@ -1851,6 +1902,7 @@ Item {
             id: chatList
             width: parent.width
             height: sidebar.height - Style.space(116)
+              - railViews.height - Style.space(10)
               - appAccountSwitcher.height
               - (railSyncStatus.visible ? railSyncStatus.height + Style.space(10) : 0)
               - (appAccountReadiness.hasUnavailableAccounts
@@ -1860,6 +1912,20 @@ Item {
             model: root.visibleChats
             currentIndex: root.chatCursorIndex
             boundsBehavior: Flickable.StopAtBounds
+
+            Text {
+              textFormat: Text.PlainText
+              objectName: "railViewEmpty"
+              visible: chatList.count === 0 && root.chatView !== "all"
+              width: chatList.width
+              y: Style.space(24)
+              horizontalAlignment: Text.AlignHCenter
+              text: root.chatView === "unread" ? "No unread chats"
+                : root.chatView === "groups" ? "No groups" : "No archived chats"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
 
             delegate: Rectangle {
               id: chatRow

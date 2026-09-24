@@ -77,6 +77,9 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- The chat list gets All, Unread, Groups and Archived views under the search
+  field. Archived chats move to their own view, as on the phone, and leave the
+  bar dropdown's recent list; a search still finds them.
 - A sent message shows at once as a pending bubble with a clock, in both
   clients, instead of appearing only after WhatsApp confirmed the send and the
   mirror stored it; the stored row then takes its place. Files show one pending

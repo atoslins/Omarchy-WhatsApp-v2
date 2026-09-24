@@ -52,7 +52,8 @@ native, and visually at home in Omarchy.
 ## Everyday conversation flow
 
 - Browse every locally synced direct message and group; search chats or the
-  current conversation.
+  current conversation, and switch the list between All, Unread, Groups and
+  Archived.
 - Start a new chat with `Ctrl+N` or the button beside "Chats": search the
   people you know by name or number, or type a number with its country code.
   WhatsApp confirms the number before the first message can be written.

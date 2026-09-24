@@ -91,12 +91,32 @@ function normalizeScope(scope, accounts) {
   return ""
 }
 
-function filterChats(chats, scope, query, limit) {
+// Rail views, as in WhatsApp: archived chats live in their own view and stay
+// out of the others, except that a search looks through them too.
+var CHAT_VIEWS = ["all", "unread", "groups", "archived"]
+function matchesView(chat, view, searching) {
+  var archived = chat && chat.archived === true
+  var name = String(view || "all")
+  if (name === "archived") return archived
+  if (archived && !(searching && name === "all")) return false
+  if (name === "unread") return Number(chat.unread || 0) > 0
+  if (name === "groups") return String(chat.kind || "") === "group"
+  return true
+}
+function viewCount(chats, scope, view) {
+  var account = String(scope || "")
+  return (Array.isArray(chats) ? chats : []).filter(function(chat) {
+    return (account === "" || accountOf(chat) === account) && matchesView(chat, view, false)
+  }).length
+}
+
+function filterChats(chats, scope, query, limit, view) {
   var values = Array.isArray(chats) ? chats : []
   var account = String(scope || "")
   var needle = String(query || "").trim().toLowerCase()
   var filtered = values.filter(function(chat) {
     if (account !== "" && accountOf(chat) !== account) return false
+    if (view !== undefined && !matchesView(chat, view, needle !== "")) return false
     return needle === ""
       || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
       || String(chat.preview || "").toLowerCase().indexOf(needle) >= 0

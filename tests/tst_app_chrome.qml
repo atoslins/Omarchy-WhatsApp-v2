@@ -198,6 +198,29 @@ TestCase {
     verify(app.settingsOpen)
   }
 
+  function test_rail_views_filter_the_chat_list() {
+    var h = createHarness()
+    h.service.chats = [
+      { account: "work", jid: "shared@example", name: "Synthetic work", kind: "dm", unread: 0 },
+      { account: "work", jid: "other@example", name: "Synthetic other", kind: "group", unread: 2 },
+      { account: "work", jid: "old@example", name: "Synthetic archived", kind: "dm", unread: 0, archived: true }
+    ]
+    compare(h.app.visibleChats.length, 2, "archived chats live in their own view")
+    verify(findChild(h.app, "railView-archived") !== null)
+    var unread = findChild(h.app, "railView-unread")
+    tryVerify(function() { return unread.x > 0 && unread.width > 0 }, 2000, "the chips have laid out")
+    mouseClick(unread, unread.width / 2, unread.height / 2)
+    compare(h.app.chatView, "unread")
+    compare(h.app.visibleChats.map(function(c) { return c.jid }), ["other@example"])
+    mouseClick(unread, unread.width / 2, unread.height / 2)
+    compare(h.app.chatView, "all", "clicking the active view goes back to all")
+    h.app.chatView = "archived"
+    compare(h.app.visibleChats.map(function(c) { return c.jid }), ["old@example"])
+    h.app.chatView = "groups"
+    h.service.chats = [workChat]
+    verify(findChild(h.app, "railViewEmpty").visible)
+  }
+
   function test_the_header_opens_chat_details_and_escape_closes_them() {
     var h = createHarness()
     h.app.selectChat(workChat)

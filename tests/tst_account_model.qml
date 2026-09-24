@@ -175,4 +175,21 @@ TestCase {
       account: "missing", jid: "shared@s.whatsapp.net"
     }), [])
   }
+
+  function test_rail_views_keep_archived_chats_apart() {
+    var chats = [
+      { account: "work", jid: "a", name: "Alpha", kind: "dm", unread: 2, archived: false },
+      { account: "work", jid: "b", name: "Beta", kind: "group", unread: 0, archived: false },
+      { account: "work", jid: "c", name: "Gamma", kind: "group", unread: 1, archived: true }
+    ]
+    compare(AccountModel.filterChats(chats, "", "", 0, "all").map(function(c) { return c.jid }), ["a", "b"])
+    compare(AccountModel.filterChats(chats, "", "", 0, "unread").map(function(c) { return c.jid }), ["a"])
+    compare(AccountModel.filterChats(chats, "", "", 0, "groups").map(function(c) { return c.jid }), ["b"])
+    compare(AccountModel.filterChats(chats, "", "", 0, "archived").map(function(c) { return c.jid }), ["c"])
+    compare(AccountModel.filterChats(chats, "", "gam", 0, "all").map(function(c) { return c.jid }), ["c"],
+      "a search looks through archived chats too")
+    compare(AccountModel.filterChats(chats, "", "", 0).length, 3, "no view keeps the old behaviour")
+    compare(AccountModel.viewCount(chats, "", "unread"), 1)
+    compare(AccountModel.viewCount(chats, "", "archived"), 1)
+  }
 }
