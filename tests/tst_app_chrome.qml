@@ -236,23 +236,13 @@ TestCase {
     verify(typeof app.selectChatAt === "undefined")
   }
 
-  function test_conversation_header_toggles_read_state_of_the_open_chat() {
+  function test_an_open_conversation_offers_no_read_action() {
     var harness = createHarness()
-    var toggle = findChild(harness.app, "conversationReadToggle")
-    verify(toggle !== null)
-    compare(toggle.tooltipText, "Mark as unread")
-    compare(toggle.iconText, "󱥂")
-    toggle.clicked()
+    verify(findChild(harness.app, "conversationReadToggle") === null,
+      "the open conversation is read by being open")
+    harness.app.toggleChatRead(workChat, false)
     compare(harness.service.lastChatRead.read, false)
     compare(harness.service.lastChatRead.ref.jid, workChat.jid)
-    compare(harness.service.lastChatRead.ref.account, "work")
-
-    var unreadChat = Object.assign({}, workChat, { unread: 3 })
-    harness.service.chats = [unreadChat, otherChat]
-    compare(toggle.tooltipText, "Mark as read")
-    compare(toggle.iconText, "󰄭")
-    toggle.clicked()
-    compare(harness.service.lastChatRead.read, true)
   }
 
   function test_rail_row_offers_the_read_toggle_on_hover() {

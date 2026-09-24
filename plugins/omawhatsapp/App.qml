@@ -839,9 +839,9 @@ Item {
   function chatIsUnread(chat) {
     return !!chat && Number(chat.unread || 0) > 0
   }
-  function toggleChatRead(chat) {
+  function toggleChatRead(chat, forceRead) {
     if (!chat) return false
-    var read = root.chatIsUnread(chat)
+    var read = forceRead === undefined ? root.chatIsUnread(chat) : forceRead === true
     if (root.demoMode) {
       root.demoChats = root.demoChats.map(function(item) {
         if (String(item.jid) !== String(chat.jid)) return item
@@ -2428,20 +2428,6 @@ Item {
             }
 
             PanelActionButton {
-              objectName: "conversationReadToggle"
-              visible: !!root.selectedChat
-              width: visible ? implicitWidth : 0
-              iconText: root.chatIsUnread(root.selectedChat) ? "󰄭" : "󱥂"
-              tooltipText: root.chatIsUnread(root.selectedChat) ? "Mark as read" : "Mark as unread"
-              foreground: root.dim
-              hoverColor: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.icon
-              size: Style.space(32)
-              onClicked: root.toggleChatRead(root.selectedChat)
-            }
-
-            PanelActionButton {
               objectName: "chatMenuButton"
               iconText: "󰇙"
               tooltipText: "Chat actions"
@@ -2474,10 +2460,7 @@ Item {
                       { label: root.selectedChat && root.selectedChat.pinned ? "Unpin chat" : "Pin chat", action: root.selectedChat && root.selectedChat.pinned ? "unpin" : "pin", destructive: false },
                       { label: root.selectedChat && root.selectedChat.muted ? "Unmute notifications" : "Mute notifications", action: root.selectedChat && root.selectedChat.muted ? "unmute" : "mute", destructive: false },
                       { label: root.selectedChat && root.selectedChat.archived ? "Unarchive chat" : "Archive chat", action: root.selectedChat && root.selectedChat.archived ? "unarchive" : "archive", destructive: false },
-                      { label: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
-                          ? "Mark read · send receipt" : "Mark as unread",
-                        action: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
-                          ? "read" : "unread", destructive: false },
+                      { label: "Mark as unread", action: "unread", destructive: false },
                       { label: "Remove local chat", action: "remove-local", destructive: true }
                     ]
                     delegate: Rectangle {
@@ -2503,6 +2486,8 @@ Item {
                           chatMenu.close()
                           if (modelData.action === "remove-local") {
                             root.requestRemoveLocalChat()
+                          } else if (modelData.action === "unread") {
+                            root.toggleChatRead(root.selectedChat, false)
                           } else if (!root.demoMode && root.service) {
                             root.service.chatAction(
                               root.currentChatRef(), modelData.action, "app")

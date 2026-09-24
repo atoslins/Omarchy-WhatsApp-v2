@@ -77,7 +77,9 @@ MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
 MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
 MAX_SENT_REPLY_STATE = 2 * 1024 * 1024
-PREFERENCES_VERSION = 2
+# 3: opening a chat marks it read by default (the owner's decision; wacli's
+# mark-read syncs the user's own devices and sends no read receipt).
+PREFERENCES_VERSION = 3
 MAX_NOTIFY_BURST = 5
 MAX_NOTIFY_SUMMARY = 96
 MAX_NOTIFY_SENDER = 48
@@ -1123,7 +1125,7 @@ class Backend:
         item = value if isinstance(value, dict) else {}
         return {
             "online": item.get("online") is not False,
-            "send_read_receipts": item.get("send_read_receipts") is True,
+            "send_read_receipts": item.get("send_read_receipts") is not False,
             "acknowledged_unread": cls._chat_snapshots(item.get("acknowledged_unread")),
             "notified": cls._chat_snapshots(item.get("notified")),
         }
@@ -1144,6 +1146,10 @@ class Backend:
             # the store that was in use when it was written, which is the
             # default account, not whichever account this request selected.
             stores[self.account("").key] = self._store_state(value)
+        if bounded_int(value.get("version"), 1, 1, 1_000) < 3:
+            # Before version 3 "off" was the default, not a choice anyone made.
+            for state in stores.values():
+                state["send_read_receipts"] = True
         notifications = value.get("notifications")
         if not isinstance(notifications, dict):
             notifications = {}

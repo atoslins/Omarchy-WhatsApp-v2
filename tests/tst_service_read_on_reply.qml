@@ -74,4 +74,54 @@ TestCase {
     service.writing = false
     tryCompare(service, "activeWriteKind", "chat-action")
   }
+
+  function openService(unread) {
+    var service = createService(unread)
+    service.selectedChatAccount = "work"
+    service.selectedChatJid = target.jid
+    service.sendReadReceipts = true
+    service.appOpen = true
+    return service
+  }
+
+  function test_new_messages_in_the_open_chat_are_read() {
+    var service = openService(2)
+    verify(service.readOpenChatIfUnread(service.chats[0]))
+    tryCompare(service, "activeWriteKind", "chat-action")
+    compare(service.activeWriteChatJid, target.jid)
+  }
+
+  function test_a_closed_window_reads_nothing() {
+    var service = openService(2)
+    service.appOpen = false
+    service.dropdownOpen = false
+    verify(!service.readOpenChatIfUnread(service.chats[0]))
+    wait(200)
+    compare(service.activeWriteKind, "")
+  }
+
+  function test_only_the_chat_on_screen_is_read() {
+    var service = openService(2)
+    service.selectedChatJid = "someone-else@s.whatsapp.net"
+    verify(!service.readOpenChatIfUnread(service.chats[0]))
+  }
+
+  function test_mark_as_unread_holds_while_the_chat_stays_open() {
+    var service = openService(0)
+    verify(service.setChatRead(target, false, "app"))
+    compare(service.manualUnreadKey, "work\n" + target.jid)
+    service.writing = false
+    var unreadChat = Object.assign({}, service.chats[0], { unread: 1 })
+    verify(!service.readOpenChatIfUnread(unreadChat),
+      "an explicit unread is not undone by the next refresh")
+    service.selectChat(unreadChat)
+    compare(service.manualUnreadKey, "", "choosing the chat again reads it")
+  }
+
+  function test_repeated_refreshes_do_not_loop_a_failing_read() {
+    var service = openService(2)
+    verify(service.readOpenChatIfUnread(service.chats[0]))
+    verify(!service.readOpenChatIfUnread(service.chats[0]),
+      "a second refresh within the throttle window does nothing")
+  }
 }

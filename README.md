@@ -23,9 +23,11 @@ native, and visually at home in Omarchy.
   SQLite/WAL changes, so new messages appear immediately without hot polling.
 - **A real offline switch.** Pause and disable background sync in settings;
   the complete local archive remains searchable and readable.
-- **Private reading by default.** Opening a chat or dismissing its badge is
-  local only. A clear in-app setting can opt into automatic receipts, while
-  `Mark read · send receipt` remains the one-off explicit action.
+- **Reading works like the phone.** The conversation on screen is marked
+  read, including messages that arrive while it is open, and replying marks a
+  chat read too. wacli only syncs that state to your own devices, so contacts
+  never get a read receipt from OmaWhatsApp. Settings can turn automatic
+  reading off, and the chat list marks any chat read or unread.
 - **One native plugin.** The service, full app, and configurable recent-chat
   dropdown share a single Omarchy plugin lifecycle.
 - **No duplicate sync process.** Sends use wacli's live companion path and a
@@ -84,8 +86,8 @@ native, and visually at home in Omarchy.
   unread state, recent messages, replies/reactions, clipboard attachments, a
   real composer, and J/K navigation. `O` expands the exact conversation into
   the full client; `Super+Shift+W` remains the direct full-app shortcut.
-- Open the native settings card to keep private reading on or opt into read
-  receipts, pause background sync, show/hide the local bar badge, and choose a
+- Open the settings to choose whether open chats and replies mark chats read,
+  pause background sync, show/hide the local bar badge, and choose a
   5/7/9-chat dropdown—all persisted privately on this device.
 - Choose System, 12-hour, or 24-hour timestamps in settings. System follows
   your locale by default; one saved preference covers chat previews, message
@@ -290,13 +292,13 @@ Add the `Super+Shift+W` binding from
 | `Esc` | Step back: composer → messages → chat list → close |
 | Conversation subtitle | The account the open chat and composer belong to, shown only when more than one account is linked |
 | Rail status line | Appears only while sync is offline or reconnecting; click it to resume a paused sync |
-| Rail settings button | Private reading, badge, desktop notifications, background sync, dropdown size, composer expansion, chat photos, and updates |
-| Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
+| Rail settings button | Automatic reading, badge, desktop notifications, background sync, dropdown size, composer expansion, chat photos, and updates |
+| Chat list hover button · chat menu `Mark as unread` | Mark a chat read or unread on your devices |
 
 Click the notification count in the dropdown header to clear every local badge
 after a confirmation. Middle-clicking the bar item does the same immediately;
-right-click refreshes. None of these actions marks messages read or sends a read
-receipt. The in-app settings card controls automatic receipts, the badge,
+right-click refreshes. None of these actions marks messages read. Settings
+control automatic reading, the badge,
 background sync, dropdown size, and the composer expansion limit.
 
 Desktop popups are a separate surface from the bar badge and are off until you

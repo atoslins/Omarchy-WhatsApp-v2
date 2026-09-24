@@ -38,9 +38,14 @@ archived chats stay silent.
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.
-Opening or dismissing never mutates WhatsApp by default. Users can explicitly
-opt into automatic exact-chat receipts in the in-app settings card; the
-labelled chat-menu action remains the one-off receipt path.
+The conversation on screen is read: selecting a chat, and every refresh that
+finds new messages in it while a window is open, marks that exact chat read,
+throttled so a failing write cannot loop. Replying marks it read too. A chat
+the user marks unread stays unread until it is chosen again. wacli's
+`chats mark-read` sends only a WhatsApp app-state patch that syncs the read
+state to the user's own devices; it sends the other side no read receipt.
+Settings can turn automatic reading off per account. Dismissing a badge stays
+local.
 
 ## Accounts
 

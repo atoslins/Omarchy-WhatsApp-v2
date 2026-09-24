@@ -51,9 +51,9 @@ locks are opened relative to an owner-checked directory descriptor with
 It stores the online/offline choice, private-reading/read-receipt preference,
 bar badge visibility, dropdown density, and per-chat unread/timestamp
 acknowledgement snapshots. Acknowledgement affects the local notification
-delta, never `wacli.db`; private reading is the default. Read receipts use
-`wacli chats mark-read` only after the user opts in or chooses the explicit
-chat-menu action. Archived and currently muted chats retain their
+delta, never `wacli.db`. The open chat, a reply, and the chat-list toggle use
+`wacli chats mark-read`/`mark-unread`, which only sync the read state to the
+user's own devices; no read receipt reaches the sender. Archived and currently muted chats retain their
 true unread count inside the chat rail while contributing zero to the bar's
 local notification total.
 

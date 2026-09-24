@@ -33,6 +33,11 @@ Item {
   property bool autoRefreshAvatars: true
   property string railDensity: "comfortable"
   property var pendingReplyReadRef: ({ account: "", jid: "", key: "" })
+  // A chat the user explicitly marked unread stays unread while it is open;
+  // choosing it again reads it.
+  property string manualUnreadKey: ""
+  property string lastAutoReadKey: ""
+  property double lastAutoReadAt: 0
   property bool showUnreadCount: true
   property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
@@ -231,6 +236,7 @@ Item {
   }
   function selectChat(chat) {
     if (!chat || !chat.jid) return
+    manualUnreadKey = ""
     var next = String(chat.jid)
     var nextAccount = String(chat.account || "")
     voiceRecorder.stopForChatChange(nextAccount, next)
@@ -476,6 +482,23 @@ Item {
       action: String(action || "")
     }, chatRef, owner)
   }
+  // A conversation on screen is a conversation being read: messages that
+  // arrive while it is open are marked read too, unless the user chose
+  // "Mark as unread" for it. Throttled so a failing write cannot loop.
+  function readOpenChatIfUnread(chat) {
+    if (!root.windowOpen || !chat || Number(chat.unread || 0) <= 0) return false
+    var ref = AccountModel.refOf(chat)
+    if (!AccountModel.sameRef(ref, root.selectedChatRef())) return false
+    if (ref.key === root.manualUnreadKey) return false
+    var now = Date.now()
+    if (ref.key === root.lastAutoReadKey && now - root.lastAutoReadAt < 10000) return false
+    root.lastAutoReadKey = ref.key
+    root.lastAutoReadAt = now
+    root.pendingReceiptRef = ref
+    root.maybeSendAutomaticReceipt()
+    return true
+  }
+
   // Mark one exact chat read or unread on WhatsApp. The count changes at once
   // and the next refresh confirms it from the mirror.
   function setChatRead(chatRef, read, owner) {
@@ -483,6 +506,8 @@ Item {
       String(chatRef && chatRef.jid || ""))
     if (String(target.jid || "") === "") return false
     if (!root.chatAction(target, read ? "read" : "unread", owner)) return false
+    if (!read && AccountModel.sameRef(target, root.selectedChatRef()))
+      root.manualUnreadKey = target.key
     root.chats = root.chats.map(function(item) {
       if (!root.sameChat(item, target.account, target.jid)) return item
       var next = Object.assign({}, item)
@@ -881,6 +906,7 @@ Item {
       }
       root.selectedChatName = String(selected.name || "WhatsApp chat")
       root.selectedChatKind = String(selected.kind || "unknown")
+      root.readOpenChatIfUnread(selected)
       if (root.messages.length === 0) root.refreshMessages()
       if (root.selectedChatKind === "group" && root.members.length === 0) root.refreshMembers()
     }

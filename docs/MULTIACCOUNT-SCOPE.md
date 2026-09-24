@@ -76,7 +76,7 @@ since changed `_preferences` (`send_read_receipts`, `show_unread_count`,
 - **Notifications are independent of the badge.** A popup must still fire when
   `show_unread_count` is false, when the window and dropdown are closed, and
   when WhatsApp reports `unread = 0` but the chat timestamp advanced (read on
-  the phone, or private reading).
+  the phone, or with automatic reading off).
 - **Archived and muted keep suppressing.** No change to that filter.
 
 ## Scope by layer

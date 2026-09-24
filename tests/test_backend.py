@@ -1013,9 +1013,9 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(self.backend.online())
         self.assertIn("enable", run.call_args.args[0])
 
-    def test_private_reading_is_default_and_settings_are_bounded(self) -> None:
+    def test_open_chat_reads_by_default_and_settings_are_bounded(self) -> None:
         defaults = self.backend.settings()
-        self.assertFalse(defaults["send_read_receipts"])
+        self.assertTrue(defaults["send_read_receipts"])
         self.assertTrue(defaults["show_unread_count"])
         self.assertEqual(defaults["dropdown_rows"], 7)
         self.assertEqual(defaults["composer_max_lines"], 6)
@@ -1026,16 +1026,16 @@ class BackendTests(unittest.TestCase):
             self.backend.settings({"check_updates_on_launch": "yes"})
 
         updated = self.backend.settings({
-            "send_read_receipts": True,
+            "send_read_receipts": False,
             "show_unread_count": False,
             "dropdown_rows": 9,
             "composer_max_lines": 8,
         })
-        self.assertTrue(updated["send_read_receipts"])
+        self.assertFalse(updated["send_read_receipts"])
         self.assertFalse(updated["show_unread_count"])
         self.assertEqual(updated["dropdown_rows"], 9)
         self.assertEqual(updated["composer_max_lines"], 8)
-        self.assertTrue(self.backend.settings()["send_read_receipts"])
+        self.assertFalse(self.backend.settings()["send_read_receipts"])
         preferences = self.root / "state" / "preferences.json"
         self.assertEqual(preferences.stat().st_mode & 0o777, 0o600)
 
@@ -1043,7 +1043,8 @@ class BackendTests(unittest.TestCase):
             store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
         )
         persisted = reloaded.settings()
-        self.assertTrue(persisted["send_read_receipts"])
+        self.assertFalse(persisted["send_read_receipts"],
+                         "an explicit choice in version 3 survives a reload")
         self.assertFalse(persisted["show_unread_count"])
         self.assertEqual(persisted["dropdown_rows"], 9)
         self.assertEqual(persisted["composer_max_lines"], 8)
@@ -1951,6 +1952,21 @@ sys.exit(0)
         stored = json.loads(
             (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(stored["stores"]), sorted([str(self.work), str(self.home)]))
+
+    def test_version_2_off_default_migrates_to_reading_open_chats(self) -> None:
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        key = str(self.backend.account("").key)
+        target = state / "preferences.json"
+        target.write_text(json.dumps({
+            "version": 2,
+            "stores": {key: {"online": True, "send_read_receipts": False}},
+        }), encoding="utf-8")
+        target.chmod(0o600)
+        self.assertTrue(self.backend.settings()["send_read_receipts"])
+        self.backend.settings({"send_read_receipts": False})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 3)
+        self.assertFalse(self.backend.settings()["send_read_receipts"])
 
     def test_version_1_state_migrates_to_the_default_account(self) -> None:
         state = self.root / "state"

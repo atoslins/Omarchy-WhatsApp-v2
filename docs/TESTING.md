@@ -57,10 +57,11 @@ durable boundaries and prove the next run restores one coherent version.
    failed/offline send keeps it, and the explicit send button is the only
    action that transmits it. Repeat once in the compact dropdown.
 7. Review current-session logs for OmaWhatsApp QML errors.
-8. Confirm private reading is on by default, and opening a chat or
-   middle-clicking the bar clears only the local notification badge. Verify the
-   settings switch with a mocked write; test a real receipt only with explicit
-   permission.
+8. Confirm automatic reading is on by default: opening a chat, a new message
+   arriving in the open chat, and replying mark it read on the phone, while a
+   chat marked unread from the list stays unread until chosen again.
+   Middle-clicking the bar clears only the local notification badge. Verify the
+   settings switch with a mocked write.
 9. Turn on Settings → Desktop notifications and confirm the next incoming message
    pops up once, that turning off "Message text in notifications" drops the preview to chat names,
    and that muted and archived chats stay silent. Check that the popup still

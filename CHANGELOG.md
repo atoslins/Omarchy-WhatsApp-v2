@@ -25,8 +25,13 @@
 - Replying to a chat marks it read, so its unread count clears the way it does
   on the phone. wacli's mark-read only syncs the read state to your own
   devices; it sends the other side no read receipt.
-- Mark a chat read or unread from a button in the conversation header, or from
-  the rail row on hover, where it takes the place of the unread count.
+- The conversation on screen is read: opening a chat and messages arriving
+  while it is open mark it read, as on the phone. This is now the default for
+  every account (preferences version 3 migrates the old "off" default). A chat
+  marked unread from the list stays unread until it is chosen again. The chat
+  menu no longer offers "Mark read · send receipt", which was never a receipt.
+- Mark a chat read or unread from the rail row on hover, where the button takes
+  the place of the unread count.
 - Show reactions that wacli stored under the contact's opaque @lid chat
   instead of the phone chat of the reacted message; a sent reaction used to
   vanish from the bubble.
