@@ -45,4 +45,29 @@ TestCase {
     compare(service.notificationUnreadCount, 0)
     compare(service.barTooltip, "OmaWhatsApp · no unread chats")
   }
+
+  function test_an_identical_rail_answer_keeps_the_current_model() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    service.ready = true
+    service.statusReady = true
+    service.statusAccount = "work"
+    service.offlineMode = false
+    var process = findChild(service, "chatsProcess")
+    verify(process !== null)
+    var answer = JSON.stringify({ ok: true, chats: [
+      { account: "work", jid: "a@s.whatsapp.net", name: "Synthetic", kind: "dm", unread: 1, notification_unread: 1 }] })
+    process.stdout.text = answer
+    process.running = false
+    process.exited(0)
+    var first = service.chats
+    compare(first.length, 1)
+    process.stdout.text = answer
+    process.exited(0)
+    verify(service.chats === first, "the same answer does not replace the model")
+    service.setChatRead({ account: "work", jid: "a@s.whatsapp.net" }, true, "app")
+    compare(service.lastChatsRaw, "", "a local change makes the next answer apply")
+    process.stdout.text = answer
+    process.exited(0)
+    compare(service.chats[0].unread, 1, "the mirror's answer wins again")
+  }
 }

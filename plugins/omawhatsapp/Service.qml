@@ -47,6 +47,10 @@ Item {
   // Messages sent from here that the mirror has not stored yet. They show at
   // once as pending bubbles: the send itself takes a second or more.
   property var pendingSends: []
+  // Last helper answers, so an identical refresh does not rebuild the lists.
+  property string lastChatsRaw: ""
+  property string lastMessagesRaw: ""
+  property string lastMessagesKey: ""
   property int pendingSendSerial: 0
   // Older pages loaded by scrolling up. Kept apart so the refresh of the
   // newest page, on every mirror change, never throws them away.
@@ -373,6 +377,7 @@ Item {
       selectedId = ""
       query = ""
       messages = []
+      lastMessagesRaw = ""
       members = []
       olderMessages = []
       hasOlderMessages = true
@@ -775,6 +780,7 @@ Item {
     if (!root.chatAction(target, read ? "read" : "unread", owner)) return false
     if (!read && AccountModel.sameRef(target, root.selectedChatRef()))
       root.manualUnreadKey = target.key
+    root.lastChatsRaw = ""
     root.chats = root.chats.map(function(item) {
       if (!root.sameChat(item, target.account, target.jid)) return item
       var next = Object.assign({}, item)
@@ -786,6 +792,7 @@ Item {
   }
   function clearNotificationCount(jid, account) {
     var target = String(jid || "")
+    root.lastChatsRaw = ""
     root.chats = root.chats.map(function(chat) {
       if (target !== "" && !root.sameChat(chat, account, target)) return chat
       var next = Object.assign({}, chat)
@@ -870,6 +877,7 @@ Item {
       if (root.sameChat(root.chats[i], target.account, target.jid)) { chat = root.chats[i]; break }
     }
     if (!chat || Number(chat.unread || 0) <= 0) return false
+    root.lastChatsRaw = ""
     root.chats = root.chats.map(function(item) {
       if (!root.sameChat(item, target.account, target.jid)) return item
       var next = Object.assign({}, item)
@@ -1165,6 +1173,7 @@ Item {
 
   Process {
     id: chatsProcess
+    objectName: "chatsProcess"
     property string payload: ""
     command: [root.helper, "chats", "--limit", "500"]
     stdinEnabled: true
@@ -1174,11 +1183,16 @@ Item {
     onExited: function(exitCode) {
       root.loadingChats = false
       if (root.storeRefreshPending) storeRefreshDebounce.restart()
-      var payload = root.parseJson(chatsOutput.text)
+      // Most mirror changes leave the rail as it was; an identical answer
+      // keeps the current model, so the list is not rebuilt for nothing.
+      var raw = String(chatsOutput.text || "")
+      if (raw !== "" && raw === root.lastChatsRaw && exitCode === 0) return
+      var payload = root.parseJson(raw)
       if (!payload || payload.ok !== true) {
         root.errorText = (payload && payload.error) || String(chatsError.text || "Chats could not be read.").trim()
         return
       }
+      root.lastChatsRaw = raw
       root.chats = Array.isArray(payload.chats) ? payload.chats : []
       if (root.chats.length === 0) {
         root.selectedChatJid = ""
@@ -1187,6 +1201,7 @@ Item {
         root.selectedChatKind = "unknown"
         root.query = ""
         root.messages = []
+        root.lastMessagesRaw = ""
         root.members = []
         return
       }
@@ -1200,6 +1215,7 @@ Item {
         root.selectedChatAccount = String(selected.account || "")
         root.query = ""
         root.messages = []
+        root.lastMessagesRaw = ""
         root.members = []
         if (root.conversationOnScreen)
           root.dismissNotifications(root.selectedChatJid, root.selectedChatAccount)
@@ -1455,6 +1471,14 @@ Item {
       if ((!payload || payload.ok !== true) && requestIsCurrent) {
         root.errorText = (payload && payload.error) || String(messagesError.text || "Messages could not be read.").trim()
       } else if (payload && payload.ok === true && responseIsCurrent) {
+        var key = chatRef.key + "\n" + requestedQuery
+        var rawMessages = String(messagesOutput.text || "")
+        if (key === root.lastMessagesKey && rawMessages === root.lastMessagesRaw) {
+          if (root.messagesPending) { root.messagesPending = false; Qt.callLater(root.refreshMessages) }
+          return
+        }
+        root.lastMessagesKey = key
+        root.lastMessagesRaw = rawMessages
         root.messages = Array.isArray(payload.messages) ? payload.messages : []
         if (root.olderMessages.length === 0) root.hasOlderMessages = payload.has_more !== false
         root.prunePendingSends()

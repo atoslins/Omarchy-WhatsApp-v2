@@ -123,6 +123,9 @@ MAX_NOTIFY_WATERMARKS = 500
 NOTIFY_EXPIRE_MS = 8000
 # The popup id of each chat's last notification, so the next message in that
 # chat updates it instead of stacking another one.
+DOCTOR_CACHE_FILE = "doctor-cache.json"
+DOCTOR_CACHE_TTL = 60
+MAX_DOCTOR_CACHE = 16 * 1024
 NOTIFY_IDS_FILE = "notify-ids.json"
 MAX_NOTIFY_IDS = 64
 NOTIFY_ID_TTL = 60 * 60
@@ -1822,6 +1825,38 @@ class Backend:
         data = envelope.get("data") if isinstance(envelope, dict) else None
         return data if isinstance(data, dict) else {}
 
+    def _doctor_cached(self, account: Account) -> dict[str, Any]:
+        """The status poll's doctor, reused for a minute while all is well.
+
+        Status runs every 12 seconds and doctor opens the WhatsApp session
+        store each time; during a pairing that contention delayed the contact
+        sync. A healthy, authenticated answer is kept for DOCTOR_CACHE_TTL;
+        anything else is asked again at once, so a logout or a fresh link
+        still shows up on the next poll.
+        """
+        now = int(time.time())
+        key = hashlib.sha256(account.key.encode("utf-8")).hexdigest()[:24]
+        cache = self._read_state_json(DOCTOR_CACHE_FILE, MAX_DOCTOR_CACHE, {})
+        item = cache.get(key) if isinstance(cache, dict) else None
+        if isinstance(item, dict) and 0 <= now - bounded_int(item.get("at"), 0, 0, 2**63 - 1) \
+                < DOCTOR_CACHE_TTL and isinstance(item.get("doctor"), dict):
+            return dict(item["doctor"])
+        doctor = self._doctor(account)
+        if doctor.get("authenticated") is True and not doctor.get("store_error"):
+            kept = {name: doctor.get(name) for name in
+                    ("authenticated", "fts_enabled", "store_dir") if name in doctor}
+            try:
+                with self._state_lock("doctor-cache.lock"):
+                    current = self._read_state_json(DOCTOR_CACHE_FILE, MAX_DOCTOR_CACHE, {})
+                    current = current if isinstance(current, dict) else {}
+                    current[key] = {"at": now, "doctor": kept}
+                    self._write_state_json(DOCTOR_CACHE_FILE,
+                                           dict(list(current.items())[-MAX_ACCOUNTS:]),
+                                           MAX_DOCTOR_CACHE)
+            except (OmaWhatsAppError, OSError):
+                pass
+        return doctor
+
     def _database(
         self,
         doctor: dict[str, Any] | None = None,
@@ -1959,7 +1994,7 @@ class Backend:
             # race through Backend._active or borrow another private store.
             doctor_error = ""
             try:
-                doctor = self._doctor(account)
+                doctor = self._doctor_cached(account)
             except OmaWhatsAppError as exc:
                 doctor = {}
                 doctor_error = clean_error(

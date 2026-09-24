@@ -218,6 +218,32 @@ class BackendTests(unittest.TestCase):
         archive = next(chat for chat in self.backend.chats()["chats"] if chat["jid"] == "archive@g.us")
         self.assertEqual(archive["unread"], 0)
 
+    def test_a_healthy_doctor_answer_is_reused_for_a_minute(self) -> None:
+        account = self.backend.account("")
+        healthy = {"authenticated": True, "fts_enabled": True, "store_dir": str(self.store)}
+        with mock.patch.object(self.backend, "_doctor", return_value=healthy) as doctor:
+            self.assertTrue(self.backend._doctor_cached(account)["authenticated"])
+            self.assertTrue(self.backend._doctor_cached(account)["authenticated"])
+        self.assertEqual(doctor.call_count, 1, "the status poll stops opening the session store every 12 s")
+        later = time.time() + backend_module.DOCTOR_CACHE_TTL + 1
+        with mock.patch.object(self.backend, "_doctor", return_value=healthy) as doctor, \
+             mock.patch.object(backend_module.time, "time", return_value=later):
+            self.backend._doctor_cached(account)
+        self.assertEqual(doctor.call_count, 1, "an old answer is asked again")
+
+    def test_an_unhealthy_doctor_answer_is_never_reused(self) -> None:
+        account = self.backend.account("")
+        with mock.patch.object(self.backend, "_doctor",
+                               return_value={"authenticated": False}) as doctor:
+            self.backend._doctor_cached(account)
+            self.backend._doctor_cached(account)
+        self.assertEqual(doctor.call_count, 2, "a pairing in progress shows up on the next poll")
+        with mock.patch.object(self.backend, "_doctor", return_value={
+                "authenticated": True, "store_error": "synthetic"}) as doctor:
+            self.backend._doctor_cached(account)
+            self.backend._doctor_cached(account)
+        self.assertEqual(doctor.call_count, 2)
+
     def test_chat_search_is_literal(self) -> None:
         self.assertEqual(self.backend.chats("Design%team")["chats"], [])
         self.assertEqual(self.backend.chats("design")["chats"][0]["jid"], "team@g.us")

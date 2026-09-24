@@ -77,6 +77,10 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Less work on every mirror change: an answer identical to the previous one
+  no longer rebuilds the chat list or the conversation, and the 12-second
+  status poll reuses a healthy `wacli doctor` answer for a minute instead of
+  opening the WhatsApp session store every time.
 - Scrolling up past the newest 240 messages loads the older ones, 200 at a
   time, down to the start of this computer's copy of the chat. A mirror change
   refreshes only the newest page and keeps the older pages loaded.
