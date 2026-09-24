@@ -44,6 +44,11 @@ Item {
   property string newChatPeopleQuery: ""
   property bool newChatPeopleLoading: false
   property bool newChatPeoplePending: false
+  // Chat details panel: what the mirror knows about the selected chat.
+  property var chatDetails: ({})
+  property bool chatDetailsLoading: false
+  property bool chatDetailsWanted: false
+  property bool chatDetailsPending: false
   // Where the last first message landed: wacli files an @lid recipient's
   // chat under their phone JID when it knows the mapping.
   property string lastStartedChatJid: ""
@@ -326,9 +331,11 @@ Item {
       query = ""
       messages = []
       members = []
+      chatDetails = ({})
       errorText = ""
       refreshMessages()
       refreshMembers()
+      if (chatDetailsWanted) Qt.callLater(refreshChatDetails)
     }
     // Local badge acknowledgement above never talks to WhatsApp. The receipt
     // decision waits for this exact account's status, then retains this exact
@@ -535,6 +542,18 @@ Item {
     return runWriteForChat("save-media", {
       id: String(item.id), destination: String(destination)
     }, chatRef, owner)
+  }
+  onChatDetailsWantedChanged: if (chatDetailsWanted) refreshChatDetails()
+  function refreshChatDetails() {
+    var ref = selectedChatRef()
+    if (String(ref.jid || "") === "") return false
+    if (chatDetailsProcess.running) { chatDetailsPending = true; return false }
+    chatDetailsLoading = true
+    chatDetailsProcess.chatRef = ref
+    chatDetailsProcess.payload = JSON.stringify({ account: ref.account, jid: ref.jid })
+    chatDetailsProcess.stdinEnabled = true
+    chatDetailsProcess.running = true
+    return true
   }
   function searchPeople(query) {
     newChatPeopleQuery = String(query || "").trim()
@@ -937,6 +956,7 @@ Item {
       if (root.windowOpen) {
         root.refreshMessages()
         root.refreshMembers()
+        if (root.chatDetailsWanted) root.refreshChatDetails()
       }
     }
   }
@@ -1127,6 +1147,29 @@ Item {
         root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
+    }
+  }
+
+  Process {
+    id: chatDetailsProcess
+    objectName: "chatDetailsProcess"
+    property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    command: [root.helper, "chat-details"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: chatDetailsOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.chatDetailsLoading = false
+      var payload = root.parseJson(chatDetailsOutput.text)
+      if (exitCode === 0 && payload && payload.ok === true
+          && AccountModel.sameRef(chatRef, root.selectedChatRef()))
+        root.chatDetails = payload
+      if (root.chatDetailsPending) {
+        root.chatDetailsPending = false
+        Qt.callLater(root.refreshChatDetails)
+      }
     }
   }
 

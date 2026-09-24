@@ -142,6 +142,9 @@ TestCase {
       property bool appConversationVisible: false
       property string railDensity: "comfortable"
       property string syncPauseReason: ""
+      property bool chatDetailsWanted: false
+      property bool chatDetailsLoading: false
+      property var chatDetails: ({})
       function setChatRead(ref, read, owner) {
         lastChatRead = { ref: ref, read: read, owner: owner }
         return true
@@ -193,6 +196,37 @@ TestCase {
     verify(collapse.visible)
     settings.clicked()
     verify(app.settingsOpen)
+  }
+
+  function test_the_header_opens_chat_details_and_escape_closes_them() {
+    var h = createHarness()
+    h.app.selectChat(workChat)
+    var title = findChild(h.app, "conversationTitle")
+    verify(title !== null)
+    compare(h.service.appConversationVisible, true)
+    mouseClick(title, 5, title.height / 2)
+    verify(h.app.chatDetailsOpen)
+    verify(h.service.chatDetailsWanted, "the service loads the details while the panel is open")
+    var panel = findChild(h.app, "chatDetailsPanel")
+    verify(panel.visible)
+    verify(!h.app.chatDetailsBeside, "a 1000 px window has no room beside the conversation")
+    compare(h.service.appConversationVisible, false,
+      "a panel covering the conversation does not count as reading it")
+    h.app.goBack()
+    verify(!h.app.chatDetailsOpen)
+    verify(!h.service.chatDetailsWanted)
+    compare(h.service.appConversationVisible, true)
+  }
+
+  function test_chat_details_open_a_known_person_or_hand_off_to_new_chat() {
+    var h = createHarness()
+    h.app.chatDetailsOpen = true
+    verify(h.app.openFromChatDetails("other@example", "Synthetic other", ""))
+    compare(h.service.selectedChatJid, "other@example")
+    h.app.chatDetailsOpen = true
+    verify(h.app.openFromChatDetails("15550009999@s.whatsapp.net", "Nobody yet", "15550009999"))
+    verify(!h.app.chatDetailsOpen)
+    tryCompare(findChild(h.app, "newChatDialog"), "opened", true)
   }
 
   function test_the_rail_line_says_why_this_app_paused_sync() {

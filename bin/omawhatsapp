@@ -2965,6 +2965,103 @@ class Backend:
             })
         return {"ok": True, "chat": chat, "query": cleaned, "messages": values}
 
+    def chat_details(self, jid: str) -> dict[str, Any]:
+        """Everything the mirror knows about one chat. Local only: no WhatsApp call."""
+        chat = self._chat(jid)
+        target = chat["jid"]
+        live = "deleted_at IS NULL AND COALESCE(reaction_to_id, '') = ''"
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    f"""
+                    SELECT chats.archived, chats.pinned, chats.muted_until,
+                      (SELECT COUNT(*) FROM messages WHERE chat_jid = chats.jid AND {live}) AS total,
+                      (SELECT MIN(ts) FROM messages WHERE chat_jid = chats.jid) AS since,
+                      (SELECT COUNT(*) FROM messages WHERE chat_jid = chats.jid AND {live}
+                        AND media_type IN ('image', 'video', 'gif')) AS media,
+                      (SELECT COUNT(*) FROM messages WHERE chat_jid = chats.jid AND {live}
+                        AND media_type = 'document') AS documents,
+                      (SELECT COUNT(*) FROM messages WHERE chat_jid = chats.jid AND {live}
+                        AND (text LIKE '%http://%' OR text LIKE '%https://%'
+                          OR text LIKE '%www.%')) AS links,
+                      (SELECT COUNT(*) FROM starred WHERE chat_jid = chats.jid) AS starred
+                    FROM chats WHERE chats.jid = ?
+                    """,
+                    [target],
+                ).fetchone()
+                person: dict[str, Any] | None = None
+                common: list[dict[str, str]] = []
+                group: dict[str, Any] | None = None
+                if chat["kind"] == "dm":
+                    contact = connection.execute(
+                        """SELECT contacts.phone, contacts.full_name, contacts.push_name,
+                             contacts.business_name, aliases.alias
+                           FROM (SELECT ? AS jid) AS wanted
+                           LEFT JOIN contacts ON contacts.jid = wanted.jid
+                           LEFT JOIN contact_aliases AS aliases ON aliases.jid = wanted.jid""",
+                        [target],
+                    ).fetchone()
+                    phone = str(contact["phone"] or "") if contact is not None else ""
+                    if not phone and target.endswith("@s.whatsapp.net"):
+                        phone = target.split("@", 1)[0]
+                    person = {
+                        "phone": phone[:32],
+                        "full_name": str(contact["full_name"] or "")[:128] if contact else "",
+                        "push_name": str(contact["push_name"] or "")[:128] if contact else "",
+                        "business_name": str(contact["business_name"] or "")[:128] if contact else "",
+                        "alias": str(contact["alias"] or "")[:128] if contact else "",
+                    }
+                    common = [{"jid": str(item["jid"]), "name": str(item["name"])[:128]}
+                              for item in connection.execute(
+                        """SELECT groups.jid,
+                             COALESCE(NULLIF(chats.name, ''), NULLIF(groups.name, ''), 'Group') AS name
+                           FROM group_participants AS members
+                           JOIN groups ON groups.jid = members.group_jid
+                           LEFT JOIN chats ON chats.jid = groups.jid
+                           WHERE members.user_jid = ? AND COALESCE(groups.left_at, 0) = 0
+                             AND COALESCE(groups.is_parent, 0) = 0
+                           ORDER BY name COLLATE NOCASE LIMIT 32""",
+                        [target],
+                    ).fetchall()]
+                elif chat["kind"] == "group":
+                    info = connection.execute(
+                        """SELECT groups.owner_jid, groups.created_ts, groups.left_at
+                           FROM groups WHERE groups.jid = ?""", [target]).fetchone()
+                    group = {
+                        "created_ts": int(info["created_ts"] or 0) if info else 0,
+                        "owner_jid": str(info["owner_jid"] or "") if info else "",
+                        "left": bool(info and info["left_at"]),
+                    }
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if row is None:
+            raise OmaWhatsAppError("That chat is not available in the local WhatsApp index.")
+        output: dict[str, Any] = {
+            "ok": True, "kind": "chat-details",
+            "chat": chat, "account": self.active.name,
+            "archived": bool(row["archived"]), "pinned": bool(row["pinned"]),
+            "muted": muted_until_active(row["muted_until"]),
+            "since": int(row["since"] or 0),
+            "counts": {name: int(row[name] or 0)
+                       for name in ("total", "media", "documents", "links", "starred")},
+        }
+        if person is not None:
+            output["person"] = person
+            output["groups_in_common"] = common
+        if group is not None:
+            members = self.members(target)["members"]
+            owner = next((m for m in members if m.get("jid") == group["owner_jid"]), None)
+            output["group"] = {
+                "created_ts": group["created_ts"], "left": group["left"],
+                "owner_name": str(owner["name"]) if owner else "",
+                "participant_count": len(members),
+            }
+            output["participants"] = members[:256]
+        holder = {"account": self.active.name, "jid": target}
+        self._attach_cached_avatars([holder], self.accounts())
+        output["avatar_path"] = str(holder.get("avatar_path") or "")
+        return output
+
     def members(self, jid: str, query: str = "", limit: int = 500) -> dict[str, Any]:
         """Return locally known group members for composer mention completion."""
         chat = self._chat(jid)
@@ -4722,6 +4819,7 @@ def parser() -> argparse.ArgumentParser:
     messages = commands.add_parser("messages")
     messages.add_argument("--limit", type=int, default=160)
     commands.add_parser("members")
+    commands.add_parser("chat-details")
     commands.add_parser("send")
     commands.add_parser("contacts-search")
     commands.add_parser("check-number")
@@ -4822,6 +4920,8 @@ def main() -> int:
         if args.command == "messages":
             return emit(backend.messages(str(payload.get("jid") or ""),
                                          str(payload.get("query") or ""), args.limit))
+        if args.command == "chat-details":
+            return emit(backend.chat_details(str(payload.get("jid") or "")))
         if args.command == "members":
             return emit(backend.members(str(payload.get("jid") or ""),
                                         str(payload.get("query") or "")))

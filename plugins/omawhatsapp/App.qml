@@ -28,6 +28,7 @@ Item {
     when: !!root.service && !root.demoMode
     value: root.opened && !root.settingsOpen && root.currentChatKey() !== ""
       && (!root.narrow || root.narrowConversation)
+      && !(root.chatDetailsOpen && !root.chatDetailsBeside)
   }
 
   UpdateController {
@@ -296,6 +297,7 @@ Item {
     mediaViewer.closeViewer()
     var selectedFromPayload = false
     if (pendingOpenChatJid !== "") selectedFromPayload = selectPendingOpenChat()
+    chatDetailsOpen = demoMode && payload.details === true
     // {"newChat":true} opens the new chat dialog; demo captures may prefill it.
     if (payload.newChat === true) {
       var newChatQuery = demoMode && typeof payload.newChatQuery === "string" ? payload.newChatQuery : ""
@@ -353,6 +355,59 @@ Item {
     })
     return entry ? String(entry.label || entry.account || "") : root.newChatAccount
   }
+  // Chat details: a side panel when the window is wide, over the
+  // conversation when it is not.
+  property bool chatDetailsOpen: false
+  readonly property bool chatDetailsBeside: chatDetailsOpen && !narrow && width >= Style.space(1100)
+  property var demoDetails: ({
+    ok: true, kind: "chat-details", chat: { kind: "group", name: "OmaWhatsApp Lab" },
+    since: 1780000000, counts: { total: 1284, media: 42, documents: 7, links: 19, starred: 3 },
+    group: { created_ts: 1760000000, owner_name: "Sam Rivera", participant_count: 3, left: false },
+    participants: [
+      { jid: "sam@s.whatsapp.net", name: "Sam Rivera", phone: "15551234567", role: "superadmin" },
+      { jid: "alex@s.whatsapp.net", name: "Alex Kim", phone: "15557654321", role: "admin" },
+      { jid: "nora@s.whatsapp.net", name: "Nora Ali", phone: "15552468101", role: "member" }
+    ]
+  })
+  readonly property var chatDetailsData: root.demoMode ? root.demoDetails
+    : (root.service && root.service.chatDetails ? root.service.chatDetails : ({}))
+
+  Binding {
+    when: !root.demoMode && !!root.service
+    target: root.service
+    property: "chatDetailsWanted"
+    value: root.opened && root.chatDetailsOpen
+  }
+
+  function toggleChatDetails() {
+    chatDetailsOpen = !chatDetailsOpen
+    return chatDetailsOpen
+  }
+  function runChatDetailsAction(action) {
+    var chat = root.selectedChat
+    if (!chat) return false
+    if (action === "search") {
+      if (!root.chatDetailsBeside) chatDetailsOpen = false
+      if (root.narrow) root.narrowSearchOpen = true
+      Qt.callLater(function() { messageSearchField.forceActiveFocus() })
+      return true
+    }
+    if (action === "unread") return root.toggleChatRead(chat, false)
+    if (root.demoMode || !root.service) return false
+    return root.service.chatAction(root.currentChatRef(), action, "app")
+  }
+  function openFromChatDetails(jid, name, phone) {
+    var target = AccountModel.findChat(sourceChats, AccountModel.chatRef(root.selectedAccount, jid))
+    if (target) {
+      chatDetailsOpen = root.chatDetailsBeside
+      selectChat(target, "composer")
+      return true
+    }
+    // Someone from a group without a chat yet: the new chat dialog takes it.
+    chatDetailsOpen = false
+    return openNewChat(/^[0-9]{6,}$/.test(String(phone || "")) ? "+" + phone : String(name || ""))
+  }
+
   property var demoPeople: [
     { jid: "demo-alex", name: "Alex", phone: "15557654321", has_chat: true },
     { jid: "15551234567@s.whatsapp.net", name: "Sam Rivera", phone: "15551234567", has_chat: false },
@@ -457,6 +512,10 @@ Item {
   }
 
   function goBack() {
+    if (root.chatDetailsOpen) {
+      root.chatDetailsOpen = false
+      return
+    }
     if (root.voiceForCurrentChat && root.service
         && (root.service.voiceState === "recording"
             || root.service.voiceState === "preparing")) {
@@ -2035,7 +2094,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: root.narrow ? parent.left : sidebar.right
-        anchors.right: parent.right
+        anchors.right: root.chatDetailsBeside ? chatDetailsPanel.left : parent.right
 
         Item {
           id: conversationHeader
@@ -2085,6 +2144,9 @@ Item {
             ChatAvatar {
               showPhoto: root.showAvatars
               objectName: "conversationAvatar"
+              HoverHandler { id: headerAvatarHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: root.toggleChatDetails() }
+              PanelToolTip { visible: headerAvatarHover.hovered; text: "Chat details" }
               width: Style.space(34)
               height: width
               chat: root.headerChat
@@ -2102,12 +2164,16 @@ Item {
               spacing: Style.space(2)
               Text {
                 textFormat: Text.PlainText
+                objectName: "conversationTitle"
                 width: parent.width
                 text: root.displayGroupName
                 color: root.foreground
                 elide: Text.ElideRight
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
+                HoverHandler { id: headerTitleHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.toggleChatDetails() }
+                PanelToolTip { visible: headerTitleHover.hovered; text: "Chat details" }
               }
               Text {
                 textFormat: Text.PlainText
@@ -2220,6 +2286,7 @@ Item {
                   spacing: Style.space(2)
                   Repeater {
                     model: [
+                      { label: root.chatDetailsOpen ? "Hide chat details" : "Chat details", action: "details", destructive: false },
                       { label: root.selectedChat && root.selectedChat.pinned ? "Unpin chat" : "Pin chat", action: root.selectedChat && root.selectedChat.pinned ? "unpin" : "pin", destructive: false },
                       { label: root.selectedChat && root.selectedChat.muted ? "Unmute notifications" : "Mute notifications", action: root.selectedChat && root.selectedChat.muted ? "unmute" : "mute", destructive: false },
                       { label: root.selectedChat && root.selectedChat.archived ? "Unarchive chat" : "Archive chat", action: root.selectedChat && root.selectedChat.archived ? "unarchive" : "archive", destructive: false },
@@ -2247,7 +2314,9 @@ Item {
                       TapHandler {
                         onTapped: {
                           chatMenu.close()
-                          if (modelData.action === "remove-local") {
+                          if (modelData.action === "details") {
+                            root.toggleChatDetails()
+                          } else if (modelData.action === "remove-local") {
                             root.requestRemoveLocalChat()
                           } else if (modelData.action === "unread") {
                             root.toggleChatRead(root.selectedChat, false)
@@ -3605,6 +3674,33 @@ Item {
             }
           }
         }
+      }
+
+      ChatDetailsPanel {
+        id: chatDetailsPanel
+        visible: root.chatDetailsOpen && !!root.selectedChat && !root.settingsOpen
+        z: root.chatDetailsBeside ? 0 : 5
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        width: root.chatDetailsBeside ? Style.space(340)
+          : (root.narrow ? parent.width : Math.max(Style.space(340), conversation.width))
+        details: root.chatDetailsData
+        chat: root.selectedChat
+        loading: !root.demoMode && !!root.service && root.service.chatDetailsLoading
+        showAvatars: root.showAvatars
+        foreground: root.foreground
+        surface: root.background
+        accent: root.accent
+        muted: root.dim
+        fontFamily: root.fontFamily
+        onCloseRequested: root.chatDetailsOpen = false
+        onActionRequested: function(action) { root.runChatDetailsAction(action) }
+        onFilterRequested: function(filter) {
+          root.contentFilter = filter
+          if (!root.chatDetailsBeside) root.chatDetailsOpen = false
+        }
+        onOpenChatRequested: function(jid, name, phone) { root.openFromChatDetails(jid, name, phone) }
       }
 
       NewChatDialog {

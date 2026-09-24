@@ -1178,6 +1178,39 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(command[command.index("--to") + 1], "alex@s.whatsapp.net")
         self.assertEqual(command[command.index("--message") + 1], "hello")
 
+    def test_chat_details_are_read_locally_for_a_group(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("""INSERT INTO groups (jid, name, owner_jid, created_ts, updated_at)
+                                  VALUES ('team@g.us', 'Design team', 'admin@s.whatsapp.net', 100, 1)""")
+            connection.execute("INSERT INTO starred VALUES ('team@g.us', 't1', '', 0, 5)")
+        with mock.patch.object(self.backend, "_run") as run:
+            details = self.backend.chat_details("team@g.us")
+        run.assert_not_called()
+        self.assertEqual(details["chat"]["name"], "Design team")
+        self.assertEqual(details["counts"], {"total": 2, "media": 1, "documents": 0,
+                                             "links": 0, "starred": 1})
+        self.assertEqual(details["since"], 20)
+        self.assertEqual(details["group"], {"created_ts": 100, "left": False,
+                                            "owner_name": "Alex Kim", "participant_count": 2})
+        self.assertEqual([m["role"] for m in details["participants"]], ["admin", "member"])
+        self.assertTrue(details["pinned"])
+        self.assertNotIn("person", details)
+
+    def test_chat_details_for_a_person_list_groups_in_common(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES ('member@s.whatsapp.net', 'dm', '', 9, 0, 0, 0, 0, 0)")
+            connection.execute("""INSERT INTO groups (jid, name, updated_at)
+                                  VALUES ('team@g.us', 'Design team', 1)""")
+            connection.execute("INSERT INTO contact_aliases VALUES ('member@s.whatsapp.net', 'Sammy', '', 1)")
+        details = self.backend.chat_details("member@s.whatsapp.net")
+        self.assertEqual(details["person"]["phone"], "15551234567")
+        self.assertEqual(details["person"]["full_name"], "Sam Rivera")
+        self.assertEqual(details["person"]["alias"], "Sammy")
+        self.assertEqual(details["groups_in_common"], [{"jid": "team@g.us", "name": "Design team"}])
+        self.assertNotIn("participants", details)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not available"):
+            self.backend.chat_details("stranger@s.whatsapp.net")
+
     def test_group_members_are_named_and_admins_sort_first(self) -> None:
         members = self.backend.members("team@g.us")["members"]
         self.assertEqual([member["name"] for member in members], ["Alex Kim", "Sam Rivera"])

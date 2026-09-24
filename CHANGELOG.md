@@ -72,6 +72,14 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Chat details: click the chat's photo or name in the header (or Chat actions →
+  Chat details) for a contact or group panel read entirely from the local
+  mirror, so it never pauses sync: photo, phone and other names, mute, pin,
+  unread and search, media, link and document counts that filter the
+  conversation, starred messages, groups in common or participants with their
+  roles, and how long this computer has held the chat. It sits beside the
+  conversation on wide windows and over it otherwise; a covered conversation
+  does not count as read.
 - Start a new chat from the button beside "Chats" (Ctrl+N) or from the bar
   dropdown. The dialog searches the people the account's mirror knows by name
   or number; a person with a chat opens it. A typed number is first checked
