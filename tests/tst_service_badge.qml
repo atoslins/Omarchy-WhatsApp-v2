@@ -14,10 +14,12 @@ TestCase {
     var service = createTemporaryObject(serviceComponent, testCase)
     service.syncActive = true
     service.writing = true
-    service.activeWriteKind = "files"
+    service.activeWriteKind = "delete"
     compare(service.syncPauseReason, "", "sync is up: nothing to explain")
     service.syncActive = false
-    compare(service.syncPauseReason, "sending files")
+    compare(service.syncPauseReason, "deleting a message")
+    service.activeWriteKind = "files"
+    compare(service.syncPauseReason, "", "wacli delegates files to the sync process")
     service.activeWriteKind = "send"
     compare(service.syncPauseReason, "", "a delegated send never pauses sync; this is a real outage")
     service.writing = false

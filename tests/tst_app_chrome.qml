@@ -341,8 +341,8 @@ TestCase {
     var h = createHarness({ syncActive: false })
     var status = findChild(h.app, "railSyncStatus")
     compare(status.label, "Reconnecting…")
-    h.service.syncPauseReason = "sending files"
-    compare(status.label, "Sync paused · sending files")
+    h.service.syncPauseReason = "deleting a message"
+    compare(status.label, "Sync paused · deleting a message")
     h.service.syncActive = true
     compare(status.label, "")
   }

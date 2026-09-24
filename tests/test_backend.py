@@ -898,6 +898,77 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(len(seen), 8, "every message once, including three sharing a second")
         self.assertEqual(seen[0], "a1")
 
+    PHONE_CHAT = "15550004444@s.whatsapp.net"
+
+    def _file_under_lid(self) -> str:
+        # Found on the owner's mirror: a delegated file send is filed under
+        # the @lid WhatsApp answered the recipient warmup with.
+        lid = "123456789012345@lid"
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES (?, 'dm', 'Robin', 45, 0, 0, 0, 0, 0)",
+                               [self.PHONE_CHAT])
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES (?, 'Robin', 'r1', '', 'Robin', 45, 0, 'hi', '', '', '', '')""",
+                [self.PHONE_CHAT])
+            connection.execute("INSERT INTO chats VALUES (?, 'unknown', '', 90, 0, 0, 0, 0, 0)", [lid])
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, filename, local_path)
+                   VALUES (?, '', 'SENT-FILE', '', 'me', 90, 1, '', '', 'document',
+                           'application/pdf', 'report.pdf', '')""", [lid])
+        return lid
+
+    def _resolve_lid(self, lid: str, phone: str):
+        def run(args, **_kwargs):
+            if args[:4] == ["--read-only", "--json", "contacts", "show"] and args[-1] == lid:
+                return subprocess.CompletedProcess(args, 0, json.dumps(
+                    {"success": True, "data": {"jid": phone}}), "")
+            raise AssertionError(args)
+        return mock.patch.object(self.backend, "_run", side_effect=run)
+
+    def test_a_file_filed_under_the_contacts_lid_shows_in_their_chat(self) -> None:
+        lid = self._file_under_lid()
+        with self._resolve_lid(lid, self.PHONE_CHAT) as run:
+            messages = self.backend.messages(self.PHONE_CHAT)["messages"]
+            chats = self.backend.chats()["chats"]
+        self.assertEqual([m["id"] for m in messages], ["SENT-FILE", "r1"],
+                         "the sent file is the newest message of the contact's chat")
+        robin = next(chat for chat in chats if chat["jid"] == self.PHONE_CHAT)
+        self.assertEqual(robin["timestamp"], 90)
+        self.assertEqual(robin["last_message_id"], "SENT-FILE")
+        self.assertEqual(robin["preview"], "report.pdf")
+        self.assertEqual(chats[1]["jid"], self.PHONE_CHAT,
+                         "the chat moves up with its newest message (after the pinned one)")
+        self.assertNotIn(lid, [chat["jid"] for chat in chats])
+        self.assertEqual(run.call_count, 1, "each @lid is resolved once and then cached")
+        with mock.patch.object(self.backend, "_run") as again:
+            self.backend.messages(self.PHONE_CHAT)
+        again.assert_not_called()
+
+    def test_actions_on_a_lid_filed_message_use_its_real_chat(self) -> None:
+        lid = self._file_under_lid()
+        with self._resolve_lid(lid, self.PHONE_CHAT):
+            chat, message = self.backend._message(self.PHONE_CHAT, "SENT-FILE")
+        self.assertEqual(message["chat_jid"], lid)
+        sent = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        with mock.patch.object(self.backend, "_write", return_value=sent) as write:
+            self.backend.delete_message(self.PHONE_CHAT, "SENT-FILE", True)
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--chat") + 1], lid,
+                         "wacli finds the stored message only under the chat it was filed in")
+
+    def test_an_unresolved_lid_stays_out_and_is_not_asked_again(self) -> None:
+        self._file_under_lid()
+        def run(args, **_kwargs):
+            return subprocess.CompletedProcess(args, 0, json.dumps({"success": True, "data": {}}), "")
+        with mock.patch.object(self.backend, "_run", side_effect=run) as first:
+            ids = [m["id"] for m in self.backend.messages(self.PHONE_CHAT)["messages"]]
+            self.backend.messages(self.PHONE_CHAT)
+        self.assertNotIn("SENT-FILE", ids, "a row is never shown in a chat it cannot be tied to")
+        self.assertEqual(first.call_count, 1)
+
     def test_messages_never_cross_chat_boundary(self) -> None:
         values = self.backend.messages("team@g.us")["messages"]
         self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])

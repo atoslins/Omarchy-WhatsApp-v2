@@ -63,6 +63,10 @@ own history directory. The helper reads only the `dnd` flag of
 quiet under do not disturb; the sound is the freedesktop theme's
 `message-new-instant`, played with `pw-play`.
 
+`lid-aliases.json` (mode `0600`) maps each `@lid` chat found in the mirror to
+the contact's phone chat, as answered by `wacli --read-only contacts show`, so
+a file wacli filed under the `@lid` still shows in that contact's chat.
+
 So that the next message in a chat updates its popup instead of stacking a
 new one, the helper keeps each chat's last popup id for an hour in the
 owner-private `notify-ids.json` (mode `0600`, at most 64 entries, keyed by

@@ -134,8 +134,16 @@ no handler that stores them. Whatever arrives during the pause, including the
 read receipts from reading a chat on another device, never reaches the mirror.
 For that reason nothing yields by itself any more: automatic chat-photo refresh
 is off by default (preferences version 4 turns it off), and the remaining
-yields are user actions that wacli cannot delegate (files, voice notes,
-deletes, forwards, photo refresh and number checks).
+yields are user actions that wacli 0.18.3 cannot delegate: deletes, forwards,
+pin, mute and archive, photo refresh and number checks. Text, files, voice
+notes, stickers, polls, reactions, edits and read state go through the sync
+process's socket and never pause it.
+
+A delegated file send can land under a contact's `@lid`: wacli's recipient
+warmup swaps the phone JID for the JID WhatsApp answers with, and only its next
+sync start migrates the row back. The helper folds such rows into the phone
+chat at read time, resolving each `@lid` once with `wacli --read-only contacts
+show` and caching the answer; it never reads `session.db` itself.
 
 The offline choice (Settings → Background sync) is persisted privately and maps to
 `systemctl --user disable --now wacli-sync.service`. Read paths remain usable;

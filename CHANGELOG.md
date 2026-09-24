@@ -77,6 +77,13 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- A file sent to a contact no longer vanishes from the chat on the next
+  refresh. wacli swaps the phone JID for the contact's `@lid` before a file
+  send and files the message there; the helper folds those rows back into the
+  phone chat (conversation, preview and order), and actions on them use the
+  chat they were filed in.
+- The rail's pause reason no longer names files or voice notes: wacli 0.18.3
+  sends them through the sync process, which never pauses for them.
 - Drag the chat list's edge to resize it; the width is saved, and a double
   click on the edge goes back to the automatic width.
 - The All/Unread/Groups/Archived chips scroll sideways, with the wheel too,

@@ -123,6 +123,13 @@ MAX_NOTIFY_WATERMARKS = 500
 NOTIFY_EXPIRE_MS = 8000
 # The popup id of each chat's last notification, so the next message in that
 # chat updates it instead of stacking another one.
+# wacli files a delegated file send under the @lid WhatsApp answers with,
+# away from the contact's phone-number chat, until its next sync start
+# migrates it. The helper folds those rows back in, resolving each @lid once
+# through `wacli --read-only contacts show` (it never reads session.db).
+LID_ALIASES_FILE = "lid-aliases.json"
+MAX_LID_ALIASES = 256
+MAX_LID_ALIASES_STATE = 64 * 1024
 DOCTOR_CACHE_FILE = "doctor-cache.json"
 DOCTOR_CACHE_TTL = 60
 MAX_DOCTOR_CACHE = 16 * 1024
@@ -1933,6 +1940,59 @@ class Backend:
             raise OmaWhatsAppError("That chat is not available in the local WhatsApp index.")
         return {"jid": str(row["jid"]), "name": str(row["name"]), "kind": str(row["kind"])}
 
+    def _lid_aliases(self) -> dict[str, str]:
+        """@lid chat JID -> phone chat JID for this account, cached for good."""
+        try:
+            with closing(self._connect()) as connection:
+                lids = [str(row[0]) for row in connection.execute(
+                    "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid GLOB '*@lid' LIMIT ?",
+                    [MAX_LID_ALIASES]).fetchall()]
+        except (sqlite3.Error, OmaWhatsAppError):
+            return {}
+        if not lids:
+            return {}
+        key = hashlib.sha256(self.active.key.encode("utf-8")).hexdigest()[:24]
+        cache = self._read_state_json(LID_ALIASES_FILE, MAX_LID_ALIASES_STATE, {})
+        cache = cache if isinstance(cache, dict) else {}
+        known = cache.get(key) if isinstance(cache.get(key), dict) else {}
+        aliases = {lid: str(known[lid]) for lid in lids
+                   if isinstance(known.get(lid), str) and known[lid].endswith("@s.whatsapp.net")}
+        missing = [lid for lid in lids if lid not in known]
+        if not missing:
+            return aliases
+        learned = dict(known)
+        for lid in missing[:16]:
+            phone_jid = ""
+            try:
+                result = self._run(["--read-only", "--json", "contacts", "show", "--jid", lid],
+                                   timeout=8)
+                data = json.loads(result.stdout or "{}").get("data")
+                candidate = str((data or {}).get("jid") or "") if isinstance(data, dict) else ""
+                if re.fullmatch(r"[0-9]{5,20}@s\.whatsapp\.net", candidate):
+                    phone_jid = candidate
+            except (OmaWhatsAppError, ValueError, AttributeError):
+                continue
+            # An unresolved @lid is remembered as "" so it is not asked again
+            # on every refresh; wacli's next sync start may still migrate it.
+            learned[lid] = phone_jid
+            if phone_jid:
+                aliases[lid] = phone_jid
+        try:
+            with self._state_lock("lid-aliases.lock"):
+                current = self._read_state_json(LID_ALIASES_FILE, MAX_LID_ALIASES_STATE, {})
+                current = current if isinstance(current, dict) else {}
+                current[key] = dict(list(learned.items())[-MAX_LID_ALIASES:])
+                self._write_state_json(LID_ALIASES_FILE, current, MAX_LID_ALIASES_STATE)
+        except (OmaWhatsAppError, OSError):
+            pass
+        return aliases
+
+    def _chat_jids(self, jid: str) -> list[str]:
+        """A phone chat and the @lid chats wacli filed some of its rows under."""
+        if not jid.endswith("@s.whatsapp.net"):
+            return [jid]
+        return [jid] + sorted(lid for lid, phone in self._lid_aliases().items() if phone == jid)
+
     def _chat_any(self, jid: str) -> dict[str, str]:
         target = jid.strip()
         if not target or len(target) > 160:
@@ -2243,11 +2303,22 @@ class Backend:
             "missing": missing, "failed": len(failed_keys), "cached": cached,
         }
 
+    @staticmethod
+    def _preview_sql(table: str) -> str:
+        return f"""CASE WHEN COALESCE({table}.media_type, '') <> '' THEN
+                        COALESCE(NULLIF(CASE WHEN {table}.media_type = 'audio'
+                            AND {table}.text = '[Audio]' THEN '' ELSE {table}.text END, ''),
+                          NULLIF({table}.media_caption, ''),
+                          NULLIF({table}.filename, ''), '[' || {table}.media_type || ']')
+                      ELSE COALESCE(NULLIF({table}.text, ''),
+                        NULLIF({table}.display_text, ''), '') END"""
+
     def _account_chats(
         self, cleaned: str, limit: int, preferences: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Read one account's chat rail. The caller owns account selection."""
         name_sql = self._chat_name_sql()
+        preview_sql = self._preview_sql("latest")
         where = SUPPORTED_CHAT_WHERE
         parameters: list[Any] = []
         if cleaned:
@@ -2262,13 +2333,7 @@ class Backend:
                       chats.pinned, chats.muted_until, chats.unread_count,
                       chats.unread AS unread_flag,
                       {name_sql} AS name,
-                      CASE WHEN COALESCE(latest.media_type, '') <> '' THEN
-                        COALESCE(NULLIF(CASE WHEN latest.media_type = 'audio'
-                            AND latest.text = '[Audio]' THEN '' ELSE latest.text END, ''),
-                          NULLIF(latest.media_caption, ''),
-                          NULLIF(latest.filename, ''), '[' || latest.media_type || ']')
-                      ELSE COALESCE(NULLIF(latest.text, ''),
-                        NULLIF(latest.display_text, ''), '') END AS preview,
+                      {preview_sql} AS preview,
                       COALESCE(latest.msg_id, '') AS last_message_id,
                       COALESCE(latest.media_type, '') AS last_media_type,
                       COALESCE(latest.from_me, 0) AS last_from_me,
@@ -2367,7 +2432,45 @@ class Backend:
                 "unread": unread,
                 "notification_unread": notification_unread,
             })
+        self._fold_lid_latest(chats)
         return chats
+
+    def _fold_lid_latest(self, chats: list[dict[str, Any]]) -> None:
+        """A row wacli filed under a contact's @lid still moves its chat."""
+        aliases = self._lid_aliases()
+        if not aliases:
+            return
+        by_jid = {str(chat["jid"]): chat for chat in chats}
+        preview_sql = self._preview_sql("latest")
+        try:
+            with closing(self._connect()) as connection:
+                for lid, phone in aliases.items():
+                    chat = by_jid.get(phone)
+                    if chat is None:
+                        continue
+                    row = connection.execute(
+                        f"""SELECT latest.ts, latest.msg_id, latest.from_me, latest.sender_name,
+                              {preview_sql} AS preview, COALESCE(latest.media_type, '') AS media
+                            FROM messages AS latest
+                            WHERE latest.chat_jid = ? AND latest.deleted_at IS NULL
+                              AND COALESCE(latest.reaction_to_id, '') = ''
+                              AND NOT {synthetic_message_sql("latest")}
+                            ORDER BY latest.ts DESC, latest.rowid DESC LIMIT 1""",
+                        [lid],
+                    ).fetchone()
+                    if row is None or int(row["ts"] or 0) <= int(chat["timestamp"] or 0):
+                        continue
+                    chat.update({
+                        "timestamp": int(row["ts"] or 0),
+                        "last_message_id": str(row["msg_id"] or "")[:256],
+                        "last_media_type": str(row["media"] or "")[:32],
+                        "preview": " ".join(str(row["preview"] or "").split())[:512],
+                        "last_from_me": bool(row["from_me"]),
+                        "last_sender": " ".join(str(row["sender_name"] or "").split())[:MAX_NOTIFY_SENDER],
+                    })
+        except (sqlite3.Error, OmaWhatsAppError):
+            return
+        chats.sort(key=lambda chat: (not chat["pinned"], -chat["timestamp"], chat["name"].casefold()))
 
     def chats(self, query: str = "", limit: int = 500) -> dict[str, Any]:
         """Merge every configured account into one rail, newest chat first."""
@@ -2904,13 +3007,14 @@ class Backend:
         sent_reply_hints = self._sent_reply_hints()
         cleaned = " ".join(query.split())[:256]
         limit = max(1, min(int(limit), 500))
-        where = """base.chat_jid = ? AND base.deleted_at IS NULL
+        chat_jids = self._chat_jids(chat["jid"])
+        where = f"""base.chat_jid IN ({",".join("?" for _ in chat_jids)}) AND base.deleted_at IS NULL
           AND COALESCE(base.reaction_to_id, '') = ''
           AND (COALESCE(base.text, '') <> '' OR COALESCE(base.media_caption, '') <> '' OR
                COALESCE(base.display_text, '') <> '' OR COALESCE(base.filename, '') <> '' OR
                COALESCE(base.media_type, '') <> '')
           AND NOT """ + synthetic_message_sql("base")
-        parameters: list[Any] = [chat["jid"]]
+        parameters: list[Any] = list(chat_jids)
         if cleaned:
             where += """ AND LOWER(COALESCE(NULLIF(base.text, ''), NULLIF(base.media_caption, ''),
               NULLIF(base.display_text, ''), NULLIF(base.filename, ''), '')) LIKE LOWER(?) ESCAPE '\\'"""
@@ -3251,13 +3355,15 @@ class Backend:
             raise OmaWhatsAppError("Choose a message first.")
         try:
             with closing(self._connect()) as connection:
+                chat_jids = self._chat_jids(chat["jid"])
                 row = connection.execute(
-                    """SELECT msg_id, sender_jid, sender_name, from_me, text,
+                    f"""SELECT chat_jid, msg_id, sender_jid, sender_name, from_me, text,
                       media_type, deleted_at
                     FROM messages
-                    WHERE chat_jid = ? AND msg_id = ?
-                      AND COALESCE(reaction_to_id, '') = ''""",
-                    [chat["jid"], target],
+                    WHERE chat_jid IN ({",".join("?" for _ in chat_jids)}) AND msg_id = ?
+                      AND COALESCE(reaction_to_id, '') = ''
+                    ORDER BY chat_jid = ? DESC LIMIT 1""",
+                    [*chat_jids, target, chat["jid"]],
                 ).fetchone()
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
@@ -3268,12 +3374,15 @@ class Backend:
     def _media_row(self, chat: dict[str, Any], target: str) -> sqlite3.Row:
         try:
             with closing(self._connect()) as connection:
+                chat_jids = self._chat_jids(chat["jid"])
                 row = connection.execute(
-                    """SELECT media_type, mime_type, filename, local_path, media_unavailable_at
+                    f"""SELECT chat_jid, media_type, mime_type, filename, local_path,
+                      media_unavailable_at
                     FROM messages
-                    WHERE chat_jid = ? AND msg_id = ? AND deleted_at IS NULL
-                      AND COALESCE(reaction_to_id, '') = ''""",
-                    [chat["jid"], target],
+                    WHERE chat_jid IN ({",".join("?" for _ in chat_jids)}) AND msg_id = ?
+                      AND deleted_at IS NULL AND COALESCE(reaction_to_id, '') = ''
+                    ORDER BY chat_jid = ? DESC LIMIT 1""",
+                    [*chat_jids, target, chat["jid"]],
                 ).fetchone()
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
@@ -3324,7 +3433,7 @@ class Backend:
         stem = hashlib.sha256(f"{chat['jid']}\n{target}".encode("utf-8")).hexdigest()[:16]
         destination = folder / f"{stem}-{self._safe_media_name(row, target)}"
         result = self._run(
-            ["--read-only", "--json", "media", "download", "--chat", chat["jid"],
+            ["--read-only", "--json", "media", "download", "--chat", str(row["chat_jid"]),
              "--id", target, "--output", str(destination)],
             timeout=180,
         )
@@ -3648,7 +3757,7 @@ class Backend:
             raise OmaWhatsAppError("An edited message cannot be empty.")
         if len(value) > MAX_MESSAGE:
             raise OmaWhatsAppError("Message is too long (maximum 4096 characters).")
-        command = ["--json", "messages", "edit", "--chat", chat["jid"],
+        command = ["--json", "messages", "edit", "--chat", str(message["chat_jid"]),
             "--id", str(message["msg_id"]), "--message", value,
             "--post-send-wait", "0"]
         self._envelope(self._write(command, timeout=45))
@@ -3658,7 +3767,7 @@ class Backend:
         chat, message = self._message(jid, message_id)
         if not for_me and not bool(message["from_me"]):
             raise OmaWhatsAppError("Only your own messages can be deleted for everyone.")
-        command = ["--json", "messages", "delete", "--chat", chat["jid"],
+        command = ["--json", "messages", "delete", "--chat", str(message["chat_jid"]),
             "--id", str(message["msg_id"]), "--post-send-wait", "0"]
         if for_me:
             command.append("--for-me")
@@ -3668,7 +3777,7 @@ class Backend:
     def forward_message(self, jid: str, message_id: str, to_jid: str) -> dict[str, Any]:
         source, message = self._message(jid, message_id)
         target = self._chat(to_jid)
-        command = ["--json", "messages", "forward", "--chat", source["jid"],
+        command = ["--json", "messages", "forward", "--chat", str(message["chat_jid"]),
             "--id", str(message["msg_id"]), "--to", target["jid"],
             "--post-send-wait", "0"]
         self._envelope(self._write(command, timeout=90))

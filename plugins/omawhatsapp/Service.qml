@@ -222,9 +222,10 @@ Item {
     if (accountOperations && accountOperations.avatarBusy) return "checking chat photos"
     if (numberCheck && numberCheck.loading) return "checking a number"
     if (!writing) return ""
+    // Files, voice notes, text, stickers, polls and reactions go through the
+    // sync process itself (wacli 0.18.3) and never pause it.
     switch (activeWriteKind) {
-    case "files": return "sending files"
-    case "voice": return "sending a voice note"
+    case "chat-action": return "updating the chat"
     case "delete": return "deleting a message"
     case "forward": return "forwarding a message"
     case "send-new": return "starting a chat"
