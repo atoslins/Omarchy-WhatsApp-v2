@@ -99,6 +99,9 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  readonly property bool enterSends: root.demoMode || !root.service || root.service.enterSends !== false
+  readonly property string composerHint: root.enterSends
+    ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
   readonly property bool notifyOn: !!root.service && root.service.notificationsEnabled
   readonly property bool notifyPreviewOn: !root.service || root.service.notificationsPreview
   readonly property bool notifyAvailable: !root.service || root.service.notifyAvailable
@@ -2738,10 +2741,16 @@ Item {
           readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
           readonly property int maxLines: root.composerMaxLines
           readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, maxLines))
-          // The 78px base leaves 38px for text after the surface/editor insets.
-          readonly property real composerExtraHeight:
-            Math.max(0, Math.ceil(visibleLines * singleLineHeight) - Style.space(38))
-          height: Math.min(Style.space(78) + composerExtraHeight + contextHeight, parent.height - Style.space(120))
+          // One control height for the attach button, a one-line field and the
+          // send button; every control sits on the same bottom edge, so a
+          // single line reads as centred and a taller draft grows upward.
+          readonly property real controlSize: Style.space(40)
+          readonly property real edge: Style.space(12)
+          readonly property real fieldPadding: Math.max(Style.space(6),
+            Math.floor((controlSize - singleLineHeight) / 2))
+          readonly property real fieldHeight: Math.max(controlSize,
+            Math.ceil(visibleLines * singleLineHeight) + fieldPadding * 2)
+          height: Math.min(fieldHeight + edge * 2 + contextHeight, parent.height - Style.space(120))
           color: Style.normalFillFor(root.foreground, root.accent)
 
           Rectangle {
@@ -2958,33 +2967,22 @@ Item {
             }
           }
 
-          Rectangle {
+          PanelActionButton {
             id: pasteButton
+            objectName: "composerAttachButton"
             visible: !root.voiceForCurrentChat
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(12)
+            anchors.leftMargin: composerBar.edge
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(22)
-            width: Style.space(34)
-            height: width
-            radius: Style.cornerRadius
-            color: pasteMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            Text {
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: "󰐕"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.icon
-            }
-            MouseArea {
-              id: pasteMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              onClicked: attachmentTray.opened ? attachmentTray.close() : attachmentTray.open()
-            }
-            PanelToolTip { visible: pasteMouse.containsMouse && !attachmentTray.opened; text: "Attach · Ctrl+O files · Ctrl+Shift+O photos and videos" }
+            anchors.bottomMargin: composerBar.edge
+            size: composerBar.controlSize
+            iconText: "󰏢"
+            tooltipText: attachmentTray.opened ? "" : "Attach · Ctrl+O files · Ctrl+Shift+O photos and videos"
+            foreground: attachmentTray.opened ? root.accent : root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.icon
+            onClicked: attachmentTray.opened ? attachmentTray.close() : attachmentTray.open()
 
             Popup {
               id: attachmentTray
@@ -3007,11 +3005,8 @@ Item {
                   model: [
                     { icon: "󰈔", label: "Document", action: "document" },
                     { icon: "󰉏", label: "Photos & videos", action: "media" },
-                    { icon: "󰄀", label: "Camera", action: "camera" },
                     { icon: "󰎆", label: "Audio", action: "audio" },
-                    { icon: "󰛋", label: "Contact", action: "contact" },
                     { icon: "󰐕", label: "Poll", action: "poll" },
-                    { icon: "󰃭", label: "Event", action: "event" },
                     { icon: "󰏘", label: "New sticker", action: "sticker" },
                     { icon: "󰅌", label: "Paste clipboard", action: "paste" }
                   ]
@@ -3051,12 +3046,6 @@ Item {
                         else if (modelData.action === "audio") root.openFilePicker("audio")
                         else if (modelData.action === "sticker") root.openFilePicker("sticker")
                         else if (modelData.action === "poll") root.startPoll()
-                        else if (modelData.action === "camera")
-                          root.attachmentError = "Camera capture needs a desktop camera portal; choose Photos & videos for now."
-                        else if (modelData.action === "contact")
-                          root.attachmentError = "wacli does not expose contact-card sending yet."
-                        else if (modelData.action === "event")
-                          root.attachmentError = "wacli does not expose WhatsApp event sending yet."
                         else root.pasteDraft()
                       }
                     }
@@ -3074,14 +3063,22 @@ Item {
             anchors.leftMargin: Style.space(8)
             anchors.right: sendButton.left
             anchors.rightMargin: Style.space(8)
-            anchors.top: parent.top
-            anchors.topMargin: composerBar.contextHeight + Style.space(10)
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(10)
+            anchors.bottomMargin: composerBar.edge
+            height: composerBar.fieldHeight
             radius: Style.cornerRadius
             color: root.background
-            border.width: composer.activeFocus ? 1 : 0
-            border.color: root.accent
+            border.width: 1
+            border.color: composer.activeFocus
+              ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.70)
+              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+
+            HoverHandler { id: composerFieldHover }
+            PanelToolTip {
+              delay: 900
+              visible: composerFieldHover.hovered && !composer.activeFocus
+              text: root.composerHint
+            }
 
             MouseArea {
               anchors.fill: parent
@@ -3092,10 +3089,10 @@ Item {
               id: composerFlickable
               objectName: "composerFlickable"
               anchors.fill: parent
-              anchors.leftMargin: Style.space(10)
+              anchors.leftMargin: Style.space(12)
               anchors.rightMargin: Style.space(6)
-              anchors.topMargin: Style.space(10)
-              anchors.bottomMargin: Style.space(10)
+              anchors.topMargin: composerBar.fieldPadding
+              anchors.bottomMargin: composerBar.fieldPadding
               contentWidth: width
               contentHeight: Math.max(height, composer.contentHeight)
               clip: true
@@ -3171,7 +3168,9 @@ Item {
                     root.pasteDraft()
                     event.accepted = true
                   } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                             && !(event.modifiers & Qt.ShiftModifier)) {
+                             && (root.enterSends
+                               ? !(event.modifiers & Qt.ShiftModifier)
+                               : !!(event.modifiers & Qt.ControlModifier))) {
                     root.sendDraft()
                     event.accepted = true
                   } else if (event.key === Qt.Key_Up && composer.text === "") {
@@ -3184,10 +3183,15 @@ Item {
 
             Text {
               textFormat: Text.PlainText
+              objectName: "composerPlaceholder"
               visible: composer.text === ""
+              // Same inset as the editor, so typing does not shift the line.
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(12)
+              anchors.top: parent.top
+              anchors.topMargin: composerBar.fieldPadding
+              elide: Text.ElideRight
+              width: parent.width - Style.space(24)
               text: root.pendingStickerPath !== "" ? "Sticker ready — no caption"
                 : root.pendingAttachments.length > 0 ? "Add a caption"
                 : (root.displayGroupName === "" ? "Choose a chat" : "Message " + root.displayGroupName)
@@ -3199,12 +3203,13 @@ Item {
 
           Rectangle {
             id: sendButton
+            objectName: "composerSendButton"
             visible: !root.voiceForCurrentChat
             anchors.right: parent.right
-            anchors.rightMargin: Style.space(12)
+            anchors.rightMargin: composerBar.edge
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(20)
-            width: Style.space(38)
+            anchors.bottomMargin: composerBar.edge
+            width: composerBar.controlSize
             height: width
             radius: width / 2
             color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
@@ -3214,18 +3219,27 @@ Item {
               textFormat: Text.PlainText
               anchors.centerIn: parent
               text: composer.text.trim() !== "" || root.pendingAttachments.length > 0
-                ? "➤" : "󰍬"
+                ? "󰒊" : "󰍬"
               color: root.currentChatKey() !== "" ? root.background : root.dimmer
               font.family: root.fontFamily
-              font.pixelSize: Style.font.body
+              font.pixelSize: Style.font.icon
             }
             MouseArea {
+              id: sendButtonMouse
               anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
               onClicked: {
                 if (composer.text.trim() !== "" || root.pendingAttachments.length > 0)
                   root.sendDraft()
                 else root.toggleVoiceRecording()
               }
+            }
+            PanelToolTip {
+              visible: sendButtonMouse.containsMouse
+              text: composer.text.trim() !== "" || root.pendingAttachments.length > 0
+                ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
+                : "Record a voice note · Ctrl+Shift+V"
             }
           }
 
@@ -3235,7 +3249,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(12)
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(18)
+            anchors.bottomMargin: composerBar.edge
             service: root.demoMode ? null : root.service
             owner: "app"
             account: root.selectedAccount

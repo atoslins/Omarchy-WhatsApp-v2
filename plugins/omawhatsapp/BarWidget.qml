@@ -52,9 +52,14 @@ BarWidget {
     if (dropdownLoader.item) dropdownLoader.item.toggle()
   }
 
-  function openDropdownDemo() {
+  function openDropdownDemo(conversation) {
     injectDropdown()
-    if (dropdownLoader.item) dropdownLoader.item.openDemo()
+    if (!dropdownLoader.item) return
+    dropdownLoader.item.openDemo()
+    // {"demo":true,"conversation":true} opens the first demo chat, so the
+    // mini conversation can be captured with repository-owned data only.
+    if (conversation === true && dropdownLoader.item.filteredChats.length > 0)
+      dropdownLoader.item.openConversation(dropdownLoader.item.filteredChats[0])
   }
 
   function openFullApp(payload) {
@@ -108,7 +113,7 @@ BarWidget {
   Connections {
     target: root.oma
     function onOpenDropdownRequested(payload) {
-      if (payload && payload.demo) root.openDropdownDemo()
+      if (payload && payload.demo) root.openDropdownDemo(payload.conversation === true)
       else root.open()
     }
     function onToggleDropdownRequested() {

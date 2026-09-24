@@ -32,6 +32,13 @@
   menu no longer offers "Mark read · send receipt", which was never a receipt.
 - Mark a chat read or unread from the rail row on hover, where the button takes
   the place of the unread count.
+- Redo the message composer in the full app and the bar dropdown: attach,
+  field and send share one height and one bottom edge, so one line reads as
+  centred and a longer draft grows upward; the placeholder sits on the line
+  the text will use. The Enter instructions move from the dropdown header into
+  a tooltip on the field, and a new preference makes Ctrl+Enter send instead
+  of Enter. The attach menu drops Camera, Contact and Event, which only showed
+  an error.
 - Show reactions that wacli stored under the contact's opaque @lid chat
   instead of the phone chat of the reacted message; a sent reaction used to
   vanish from the bubble.

@@ -227,6 +227,10 @@ Panel {
     })
   }
 
+  readonly property bool enterSends: demoMode || !service || service.enterSends !== false
+  readonly property string composerHint: enterSends
+    ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
+
   function open() { openFor(true) }
   function openDemo() { openFor(false) }
 
@@ -1072,7 +1076,8 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: root.offline ? "offline · viewing local archive"
-                  : (root.sending ? "sending…" : "Enter sends · Shift+Enter adds a line")
+                  : (root.sending ? "sending…" : "")
+                visible: text !== ""
                 color: root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -1195,8 +1200,6 @@ Panel {
             height: composerColumn.implicitHeight + Style.space(16)
             radius: Style.cornerRadius
             color: root.subtle
-            border.width: composer.activeFocus ? 1 : 0
-            border.color: root.accent
             Column {
               id: composerColumn
               anchors.left: parent.left
@@ -1293,59 +1296,48 @@ Panel {
                 width: parent.width
                 readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
                 readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, root.composerMaxLines))
-                readonly property int baseHeight: Style.space(44)
+                // Same rules as the full app: one control height, one bottom edge.
+                readonly property real controlSize: Style.space(36)
+                readonly property real fieldPadding: Math.max(Style.space(5),
+                  Math.floor((controlSize - singleLineHeight) / 2))
+                readonly property real baseHeight: controlSize
                 height: !root.voiceForCurrentChat
-                  ? Math.max(baseHeight, Math.ceil(visibleLines * singleLineHeight) + Style.space(20)) : 0
+                  ? Math.max(controlSize, Math.ceil(visibleLines * singleLineHeight) + fieldPadding * 2) : 0
 
-                Rectangle {
+                PanelActionButton {
                   id: filePickerButton
+                  objectName: "composerAttachButton"
                   anchors.left: parent.left
                   anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(5)
-                  width: Style.space(34)
-                  height: width
-                  radius: width / 2
-                  color: pasteHover.hovered ? root.selected : "transparent"
-                  Text {
-                    textFormat: Text.PlainText
-                    anchors.centerIn: parent
-                    text: "󰏢"
-                    color: root.accent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                  HoverHandler { id: pasteHover }
-                  PanelToolTip { visible: pasteHover.hovered; text: "Attach files · Ctrl+O" }
-                  TapHandler { onTapped: root.openFilePicker() }
+                  size: composerRowItem.controlSize
+                  iconText: "󰏢"
+                  tooltipText: "Attach files · Ctrl+O"
+                  foreground: root.muted
+                  hoverColor: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.body
+                  onClicked: root.openFilePicker()
                 }
-                Rectangle {
+                PanelActionButton {
                   id: clipboardButton
+                  objectName: "composerPasteButton"
                   anchors.left: filePickerButton.right
-                  anchors.leftMargin: Style.space(7)
                   anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(5)
-                  width: Style.space(34)
-                  height: width
-                  radius: width / 2
-                  color: clipboardHover.hovered ? root.selected : "transparent"
-                  Text {
-                    textFormat: Text.PlainText
-                    anchors.centerIn: parent
-                    text: "󰅌"
-                    color: root.accent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                  HoverHandler { id: clipboardHover }
-                  PanelToolTip { visible: clipboardHover.hovered; text: "Paste from the clipboard · Ctrl+V" }
-                  TapHandler { onTapped: root.pasteClipboard() }
+                  size: composerRowItem.controlSize
+                  iconText: "󰅌"
+                  tooltipText: "Paste from the clipboard · Ctrl+V"
+                  foreground: root.muted
+                  hoverColor: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.body
+                  onClicked: root.pasteClipboard()
                 }
                 Rectangle {
                   id: sendButton
+                  objectName: "composerSendButton"
                   anchors.right: parent.right
                   anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(5)
-                  width: Style.space(34)
+                  width: composerRowItem.controlSize
                   height: width
                   radius: width / 2
                   color: root.sending ? root.subtle : root.accent
@@ -1360,6 +1352,13 @@ Panel {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                   }
+                  HoverHandler { id: sendHover; cursorShape: Qt.PointingHandCursor }
+                  PanelToolTip {
+                    visible: sendHover.hovered && !root.sending
+                    text: String(composer.text || "").trim() !== "" || root.pendingAttachments.length > 0
+                      ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
+                      : "Record a voice note · Ctrl+Shift+V"
+                  }
                   TapHandler {
                     enabled: !root.sending
                     onTapped: {
@@ -1369,17 +1368,39 @@ Panel {
                     }
                   }
                 }
+                Rectangle {
+                  id: composerFieldSurface
+                  objectName: "composerFieldSurface"
+                  anchors.left: clipboardButton.right
+                  anchors.leftMargin: Style.space(6)
+                  anchors.right: sendButton.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  radius: Style.cornerRadius
+                  color: root.background
+                  border.width: 1
+                  border.color: composer.activeFocus
+                    ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.70)
+                    : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+                  HoverHandler { id: composerFieldHover }
+                  PanelToolTip {
+                    delay: 900
+                    visible: composerFieldHover.hovered && !composer.activeFocus
+                    text: root.composerHint
+                  }
+                }
                 Flickable {
                   id: composerFlickable
                   objectName: "composerFlickable"
-                  anchors.left: clipboardButton.right
-                  anchors.leftMargin: Style.space(7)
-                  anchors.right: sendButton.left
-                  anchors.rightMargin: Style.space(7)
+                  anchors.left: composerFieldSurface.left
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: composerFieldSurface.right
+                  anchors.rightMargin: Style.space(4)
                   anchors.top: parent.top
                   anchors.bottom: parent.bottom
-                  anchors.topMargin: Style.space(10)
-                  anchors.bottomMargin: Style.space(10)
+                  anchors.topMargin: composerRowItem.fieldPadding
+                  anchors.bottomMargin: composerRowItem.fieldPadding
                   contentWidth: width
                   contentHeight: Math.max(height, composer.contentHeight)
                   clip: true
@@ -1455,7 +1476,9 @@ Panel {
                         }
                         event.accepted = true
                       } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                                 && !(event.modifiers & Qt.ShiftModifier)) {
+                                 && (root.enterSends
+                                   ? !(event.modifiers & Qt.ShiftModifier)
+                                   : !!(event.modifiers & Qt.ControlModifier))) {
                         root.sendDraft()
                         event.accepted = true
                       }
