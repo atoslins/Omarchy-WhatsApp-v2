@@ -21,7 +21,7 @@ native, and visually at home in Omarchy.
   network sync continues in a quiet user service.
 - **Change-driven refresh.** A tiny resident filesystem watcher debounces
   SQLite/WAL changes, so new messages appear immediately without hot polling.
-- **A real offline switch.** Pause and disable background sync from the header;
+- **A real offline switch.** Pause and disable background sync in settings;
   the complete local archive remains searchable and readable.
 - **Private reading by default.** Opening a chat or dismissing its badge is
   local only. A clear in-app setting can opt into automatic receipts, while
@@ -271,8 +271,7 @@ Add the `Super+Shift+W` binding from
 | Dropdown `Esc` | Composer → messages → recent chats → close |
 | Dropdown `O` | Expand the exact chat into the full app |
 | `Ctrl+F` | Find in the current conversation |
-| `Ctrl+1` … `Ctrl+9` | Jump to that visible chat (search order respected) |
-| `Ctrl+B` | Collapse or restore the chat rail without losing context |
+| `Ctrl+B` | Hide or show the chat list without losing context (also the rail's hide button, and the show button in the conversation while it is hidden) |
 | Chat list `/` | Focus chat search; `Esc` returns to list navigation |
 | `C` | Focus the composer |
 | `Enter` / `Shift+Enter` | Send / add a line |
@@ -289,10 +288,9 @@ Add the `Super+Shift+W` binding from
 | `Left` / `Right` | Previous/next gallery item |
 | `+` / `-` / `0` | Zoom in/out/fit |
 | `Esc` | Step back: composer → messages → chat list → close |
-| Header `󰀄` account name | The account the open chat, composer, and header pills belong to |
-| Header `quiet` / `notify` pill | Left click toggles desktop popups; right click drops the message preview |
-| Header `online` / `offline` pill | Toggle background sync; local history stays available |
-| Header settings button | Private reading, badge, sync, dropdown size, composer expansion, chat photos, and updates |
+| Conversation subtitle | The account the open chat and composer belong to, shown only when more than one account is linked |
+| Rail status line | Appears only while sync is offline or reconnecting; click it to resume a paused sync |
+| Rail settings button | Private reading, badge, desktop notifications, background sync, dropdown size, composer expansion, chat photos, and updates |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
 Click the notification count in the dropdown header to clear every local badge

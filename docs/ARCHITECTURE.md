@@ -122,7 +122,7 @@ its companion socket. If that path is unavailable, the helper serializes a
 bounded fallback, briefly yields the user service, sends, and restarts sync in
 a `finally` block.
 
-The header's offline choice is persisted privately and maps to
+The offline choice (Settings → Background sync) is persisted privately and maps to
 `systemctl --user disable --now wacli-sync.service`. Read paths remain usable;
 all WhatsApp mutations fail closed until the user explicitly returns online.
 Installer upgrades preserve that choice.

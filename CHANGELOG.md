@@ -2,6 +2,7 @@
 
 ## Unreleased (fork)
 
+- Message hover actions sit beside the bubble with real icons and tooltips.
 - Accept wacli 0.17.1 or newer instead of exactly 0.17.1. The parity
   registry, tests, and CI are verified against 0.18.3; the installer reports
   a newer release and keeps its unclassified commands blocked.
@@ -9,6 +10,17 @@
   scoped to a locally indexed group. The registry now covers 104 leaves and
   records the release each leaf first appeared in (`min_wacli`).
 - Run CI against both wacli 0.17.1 and 0.18.3 on the Omarchy 4.0.4 shell API.
+- Drop the window title bar. Settings and hiding the chat list move to small
+  icon buttons beside "Chats", the sync state shows as a quiet line at the
+  bottom of the rail only while offline or reconnecting, and desktop
+  notifications move into Settings. The manual refresh buttons are gone; the
+  store watcher already refreshes, and right-clicking the bar icon still does.
+- The conversation subtitle no longer says "direct message" or "group"; it
+  names the chat's account only when more than one is linked.
+- Remove the Ctrl+1…Ctrl+9 chat jumps.
+- Every icon-only control has a tooltip, and the message hover actions use
+  reply, emoji and more-actions icons instead of unrelated glyphs. The bar
+  dropdown's attach button shows a paperclip instead of a megaphone.
 - Keep up to 2048 chat photos in the private cache instead of 128, so accounts
   with more chats than that stop evicting and re-downloading photos on every
   refresh, and check 64 chats per explicit refresh instead of 12 so filling the

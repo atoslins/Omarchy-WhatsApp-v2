@@ -720,7 +720,7 @@ Panel {
             Rectangle {
               id: notificationBadge
               visible: root.notificationCount > 0
-              anchors.right: refreshButton.left
+              anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               width: Math.max(Style.space(25), unreadHeader.implicitWidth + Style.space(10))
@@ -743,26 +743,6 @@ Panel {
                 cursorShape: Qt.PointingHandCursor
               }
               TapHandler { onTapped: root.requestClearNotifications() }
-            }
-
-            Rectangle {
-              id: refreshButton
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(32)
-              height: width
-              radius: width / 2
-              color: refreshHover.hovered ? root.selected : "transparent"
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: "󰑐"
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-              }
-              HoverHandler { id: refreshHover }
-              TapHandler { onTapped: root.refresh() }
             }
           }
 
@@ -1055,6 +1035,7 @@ Panel {
                 font.pixelSize: Style.font.body
               }
               HoverHandler { id: backHover }
+              PanelToolTip { visible: backHover.hovered; text: "Back to chats · Esc" }
               TapHandler { onTapped: root.backToChats() }
             }
             ChatAvatar {
@@ -1114,6 +1095,7 @@ Panel {
                 font.pixelSize: Style.font.body
               }
               HoverHandler { id: fullHover }
+              PanelToolTip { visible: fullHover.hovered; text: "Open in the full app · O" }
               TapHandler { onTapped: root.openFullApp() }
             }
             Rectangle {
@@ -1252,6 +1234,8 @@ Panel {
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   TapHandler { onTapped: root.replyTarget = null }
+                  HoverHandler { id: cancelReplyHover }
+                  PanelToolTip { visible: cancelReplyHover.hovered; text: "Cancel reply" }
                 }
               }
               Row {
@@ -1296,6 +1280,8 @@ Panel {
                         enabled: !root.sending
                         onTapped: root.removeAttachment(index)
                       }
+                      HoverHandler { id: removeFileHover }
+                      PanelToolTip { visible: removeFileHover.hovered; text: "Remove attachment" }
                     }
                   }
                 }
@@ -1323,12 +1309,13 @@ Panel {
                   Text {
                     textFormat: Text.PlainText
                     anchors.centerIn: parent
-                    text: "󰃦"
+                    text: "󰏢"
                     color: root.accent
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                   }
                   HoverHandler { id: pasteHover }
+                  PanelToolTip { visible: pasteHover.hovered; text: "Attach files · Ctrl+O" }
                   TapHandler { onTapped: root.openFilePicker() }
                 }
                 Rectangle {
@@ -1350,6 +1337,7 @@ Panel {
                     font.pixelSize: Style.font.body
                   }
                   HoverHandler { id: clipboardHover }
+                  PanelToolTip { visible: clipboardHover.hovered; text: "Paste from the clipboard · Ctrl+V" }
                   TapHandler { onTapped: root.pasteClipboard() }
                 }
                 Rectangle {

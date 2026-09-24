@@ -823,14 +823,6 @@ Item {
     else root.focusComposer()
   }
 
-  function selectChatAt(index) {
-    var position = Number(index)
-    if (position < 0 || position >= visibleChats.length) return
-    chatCursorIndex = position
-    chatList.positionViewAtIndex(position, ListView.Contain)
-    selectChat(visibleChats[position])
-  }
-
   function moveChatCursor(delta) {
     if (visibleChats.length === 0) return
     keyboardNavigation.moveChats(delta, visibleChats.length)
@@ -1366,11 +1358,7 @@ Item {
           event.accepted = true
           return
         }
-        if ((event.modifiers & Qt.ControlModifier)
-            && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
-          root.selectChatAt(event.key - Qt.Key_1)
-          event.accepted = true
-        } else if (event.key === Qt.Key_Escape) {
+        if (event.key === Qt.Key_Escape) {
           root.goBack()
           event.accepted = true
         } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_F) {
@@ -1404,200 +1392,6 @@ Item {
                    && root.keyboardContext === "messages" && event.key === Qt.Key_Space) {
           root.toggleCursorItem()
           event.accepted = true
-        }
-      }
-
-      // ------------------------------------------------------------ header
-
-      Item {
-        id: appHeader
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: Style.space(48)
-
-        Row {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(16)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(9)
-
-          Text {
-            textFormat: Text.PlainText
-            text: "󰖣"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.iconLarge
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            text: "OmaWhatsApp"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-          }
-        }
-
-        Row {
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(14)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(10)
-
-          Text {
-            textFormat: Text.PlainText
-            id: accountLabel
-            visible: root.multiAccount
-            anchors.verticalCenter: parent.verticalCenter
-            text: "󰀄 " + (root.selectedChat
-              ? AccountModel.labelOf(root.selectedChat) : root.selectedAccount)
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Rectangle {
-            id: notifyModeButton
-            height: Style.space(28)
-            width: notifyModeLabel.implicitWidth + Style.space(20)
-            radius: height / 2
-            color: notifyModeMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            border.width: !root.demoMode && root.notifyOn ? 1 : 0
-            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.65)
-
-            Text {
-              textFormat: Text.PlainText
-              id: notifyModeLabel
-              anchors.centerIn: parent
-              text: !root.notifyOn ? "󰂛 quiet"
-                : (!root.notifyAvailable ? "󰂚 notify · unavailable"
-                  : (root.notifyPreviewOn ? "󰂚 notify" : "󰂚 notify · names"))
-              color: !root.notifyOn ? root.dim
-                : (root.notifyAvailable ? root.accent : root.urgent)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            MouseArea {
-              id: notifyModeMouse
-              anchors.fill: parent
-              enabled: !root.demoMode && root.service && !root.service.controlWriting
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              acceptedButtons: Qt.LeftButton | Qt.RightButton
-              // Left click switches popups on or off; right click drops the preview.
-              onClicked: function(mouse) {
-                if (mouse.button === Qt.RightButton)
-                  root.service.setNotifications(null, !root.notifyPreviewOn)
-                else
-                  root.service.setNotifications(!root.notifyOn, null)
-              }
-            }
-          }
-
-          Rectangle {
-            id: syncModeButton
-            height: Style.space(28)
-            width: syncModeLabel.implicitWidth + Style.space(26)
-            radius: height / 2
-            color: syncModeMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            border.width: root.offlineForSelectedAccount ? 1 : 0
-            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.65)
-
-            Rectangle {
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(7)
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(6)
-              height: width
-              radius: width / 2
-              color: root.demoMode || (root.selectedStatusReady && root.service
-                && (root.service.syncActive || root.offlineForSelectedAccount))
-                ? root.accent : root.urgent
-              opacity: root.service && root.service.syncActive ? 0.9 : 0.55
-            }
-
-            Text {
-              textFormat: Text.PlainText
-              id: syncModeLabel
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(7)
-              anchors.verticalCenter: parent.verticalCenter
-              text: root.demoMode ? "preview"
-                : (!root.selectedStatusReady ? "loading"
-                  : (root.offlineForSelectedAccount ? "offline"
-                  : (root.service && root.service.syncActive ? "online" : "reconnecting")))
-              color: root.offlineForSelectedAccount ? root.accent : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            MouseArea {
-              id: syncModeMouse
-              anchors.fill: parent
-              enabled: !root.demoMode && root.service && root.selectedStatusReady
-                && !root.service.controlWriting
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.service.setOnline(root.offlineForSelectedAccount)
-            }
-          }
-
-          Rectangle {
-            width: Style.space(30)
-            height: width
-            radius: Style.cornerRadius
-            color: settingsMouse.containsMouse || root.settingsOpen
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            Text {
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: "󰒓"
-              color: root.settingsOpen ? root.accent : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-            MouseArea {
-              id: settingsMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.settingsOpen = !root.settingsOpen
-            }
-          }
-
-          Rectangle {
-            width: Style.space(30)
-            height: width
-            radius: Style.cornerRadius
-            color: refreshMouse.containsMouse
-              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-            Text {
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: "↻"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-            MouseArea {
-              id: refreshMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              onClicked: if (root.service) root.service.refresh()
-            }
-          }
-        }
-
-        Rectangle {
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          height: 1
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
         }
       }
 
@@ -1688,6 +1482,7 @@ Item {
                   font.pixelSize: Style.font.title
                 }
                 HoverHandler { id: closeSettingsHover }
+                PanelToolTip { visible: closeSettingsHover.hovered; text: "Close settings · Esc" }
                 TapHandler { onTapped: root.settingsOpen = false }
               }
             }
@@ -1784,6 +1579,93 @@ Item {
                 accent: root.accent
                 onToggled: if (root.service)
                   root.service.setPreference("show_unread_count", !checked)
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: Style.space(62)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(12)
+                anchors.right: notifySwitch.left
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Desktop notifications"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: !root.notifyAvailable ? "Needs notify-send from libnotify"
+                    : (root.notifyOn ? "Muted and archived chats stay silent" : "Off; the bar badge still counts new messages")
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              ToggleSwitch {
+                id: notifySwitch
+                objectName: "notifySwitch"
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.notifyOn
+                enabled: !root.demoMode && (root.notifyAvailable || root.notifyOn)
+                busy: root.service ? root.service.controlWriting : false
+                foreground: root.foreground
+                accent: root.accent
+                onToggled: if (!root.demoMode && root.service)
+                  root.service.setNotifications(!checked, null)
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: Style.space(62)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(12)
+                anchors.right: notifyPreviewSwitch.left
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Message text in notifications"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.notifyPreviewOn ? "Sender and message preview" : "Chat names only"
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              ToggleSwitch {
+                id: notifyPreviewSwitch
+                objectName: "notifyPreviewSwitch"
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.notifyPreviewOn
+                enabled: !root.demoMode && root.notifyOn
+                busy: root.service ? root.service.controlWriting : false
+                foreground: root.foreground
+                accent: root.accent
+                onToggled: if (!root.demoMode && root.service)
+                  root.service.setNotifications(null, !checked)
               }
             }
 
@@ -2046,7 +1928,7 @@ Item {
 
       Rectangle {
         id: sidebar
-        anchors.top: appHeader.bottom
+        anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         visible: root.narrow ? !root.narrowConversation : width > 0
@@ -2086,14 +1968,33 @@ Item {
               font.family: root.fontFamily
               font.pixelSize: Style.font.heading
             }
-            Text {
-              textFormat: Text.PlainText
+            Row {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              text: String(root.sourceChats.length)
-              color: root.dimmer
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+              spacing: Style.space(2)
+              PanelActionButton {
+                objectName: "railSettingsButton"
+                iconText: "󰢻"
+                tooltipText: "Settings"
+                foreground: root.settingsOpen ? root.accent : root.dim
+                hoverColor: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                size: Style.space(28)
+                onClicked: root.settingsOpen = !root.settingsOpen
+              }
+              PanelActionButton {
+                objectName: "railCollapseButton"
+                visible: !root.narrow
+                iconText: "󰁭"
+                tooltipText: "Hide chat list · Ctrl+B"
+                foreground: root.dim
+                hoverColor: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                size: Style.space(28)
+                onClicked: root.toggleSidebar()
+              }
             }
           }
 
@@ -2158,6 +2059,7 @@ Item {
             width: parent.width
             height: sidebar.height - Style.space(116)
               - appAccountSwitcher.height
+              - (railSyncStatus.visible ? railSyncStatus.height + Style.space(10) : 0)
               - (appAccountReadiness.hasUnavailableAccounts
                 ? appAccountReadiness.height + Style.space(10) : 0)
             clip: true
@@ -2200,18 +2102,6 @@ Item {
                 fontFamily: root.fontFamily
               }
 
-              Text {
-                textFormat: Text.PlainText
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(9)
-                anchors.verticalCenter: parent.verticalCenter
-                visible: index < 9 && Number(modelData.unread || 0) === 0
-                  && (chatRow.selected || chatMouse.containsMouse)
-                text: "Ctrl+" + String(index + 1)
-                color: root.dimmer
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
 
               Column {
                 anchors.left: chatAvatar.right
@@ -2278,6 +2168,55 @@ Item {
               }
             }
           }
+
+          Item {
+            id: railSyncStatus
+            objectName: "railSyncStatus"
+            readonly property string label: root.demoMode ? ""
+              : (!root.selectedStatusReady ? "Loading…"
+                : (root.offlineForSelectedAccount ? "Offline · local archive"
+                  : (root.service && root.service.syncActive ? "" : "Reconnecting…")))
+            width: parent.width
+            height: Style.space(18)
+            visible: label !== ""
+            opacity: 0.75
+
+            Row {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(6)
+                height: width
+                radius: width / 2
+                color: root.offlineForSelectedAccount ? root.dim : root.urgent
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: railSyncStatus.label
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+            MouseArea {
+              id: railSyncStatusMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: root.offlineForSelectedAccount ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: if (root.offlineForSelectedAccount && root.service
+                && !root.service.controlWriting) root.service.setOnline(true)
+            }
+            PanelToolTip {
+              visible: railSyncStatusMouse.containsMouse
+              text: root.offlineForSelectedAccount
+                ? "Background sync is paused. Click to resume it."
+                : (railSyncStatus.label === "Loading…"
+                  ? "Reading the account state."
+                  : "Background sync is not connected. Local history stays readable; new messages arrive once it reconnects.")
+            }
+          }
         }
       }
 
@@ -2286,7 +2225,7 @@ Item {
       Item {
         id: conversation
         visible: !root.narrow || root.narrowConversation
-        anchors.top: appHeader.bottom
+        anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: root.narrow ? parent.left : sidebar.right
         anchors.right: parent.right
@@ -2307,49 +2246,33 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(10)
 
-            Rectangle {
+            PanelActionButton {
               visible: root.narrow
-              width: visible ? Style.space(30) : 0
-              height: Style.space(30)
-              radius: Style.cornerRadius
-              color: backHover.hovered
-                ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: "←"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-              }
-              HoverHandler { id: backHover }
-              TapHandler {
-                onTapped: {
-                  root.narrowConversation = false
-                  root.narrowSearchOpen = false
-                }
+              width: visible ? implicitWidth : 0
+              iconText: "󰁍"
+              tooltipText: "Back to chats"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.body
+              size: Style.space(30)
+              onClicked: {
+                root.narrowConversation = false
+                root.narrowSearchOpen = false
               }
             }
 
-            Rectangle {
-              visible: !root.narrow
-              width: visible ? Style.space(30) : 0
-              height: Style.space(30)
-              radius: Style.cornerRadius
-              color: sidebarToggleHover.hovered
-                ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: root.sidebarCollapsed ? "󰤻" : "󰤸"
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.icon
-              }
-              HoverHandler { id: sidebarToggleHover }
-              TapHandler { onTapped: root.toggleSidebar() }
-              ToolTip.visible: sidebarToggleHover.hovered
-              ToolTip.text: (root.sidebarCollapsed ? "Show" : "Hide") + " chats · Ctrl+B"
+            PanelActionButton {
+              objectName: "showChatListButton"
+              visible: !root.narrow && root.sidebarCollapsed
+              width: visible ? implicitWidth : 0
+              iconText: "󰵵"
+              tooltipText: "Show chat list · Ctrl+B"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.body
+              size: Style.space(30)
+              onClicked: root.toggleSidebar()
             }
 
             ChatAvatar {
@@ -2379,8 +2302,14 @@ Item {
                 font.pixelSize: Style.font.body
               }
               Text {
+                objectName: "conversationSubtitle"
                 textFormat: Text.PlainText
-                text: root.displayKind === "group" ? "group" : "direct message"
+                // wacli keeps neither the contact's about text nor live
+                // presence, so the only honest subtitle is the account the
+                // chat belongs to, and only when more than one is linked.
+                text: root.multiAccount && root.selectedChat
+                  ? AccountModel.labelOf(root.selectedChat) : ""
+                visible: text !== ""
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -2437,46 +2366,32 @@ Item {
               }
             }
 
-            Rectangle {
+            PanelActionButton {
               visible: root.narrow && !root.narrowSearchOpen
-              width: visible ? Style.space(32) : 0
-              height: Style.space(32)
-              radius: Style.cornerRadius
-              color: narrowSearchHover.hovered
-                ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: "󰍉"
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.icon
-              }
-              HoverHandler { id: narrowSearchHover }
-              TapHandler {
-                onTapped: {
-                  root.narrowSearchOpen = true
-                  Qt.callLater(function() { messageSearchField.forceActiveFocus() })
-                }
+              width: visible ? implicitWidth : 0
+              iconText: "󰍉"
+              tooltipText: "Search messages · Ctrl+F"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.icon
+              size: Style.space(32)
+              onClicked: {
+                root.narrowSearchOpen = true
+                Qt.callLater(function() { messageSearchField.forceActiveFocus() })
               }
             }
 
-            Rectangle {
-              width: Style.space(32)
-              height: width
-              radius: Style.cornerRadius
-              color: chatMenuHover.hovered
-                ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: "󰇙"
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.icon
-              }
-              HoverHandler { id: chatMenuHover }
-              TapHandler { onTapped: chatMenu.open() }
+            PanelActionButton {
+              objectName: "chatMenuButton"
+              iconText: "󰇙"
+              tooltipText: "Chat actions"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.icon
+              size: Style.space(32)
+              onClicked: chatMenu.open()
 
               Popup {
                 id: chatMenu
@@ -2844,6 +2759,7 @@ Item {
                 font.pixelSize: Style.font.body
               }
               HoverHandler { id: cancelContextHover }
+              PanelToolTip { visible: cancelContextHover.hovered; text: root.editTarget ? "Cancel edit · Esc" : "Cancel reply · Esc" }
               TapHandler { onTapped: root.cancelComposerContext() }
             }
           }
@@ -2944,6 +2860,8 @@ Item {
                     font.pixelSize: Style.font.caption
                   }
                   TapHandler { onTapped: root.removeAttachment(index) }
+                  HoverHandler { id: removeAttachmentHover }
+                  PanelToolTip { visible: removeAttachmentHover.hovered; text: "Remove attachment" }
                 }
               }
             }
@@ -3007,6 +2925,7 @@ Item {
               hoverEnabled: true
               onClicked: attachmentTray.opened ? attachmentTray.close() : attachmentTray.open()
             }
+            PanelToolTip { visible: pasteMouse.containsMouse && !attachmentTray.opened; text: "Attach · Ctrl+O files · Ctrl+Shift+O photos and videos" }
 
             Popup {
               id: attachmentTray
@@ -3647,6 +3566,8 @@ Item {
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
               TapHandler { onTapped: root.dismissForward() }
+              HoverHandler { id: dismissForwardHover }
+              PanelToolTip { visible: dismissForwardHover.hovered; text: "Close · Esc" }
             }
           }
           TextField {

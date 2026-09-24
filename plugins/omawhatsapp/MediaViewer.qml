@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Ui
 import "MediaViewerLogic.js" as MediaLogic
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
@@ -169,6 +170,7 @@ FocusScope {
         font.pixelSize: Style.font.heading
       }
       HoverHandler { id: closeHover }
+      PanelToolTip { visible: closeHover.hovered; text: "Close · Esc" }
       TapHandler { onTapped: root.closeViewer() }
     }
 
