@@ -107,9 +107,9 @@ Item {
     helper: root.helper
     accounts: root.accounts
     onRefreshRequested: { root.refreshStatus(); root.refreshChats() }
-    onAvatarRefreshFinished: function(checked) {
+    onAvatarRefreshFinished: function(checked, pending) {
       root.autoAvatarNotBefore = Date.now()
-        + (checked >= avatarBatch ? root.autoAvatarBusyGap : root.autoAvatarQuietGap)
+        + (pending > 0 ? root.autoAvatarBusyGap : root.autoAvatarQuietGap)
     }
   }
 
@@ -307,6 +307,9 @@ Item {
     // after the process settles. A disabled receipt policy or offline mode is
     // an intentional boundary, so those clear the pending request.
     if (writing) return
+    // Paused sync means the store lock is taken; retry once it is back.
+    if (!syncActive && !offlineMode) { receiptRetry.interval = 2000; receiptRetry.restart(); return }
+    receiptRetry.interval = 100
     if (!SettingsPolicy.shouldSendAutomaticReceipt(
           sendReadReceipts, offlineMode, false)) {
       pendingReceiptRef = AccountModel.chatRef("", "")
@@ -361,7 +364,10 @@ Item {
       writeFailed(unavailable, targetRef, ({}), origin)
       return false
     }
+    // Saving a copy works offline when the file is already local; the helper
+    // refuses the download part while offline.
     var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
+      || kind === "save-media"
     if (offlineMode && kind !== "paste" && !isLocalAction) {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
@@ -475,6 +481,12 @@ Item {
     if (started) mediaDownloadId = id
     return started
   }
+  function saveMedia(chatRef, item, destination, owner) {
+    if (!item || !item.id || String(destination || "") === "") return false
+    return runWriteForChat("save-media", {
+      id: String(item.id), destination: String(destination)
+    }, chatRef, owner)
+  }
   function reactTo(chatRef, item, emoji, owner) {
     if (!item || !item.id) return false
     return runWriteForChat("react", {
@@ -515,6 +527,10 @@ Item {
   // "Mark as unread" for it. Throttled so a failing write cannot loop.
   function readOpenChatIfUnread(chat) {
     if (!root.windowOpen || !chat || Number(chat.unread || 0) <= 0) return false
+    // While sync is paused (a photo batch, a locked write) mark-read would
+    // wait on the store lock and hold the write queue; a later refresh after
+    // sync returns reads the chat instead.
+    if (!root.syncActive) return false
     var ref = AccountModel.refOf(chat)
     if (!AccountModel.sameRef(ref, root.selectedChatRef())) return false
     if (ref.key === root.manualUnreadKey) return false

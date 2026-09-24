@@ -44,6 +44,17 @@
   batches, then once a day. wacli needs the store lock for photo lookups, so
   each batch still pauses sync for a few seconds.
 - In-app update checks look at this fork's releases, not upstream's.
+- Download attachments with `media download --read-only --output` into
+  OmaWhatsApp's own media folder, so opening media no longer pauses sync.
+- Save as… for attachments, from the message menu and the media viewer.
+- Insert emoji from a picker beside the attach button in both composers; it
+  reads Omarchy's own emoji list and types at the cursor. In the bar dropdown
+  it replaces the paste button (Ctrl+V still pastes).
+- The bar dropdown's count now filters the list to unread chats; right-click
+  clears the badge. Background writes such as automatic reading no longer show
+  "sending…" in the dropdown or block going back to the list.
+- Each chat-photo batch stops after 20 seconds of paused sync; the rest stays
+  due for the next batch. Automatic reading waits for sync to be running.
 - Right-click a chat in the list for read or unread, pin, mute, archive and
   remove, and right-click a message for its actions at the pointer; the
   message menu gains React.

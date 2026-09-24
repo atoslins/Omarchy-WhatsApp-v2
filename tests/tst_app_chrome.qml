@@ -305,6 +305,18 @@ TestCase {
     verify(row.height < comfortable)
   }
 
+  function test_save_as_opens_a_save_dialog_with_a_suggested_name() {
+    var harness = createHarness()
+    var app = harness.app
+    verify(app.saveMediaAs({ id: "photo", filename: "trip.jpg", media_type: "image" }))
+    var process = findChild(app, "savePickerProcess")
+    verify(process.running)
+    verify(process.command.indexOf("--save") >= 0)
+    verify(process.command.indexOf("--confirm-overwrite") >= 0)
+    verify(process.command.filter(function(arg) {
+      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+  }
+
   function test_desktop_notifications_live_in_settings() {
     var harness = createHarness({ notificationsEnabled: true, notificationsPreview: true })
     var app = harness.app

@@ -35,6 +35,29 @@ Item {
   signal deleteRequested(bool forMe)
   signal forwardRequested()
   signal copyRequested(string text)
+  signal saveRequested()
+
+  // The message menu, as data: tests and the right-click path share it.
+  readonly property var menuActions: [
+    { label: "Reply", action: "reply", show: true },
+    { label: "React", action: "react", show: true },
+    { label: "Copy text", action: "copy", show: root.bodyText !== "" },
+    { label: "Edit", action: "edit", show: root.message.from_me && !root.message.media_type },
+    { label: "Save as…", action: "save", show: root.hasMedia },
+    { label: "Forward", action: "forward", show: true },
+    { label: "Delete for me", action: "delete-me", show: true },
+    { label: "Delete for everyone", action: "delete-all", show: root.message.from_me }
+  ].filter(function(item) { return item.show })
+  function runMenuAction(action) {
+    actionMenu.close()
+    if (action === "reply") root.replyRequested()
+    else if (action === "react") reactionPicker.open()
+    else if (action === "copy") root.copyRequested(root.bodyText)
+    else if (action === "edit") root.editRequested()
+    else if (action === "forward") root.forwardRequested()
+    else if (action === "save") root.saveRequested()
+    else root.deleteRequested(action === "delete-me")
+  }
   signal optionRequested(int index)
   signal playbackRequested(string messageId)
 
@@ -461,17 +484,10 @@ Item {
         id: menuColumn
         spacing: Style.space(2)
         Repeater {
-          model: [
-            { label: "Reply", action: "reply", show: true },
-            { label: "React", action: "react", show: true },
-            { label: "Copy text", action: "copy", show: root.bodyText !== "" },
-            { label: "Edit", action: "edit", show: root.message.from_me && !root.message.media_type },
-            { label: "Forward", action: "forward", show: true },
-            { label: "Delete for me", action: "delete-me", show: true },
-            { label: "Delete for everyone", action: "delete-all", show: root.message.from_me }
-          ]
+          model: root.menuActions
           delegate: Rectangle {
             required property var modelData
+            objectName: "messageMenu-" + modelData.action
             visible: modelData.show
             width: parent.width
             height: visible ? Style.space(32) : 0
@@ -489,17 +505,7 @@ Item {
               font.pixelSize: Style.font.caption
             }
             HoverHandler { id: menuHover }
-            TapHandler {
-              onTapped: {
-                actionMenu.close()
-                if (modelData.action === "reply") root.replyRequested()
-                else if (modelData.action === "react") reactionPicker.open()
-                else if (modelData.action === "copy") root.copyRequested(root.bodyText)
-                else if (modelData.action === "edit") root.editRequested()
-                else if (modelData.action === "forward") root.forwardRequested()
-                else root.deleteRequested(modelData.action === "delete-me")
-              }
-            }
+            TapHandler { onTapped: root.runMenuAction(modelData.action) }
           }
         }
       }

@@ -81,7 +81,20 @@ TestCase {
     service.selectedChatJid = target.jid
     service.sendReadReceipts = true
     service.appOpen = true
+    service.syncActive = true
     return service
+  }
+
+  function test_open_chat_waits_while_sync_is_paused() {
+    var service = openService(2)
+    service.syncActive = false
+    verify(!service.readOpenChatIfUnread(service.chats[0]),
+      "a paused sync holds the store lock; reading would block the write queue")
+    wait(200)
+    compare(service.activeWriteKind, "")
+    service.syncActive = true
+    service.lastAutoReadKey = ""
+    verify(service.readOpenChatIfUnread(service.chats[0]))
   }
 
   function test_new_messages_in_the_open_chat_are_read() {
@@ -145,10 +158,19 @@ TestCase {
   function test_photo_refresh_backs_off_once_nothing_more_is_due() {
     var service = createService(0)
     var before = Date.now()
-    service.accountOperations.avatarRefreshFinished(3)
+    service.accountOperations.avatarRefreshFinished(3, 0)
     verify(service.autoAvatarNotBefore - before >= service.autoAvatarQuietGap - 1000)
-    service.accountOperations.avatarRefreshFinished(service.accountOperations.avatarBatch)
+    service.accountOperations.avatarRefreshFinished(5, 40)
     verify(service.autoAvatarNotBefore - Date.now() <= service.autoAvatarBusyGap + 1000,
-      "a full batch means more is due soon")
+      "photos still due bring the next batch soon")
+  }
+
+  function test_save_media_goes_to_the_helper_for_the_exact_chat() {
+    var service = createService(0)
+    service.offlineMode = true
+    verify(service.saveMedia(target, { id: "photo" }, "/tmp/out.png", "app"),
+      "saving a copy is allowed offline; the helper refuses only a download")
+    compare(service.activeWriteKind, "save-media")
+    compare(service.activeWriteChatJid, target.jid)
   }
 }

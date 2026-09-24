@@ -282,6 +282,26 @@ class BackendTests(unittest.TestCase):
         self.assertEqual((second["checked"], second["failed"]), (3, 3))
         self.assertEqual(batches[1], [row["jid"] for row in rows[limit:]])
 
+    def test_a_photo_batch_stops_after_its_time_budget_and_leaves_the_rest_due(self) -> None:
+        account = self.backend.account("")
+        rows = [{"account": account.name, "jid": f"synthetic-{index}@example"}
+                for index in range(10)]
+        clock = iter([0.0] + [float(step) * 7.0 for step in range(40)])
+        looked_up = []
+
+        def lookup(args, **_kwargs):
+            looked_up.append(args)
+            return subprocess.CompletedProcess(args, 1, "", "no photo")
+
+        with mock.patch.object(self.backend, "chats", return_value={"chats": rows}), \
+                mock.patch.object(self.backend, "_yield_active_sync", return_value=False), \
+                mock.patch.object(self.backend, "_run_after_sync_yield", side_effect=lookup), \
+                mock.patch.object(backend_module.time, "monotonic", side_effect=lambda: next(clock)):
+            result = self.backend.refresh_avatars("remote-read")
+        self.assertLess(len(looked_up), 10, "the batch stopped at its time budget")
+        self.assertEqual(result["checked"], len(looked_up))
+        self.assertEqual(result["pending"], 10 - len(looked_up))
+
     def test_failed_avatar_download_retries_from_the_cached_generation(self) -> None:
         account = self.backend.account("")
         jid = "synthetic@example"
@@ -721,13 +741,55 @@ class BackendTests(unittest.TestCase):
                 "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
                 ["team@g.us", "t2"],
             )
-        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
-        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+        commands = []
+
+        def download(command, **_kwargs):
+            commands.append(list(command))
+            output = Path(command[command.index("--output") + 1])
+            output.write_bytes(b"png")
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps({"success": True, "data": {"path": str(output)}}), "")
+
+        with mock.patch.object(self.backend, "_run", side_effect=download), \
+                mock.patch.object(self.backend, "_write") as write:
             result = self.backend.download_media("team@g.us", "t2")
         self.assertTrue(result["ok"])
-        command = write.call_args.args[0]
+        write.assert_not_called()
+        command = commands[0]
+        self.assertEqual(command[:1], ["--read-only"], "no store lock, so sync keeps running")
         self.assertEqual(command[command.index("--chat") + 1], "team@g.us")
         self.assertEqual(command[command.index("--id") + 1], "t2")
+        saved = Path(result["local_path"])
+        self.assertTrue(saved.is_file())
+        self.assertTrue(str(saved).startswith(str(self.root / "state" / "media")))
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        message = next(item for item in self.backend.messages("team@g.us")["messages"]
+                       if item["id"] == "t2")
+        self.assertEqual(message["local_path"], str(saved), "the timeline sees the download")
+        with mock.patch.object(self.backend, "_run") as again:
+            self.assertEqual(self.backend.download_media("team@g.us", "t2")["local_path"], str(saved))
+        again.assert_not_called()
+
+    def test_offline_mode_blocks_attachment_download(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"])
+        with mock.patch.object(self.backend, "online", return_value=False), \
+                mock.patch.object(self.backend, "_run") as run:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline"):
+                self.backend.download_media("team@g.us", "t2")
+        run.assert_not_called()
+
+    def test_save_media_copies_the_attachment_to_the_chosen_file(self) -> None:
+        destination = self.root / "Downloads" / "saved.png"
+        destination.parent.mkdir()
+        result = self.backend.save_media("team@g.us", "t2", str(destination))
+        self.assertEqual(result["path"], str(destination))
+        self.assertEqual(destination.read_bytes(), self.preview.read_bytes())
+        for bad in ("relative.png", str(self.root / "missing" / "x.png"), str(destination.parent)):
+            with self.assertRaises(backend_module.OmaWhatsAppError):
+                self.backend.save_media("team@g.us", "t2", bad)
 
     def test_unavailable_media_is_not_retried_forever(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:

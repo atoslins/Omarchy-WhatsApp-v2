@@ -102,6 +102,24 @@ TestCase {
     compare(Math.round(menu.y), 12)
   }
 
+  SignalSpy { id: saveSpy; signalName: "saveRequested" }
+
+  function test_save_as_is_offered_for_media_only() {
+    var text = createTemporaryObject(bubbleComponent, testCase)
+    var actions = function(bubble) { return bubble.menuActions.map(function(item) { return item.action }) }
+    verify(actions(text).indexOf("save") < 0, "plain text has nothing to save")
+    var media = createTemporaryObject(bubbleComponent, testCase, {
+      message: { id: "photo", text: "", sender: "Demo", timestamp: 1787540100,
+        from_me: false, media_type: "image", mime_type: "image/png", local_path: "", reactions: [] }
+    })
+    verify(actions(media).indexOf("save") >= 0)
+    compare(media.menuActions.filter(function(item) { return item.action === "save" })[0].label, "Save as…")
+    saveSpy.target = media
+    saveSpy.clear()
+    media.runMenuAction("save")
+    compare(saveSpy.count, 1)
+  }
+
   function test_every_action_has_a_recognisable_icon_and_a_tooltip() {
     var bubble = createTemporaryObject(bubbleComponent, testCase)
     var expected = [

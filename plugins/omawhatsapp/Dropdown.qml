@@ -83,10 +83,21 @@ Panel {
     ? [{ account: "work", label: "work" },
        { account: "personal", label: "personal" }]
     : (service && Array.isArray(service.accounts) ? service.accounts : [])
+  // The count in the header toggles this: only chats with unread messages.
+  property bool unreadOnly: false
+  function badgeTapped(button) {
+    if (button === Qt.RightButton) return root.requestClearNotifications()
+    root.unreadOnly = !root.unreadOnly
+    root.selectedIndex = 0
+    return true
+  }
   readonly property var filteredChats: {
     var needle = String(searchText || "").trim().toLowerCase()
     var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
-    return AccountModel.filterChats(root.sourceChats, scope, needle,
+    var source = root.unreadOnly
+      ? root.sourceChats.filter(function(chat) { return Number(chat.unread || 0) > 0 })
+      : root.sourceChats
+    return AccountModel.filterChats(source, scope, needle,
       Math.max(1, Number(maxRows || 7)))
   }
   readonly property bool serviceOnCurrentChat: !!service
@@ -118,7 +129,10 @@ Panel {
     && String(service.statusAccount || "") === currentAccount())
   readonly property bool offline: !demoMode && accountStatusReady
     && service.offlineMode
-  readonly property bool sending: !demoMode && service && service.writing
+  // Only this surface's own sends: automatic reading and other background
+  // writes must never freeze the mini client or block going back.
+  readonly property bool sending: !demoMode && !!service && service.writing
+    && service.activeWriteOwner === "dropdown"
     && String(service.activeWriteChatJid || "") === currentJid()
     && String(service.activeWriteAccount || "") === currentAccount()
   readonly property bool voiceForCurrentChat: !demoMode && service
@@ -724,21 +738,24 @@ Panel {
 
             Rectangle {
               id: notificationBadge
-              visible: root.notificationCount > 0
+              objectName: "notificationBadge"
+              visible: root.notificationCount > 0 || root.unreadOnly
               anchors.right: parent.right
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               width: Math.max(Style.space(25), unreadHeader.implicitWidth + Style.space(10))
               height: Style.space(24)
               radius: height / 2
-              color: root.accent
+              color: root.unreadOnly ? "transparent" : root.accent
+              border.width: root.unreadOnly ? 1 : 0
+              border.color: root.accent
               opacity: notificationBadgeHover.hovered ? 0.82 : 1
               Text {
                 textFormat: Text.PlainText
                 id: unreadHeader
                 anchors.centerIn: parent
                 text: root.notificationCount > 99 ? "99+" : String(root.notificationCount)
-                color: root.background
+                color: root.unreadOnly ? root.accent : root.background
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 font.weight: Font.DemiBold
@@ -747,7 +764,15 @@ Panel {
                 id: notificationBadgeHover
                 cursorShape: Qt.PointingHandCursor
               }
-              TapHandler { onTapped: root.requestClearNotifications() }
+              TapHandler {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onTapped: function(eventPoint, button) { root.badgeTapped(button) }
+              }
+              PanelToolTip {
+                visible: notificationBadgeHover.hovered
+                text: (root.unreadOnly ? "Show all chats" : "Show only unread chats")
+                  + " · right-click clears the badge"
+              }
             }
           }
 
@@ -1322,18 +1347,30 @@ Panel {
                   onClicked: root.openFilePicker()
                 }
                 PanelActionButton {
-                  id: clipboardButton
-                  objectName: "composerPasteButton"
+                  id: emojiButton
+                  objectName: "composerEmojiButton"
                   anchors.left: filePickerButton.right
                   anchors.bottom: parent.bottom
                   size: composerRowItem.controlSize
-                  iconText: "󰅌"
-                  tooltipText: "Paste from the clipboard · Ctrl+V"
-                  foreground: root.muted
+                  iconText: "󰇵"
+                  tooltipText: dropdownEmojiPicker.opened ? "" : "Emoji"
+                  foreground: dropdownEmojiPicker.opened ? root.accent : root.muted
                   hoverColor: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: Style.font.body
-                  onClicked: root.pasteClipboard()
+                  onClicked: dropdownEmojiPicker.opened ? dropdownEmojiPicker.close() : dropdownEmojiPicker.open()
+
+                  EmojiPicker {
+                    id: dropdownEmojiPicker
+                    x: 0
+                    y: -height - Style.space(8)
+                    target: composer
+                    foreground: root.foreground
+                    surface: root.background
+                    accent: root.accent
+                    muted: root.muted
+                    fontFamily: root.fontFamily
+                  }
                 }
                 Rectangle {
                   id: sendButton
@@ -1374,7 +1411,7 @@ Panel {
                 Rectangle {
                   id: composerFieldSurface
                   objectName: "composerFieldSurface"
-                  anchors.left: clipboardButton.right
+                  anchors.left: emojiButton.right
                   anchors.leftMargin: Style.space(6)
                   anchors.right: sendButton.left
                   anchors.rightMargin: Style.space(8)

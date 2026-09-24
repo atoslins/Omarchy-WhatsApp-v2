@@ -116,6 +116,9 @@ LEGACY_ACCOUNT_NAME = "primary"
 # Chats checked per explicit refresh. Each refresh yields the sync unit
 # while it runs, so a larger batch means fewer restarts for the same work.
 AVATAR_REFRESH_LIMIT = 64
+# Each photo lookup is its own wacli connection holding the store lock, so a
+# batch stops starting lookups after this long; the rest stay due.
+AVATAR_BATCH_SECONDS = 20.0
 AVATAR_REFRESH_TTL = 7 * 24 * 60 * 60
 AVATAR_MISSING_TTL = 24 * 60 * 60
 AVATAR_FAILURE_BACKOFF = 60 * 60
@@ -1724,8 +1727,11 @@ class Backend:
                 return output, [candidate["key"] for candidate in candidates]
             active = self._yield_active_sync(account)
             operation_error: BaseException | None = None
+            started = time.monotonic()
             try:
                 for candidate in candidates:
+                    if time.monotonic() - started >= AVATAR_BATCH_SECONDS:
+                        break
                     args = ["--json", "profile", "picture-info", "--jid",
                             candidate["jid"], "--preview"]
                     if candidate["picture_id"]:
@@ -2059,6 +2065,7 @@ class Backend:
                     checked <= 0 or now - checked >= ttl
                     or (entry.get("missing") is not True and not has_file)):
                 due.append(candidate)
+        due_total = len(due)
         due = due[:bounded]
 
         grouped: dict[str, list[dict[str, str]]] = {}
@@ -2137,8 +2144,10 @@ class Backend:
         except AvatarCacheError as exc:
             raise OmaWhatsAppError(str(exc)) from exc
         cached = len(self.avatar_cache.paths(keys))
+        processed = len(metadata) + len(failed_keys)
         return {
-            "ok": True, "kind": "avatars", "checked": len(due),
+            "ok": True, "kind": "avatars", "checked": processed,
+            "pending": max(0, due_total - processed),
             "refreshed": refreshed, "unchanged": unchanged,
             "missing": missing, "failed": len(failed_keys), "cached": cached,
         }
@@ -2807,15 +2816,11 @@ class Backend:
             raise OmaWhatsAppError("That message is not available in this chat.")
         return chat, row
 
-    def download_media(self, jid: str, message_id: str) -> dict[str, Any]:
-        chat = self._chat(jid)
-        target = message_id.strip()
-        if not target or len(target) > 256:
-            raise OmaWhatsAppError("That attachment is missing its message ID.")
+    def _media_row(self, chat: dict[str, Any], target: str) -> sqlite3.Row:
         try:
             with closing(self._connect()) as connection:
                 row = connection.execute(
-                    """SELECT media_type, local_path, media_unavailable_at
+                    """SELECT media_type, mime_type, filename, local_path, media_unavailable_at
                     FROM messages
                     WHERE chat_jid = ? AND msg_id = ? AND deleted_at IS NULL
                       AND COALESCE(reaction_to_id, '') = ''""",
@@ -2825,17 +2830,90 @@ class Backend:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         if row is None or not str(row["media_type"] or ""):
             raise OmaWhatsAppError("That attachment is not available in this chat.")
+        return row
+
+    def _local_media_path(self, chat: dict[str, Any], target: str, row: sqlite3.Row) -> str:
         local_path = str(row["local_path"] or "")
         if local_path and Path(local_path).is_file():
-            return {"ok": True, "kind": "media", "local_path": local_path}
+            return local_path
+        hint = self._sent_media_hints().get(self._sent_hint_key(chat["jid"], target), {})
+        hinted = str(hint.get("local_path") or "")
+        return hinted if hinted and Path(hinted).is_file() else ""
+
+    @staticmethod
+    def _safe_media_name(row: sqlite3.Row, target: str) -> str:
+        name = Path(str(row["filename"] or "")).name
+        name = re.sub(r"[^\w.\- ()]+", "_", name).strip(" .")[:120]
+        if not name:
+            extension = mimetypes.guess_extension(str(row["mime_type"] or "")) or ""
+            name = re.sub(r"[^A-Za-z0-9]", "", target)[:32] + extension
+        return name or "attachment"
+
+    def download_media(self, jid: str, message_id: str) -> dict[str, Any]:
+        """Fetch one attachment without taking wacli's store lock.
+
+        `media download --read-only --output PATH` runs beside the live sync
+        instead of pausing it; wacli does not record that path, so the file is
+        kept in OmaWhatsApp's own media folder and remembered in the private
+        local-media index the timeline already consults.
+        """
+        chat = self._chat(jid)
+        target = message_id.strip()
+        if not target or len(target) > 256:
+            raise OmaWhatsAppError("That attachment is missing its message ID.")
+        row = self._media_row(chat, target)
+        existing = self._local_media_path(chat, target, row)
+        if existing:
+            return {"ok": True, "kind": "media", "local_path": existing}
         if row["media_unavailable_at"] is not None:
             raise OmaWhatsAppError("That older attachment is no longer available from WhatsApp.")
-        result = self._write(
-            ["--json", "media", "download", "--chat", chat["jid"], "--id", target],
+        if not self.online():
+            raise OmaWhatsAppError("Offline mode is on. Go online to download attachments.")
+        folder = self.state_dir / "media" / hashlib.sha256(
+            self.active.key.encode("utf-8")).hexdigest()[:16]
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stem = hashlib.sha256(f"{chat['jid']}\n{target}".encode("utf-8")).hexdigest()[:16]
+        destination = folder / f"{stem}-{self._safe_media_name(row, target)}"
+        result = self._run(
+            ["--read-only", "--json", "media", "download", "--chat", chat["jid"],
+             "--id", target, "--output", str(destination)],
             timeout=180,
         )
-        self._envelope(result)
-        return {"ok": True, "kind": "media"}
+        envelope = self._envelope(result)
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        saved = Path(str(data.get("path") or destination))
+        try:
+            saved.resolve().relative_to(folder.resolve())
+        except ValueError as exc:
+            raise OmaWhatsAppError("wacli saved the attachment outside the media folder.") from exc
+        if not saved.is_file() or saved.is_symlink():
+            raise OmaWhatsAppError("The attachment download did not produce a file.")
+        saved.chmod(0o600)
+        self._remember_sent_media_best_effort(
+            chat["jid"], target, saved, str(row["mime_type"] or ""), str(row["media_type"] or ""))
+        return {"ok": True, "kind": "media", "local_path": str(saved)}
+
+    def save_media(self, jid: str, message_id: str, destination: Any) -> dict[str, Any]:
+        """Copy one attachment to a path the user chose in a save dialog."""
+        if not isinstance(destination, str) or not destination.strip():
+            raise OmaWhatsAppError("Choose where to save the attachment.")
+        target_path = Path(destination).expanduser()
+        if not target_path.is_absolute() or not target_path.parent.is_dir():
+            raise OmaWhatsAppError("That folder does not exist.")
+        if target_path.is_symlink() or target_path.is_dir():
+            raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
+        source = Path(self.download_media(jid, message_id)["local_path"])
+        temporary = target_path.with_name(f".{target_path.name}.{secrets.token_hex(6)}.part")
+        try:
+            shutil.copyfile(source, temporary, follow_symlinks=False)
+            os.replace(temporary, target_path)
+        except OSError as exc:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+            raise OmaWhatsAppError("The attachment could not be saved there.") from exc
+        return {"ok": True, "kind": "save-media", "path": str(target_path)}
 
     @staticmethod
     def _envelope(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -4231,6 +4309,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("notify-mode")
     commands.add_parser("media-mode")
     commands.add_parser("about")
+    commands.add_parser("save-media")
     commands.add_parser("sync-mode")
     commands.add_parser("settings")
     commands.add_parser("avatars")
@@ -4372,6 +4451,10 @@ def main() -> int:
         if args.command == "notify-mode":
             return emit(backend.set_notifications(payload.get("enabled"),
                                                   payload.get("preview")))
+        if args.command == "save-media":
+            return emit(backend.save_media(str(payload.get("jid") or ""),
+                                           str(payload.get("id") or ""),
+                                           payload.get("destination")))
         if args.command == "about":
             return emit(backend.about())
         if args.command == "media-mode":

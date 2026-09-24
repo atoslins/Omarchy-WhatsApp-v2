@@ -797,6 +797,24 @@ Item {
     filePickerProcess.running = true
   }
 
+  // Save as…: a zenity save dialog, then the helper copies the attachment
+  // (downloading it first, without pausing sync, when it is not local yet).
+  function saveMediaAs(item) {
+    if (!item || !item.id || savePickerProcess.running) return false
+    var origin = currentChatRef()
+    if (origin.jid === "" || root.demoMode || !root.service) return false
+    var name = String(item.filename || "").split("/").pop()
+    if (name === "") name = String(item.local_path || "").split("/").pop()
+    if (name === "") name = "attachment"
+    savePickerProcess.item = item
+    savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
+    savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
+      "--confirm-overwrite", "--title=Save attachment",
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/" + name]
+    savePickerProcess.running = true
+    return true
+  }
+
   function copyText(value) {
     var text = String(value || "")
     if (text === "" || clipboardProcess.running) return
@@ -1323,6 +1341,22 @@ Item {
             .map(function(path) { return root.localFileUrl(path) })
           root.acceptFilePickerResult(target,
             kind === "sticker" ? paths.slice(0, 1) : paths, kind)
+        }
+      }
+
+      Process {
+        id: savePickerProcess
+        objectName: "savePickerProcess"
+        property var item: null
+        property var originRef: AccountModel.chatRef("", "")
+        command: []
+        stdout: StdioCollector { id: savePickerOutput }
+        onExited: function(exitCode) {
+          var target = originRef
+          var chosen = String(savePickerOutput.text || "").trim()
+          originRef = AccountModel.chatRef("", "")
+          if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
+          root.service.saveMedia(target, item, chosen, "app")
         }
       }
 
@@ -2182,6 +2216,7 @@ Item {
               onDeleteRequested: function(forMe) { root.requestDelete(modelData, forMe) }
               onForwardRequested: root.startForward(modelData)
               onCopyRequested: function(text) { root.copyText(text) }
+              onSaveRequested: root.saveMediaAs(modelData)
               onOptionRequested: function(optionIndex) {
                 if (!root.demoMode && root.service)
                   root.service.selectOption(
@@ -2639,12 +2674,41 @@ Item {
             }
           }
 
+          PanelActionButton {
+            id: emojiButton
+            objectName: "composerEmojiButton"
+            visible: !root.voiceForCurrentChat
+            anchors.left: pasteButton.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: composerBar.edge
+            size: composerBar.controlSize
+            iconText: "󰇵"
+            tooltipText: emojiPicker.opened ? "" : "Emoji"
+            foreground: emojiPicker.opened ? root.accent : root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.icon
+            onClicked: emojiPicker.opened ? emojiPicker.close() : emojiPicker.open()
+
+            EmojiPicker {
+              id: emojiPicker
+              x: 0
+              y: -height - Style.space(8)
+              target: composer
+              foreground: root.foreground
+              surface: root.background
+              accent: root.accent
+              muted: root.dim
+              fontFamily: root.fontFamily
+            }
+          }
+
           Rectangle {
             id: composerSurface
             objectName: "composerSurface"
             visible: !root.voiceForCurrentChat
-            anchors.left: pasteButton.right
-            anchors.leftMargin: Style.space(8)
+            anchors.left: emojiButton.right
+            anchors.leftMargin: Style.space(6)
             anchors.right: sendButton.left
             anchors.rightMargin: Style.space(8)
             anchors.bottom: parent.bottom
@@ -3299,6 +3363,7 @@ Item {
         dim: root.dim
         fontFamily: root.fontFamily
         onOpenExternalRequested: function(path) { root.openMediaExternal(path) }
+        onSaveRequested: function(item) { root.saveMediaAs(item) }
       }
     }
   }

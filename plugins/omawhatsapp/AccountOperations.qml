@@ -12,7 +12,7 @@ Item {
   // Chats checked by the last refresh; a full batch means more may be due.
   property int lastChecked: -1
   readonly property int avatarBatch: 64
-  signal avatarRefreshFinished(int checked)
+  signal avatarRefreshFinished(int checked, int pending)
   property string statusMessage: ""
   property string linkPhase: "idle"
   property string linkTarget: ""
@@ -121,7 +121,7 @@ Item {
     }
     var checked = Math.max(0, Number(response.checked || 0))
     lastChecked = checked
-    avatarRefreshFinished(checked)
+    avatarRefreshFinished(checked, Math.max(0, Number(response.pending || 0)))
     var failed = Math.max(0, Number(response.failed || 0))
     var refreshed = Math.max(0, Number(response.refreshed || 0))
     if (checked > 0 && failed >= checked) {
