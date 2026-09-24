@@ -562,6 +562,21 @@ class BackendTests(unittest.TestCase):
             self.assertTrue(self.backend._play_message_sound())
             self.assertEqual(popen.call_args.args[0], [str(self.wacli), str(sound)])
 
+    def test_an_edit_or_reaction_that_moves_the_chat_does_not_pop_up(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4, text="first")
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            # wacli rewrites the edited row and moves the chat time forward.
+            connection.execute("UPDATE messages SET text = 'first, edited' WHERE msg_id = 't3'")
+            connection.execute("UPDATE chats SET last_message_ts = 45 WHERE jid = 'team@g.us'")
+        result, sent = self._notify()
+        self.assertEqual(sent, [], "the same last message is not news")
+        self._arrive("team@g.us", "t4", 50, 5, text="second")
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+
     def test_group_popup_names_the_sender_and_counts_arrivals(self) -> None:
         self._enable_notifications()
         self._arrive("team@g.us", "t3", 31, 5, text="ship it now", sender="Sam")
@@ -2377,6 +2392,13 @@ sys.exit(0)
             connection.execute(
                 "UPDATE chats SET last_message_ts = 41, unread_count = 3 WHERE jid = ?",
                 ["family@g.us"])
+            # A popup needs a new last message, not just a moved chat time.
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES ('family@g.us', '', 'f-new', 'kin@s.whatsapp.net', 'Kin', 41, 0,
+                        'dinner?', '', '', '', '')""")
         with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
                 mock.patch.object(self.backend, "_deliver_notification",
                                   return_value=True) as deliver:

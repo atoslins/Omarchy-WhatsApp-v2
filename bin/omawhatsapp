@@ -2593,6 +2593,11 @@ class Backend:
                     previous_unread = int(previous.get("unread") or 0)
                     message_id = str(chat.get("last_message_id") or "")
                     previous_message_id = str(previous.get("message_id") or "")
+                    # An edit, a reaction or a receipt moves the chat's time
+                    # without a new message; only a new last message pops up.
+                    if message_id and previous_message_id \
+                            and message_id == previous_message_id:
+                        continue
                     same_second_arrival = timestamp == previous_timestamp and (
                         unread > previous_unread
                         or bool(previous_message_id and message_id
