@@ -127,7 +127,7 @@ Panel {
     ? Style.space(620) : chatChromeHeight
       + accountReadinessHeight + chatListHeight
   readonly property int notificationCount: demoMode
-    ? (demoNotificationsCleared ? 0 : 4)
+    ? (demoNotificationsCleared ? 0 : 2)
     : (service ? Number(service.notificationUnreadCount || 0) : 0)
   readonly property bool ready: demoMode || (service && service.railReady)
   readonly property bool accountStatusReady: demoMode || (!!service

@@ -19,6 +19,8 @@ Item {
   property bool offlineMode: false
   property bool notificationsEnabled: false
   property bool notificationsPreview: true
+  property bool notificationsSound: true
+  property bool notifyPending: false
   property bool notifyAvailable: true
   property bool loadingChats: false
   property bool loadingMessages: false
@@ -30,7 +32,8 @@ Item {
   property bool readOnReply: true
   property bool enterSends: true
   property bool showAvatars: true
-  property bool autoRefreshAvatars: true
+  // Off by default: a photo batch pauses sync, and what arrives meanwhile is lost.
+  property bool autoRefreshAvatars: false
   property string railDensity: "comfortable"
   property bool autoDownloadMedia: true
   property var about: ({})
@@ -157,13 +160,22 @@ Item {
   readonly property int unreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.unread || 0)
   }, 0)
+  // The badge counts chats, as WhatsApp's own icon does: 3 means three
+  // conversations are waiting, not three messages.
   readonly property int notificationUnreadCount: chats.reduce(function(total, chat) {
+    return total + (Number(chat.notification_unread || 0) > 0 ? 1 : 0)
+  }, 0)
+  readonly property int notificationMessageCount: chats.reduce(function(total, chat) {
     return total + Number(chat.notification_unread || 0)
   }, 0)
-  readonly property string barTooltip: railReady
-    ? (offlineMode ? "OmaWhatsApp · offline archive"
-      : "OmaWhatsApp · " + notificationUnreadCount + " new · middle-click to dismiss")
-    : "OmaWhatsApp · reconnecting"
+  readonly property string barTooltip: !railReady ? "OmaWhatsApp · reconnecting"
+    : offlineMode ? "OmaWhatsApp · offline archive"
+    : notificationUnreadCount === 0 ? "OmaWhatsApp · no unread chats"
+    : "OmaWhatsApp · " + notificationUnreadCount
+      + (notificationUnreadCount === 1 ? " unread chat" : " unread chats")
+      + " · " + notificationMessageCount
+      + (notificationMessageCount === 1 ? " message" : " messages")
+      + " · middle-click to dismiss"
 
   signal textPasted(string text, var chatRef, string owner)
   signal attachmentPasted(string path, var chatRef, string owner)
@@ -219,7 +231,9 @@ Item {
     refreshMembers()
   }
   function runNotify() {
-    if (!railReady || !notificationsEnabled || notifyProcess.running) return
+    if (!railReady || !notificationsEnabled) return
+    if (notifyProcess.running) { notifyPending = true; return }
+    notifyPending = false
     notifyProcess.payload = JSON.stringify({
       account: selectedChatAccount,
       skip_jid: conversationOnScreen ? selectedChatJid : ""
@@ -243,6 +257,7 @@ Item {
   function refreshFromStore() {
     storeRefreshPending = true
     storeRefreshDebounce.restart()
+    if (notificationsEnabled) notifyDebounce.restart()
   }
   function refreshChats() {
     if (chatsProcess.running) return
@@ -646,11 +661,12 @@ Item {
     clearNotificationCount(target, scope)
     return acknowledgementQueue.enqueue(scope, target)
   }
-  function setNotifications(enabled, preview) {
+  function setNotifications(enabled, preview, sound) {
     if (controlProcess.running || writing) return false
     var request = ({})
     if (enabled !== undefined && enabled !== null) request.enabled = enabled === true
     if (preview !== undefined && preview !== null) request.preview = preview === true
+    if (sound !== undefined && sound !== null) request.sound = sound === true
     controlWriting = true
     controlProcess.kind = "notify-mode"
     controlProcess.account = ""
@@ -885,6 +901,15 @@ Item {
     }
   }
 
+  // A message landing in the mirror pops its notification now, not at the
+  // next 12-second tick; the short wait folds a burst into one popup per chat.
+  Timer {
+    id: notifyDebounce
+    interval: 900
+    repeat: false
+    onTriggered: root.runNotify()
+  }
+
   Timer {
     id: storeRefreshDebounce
     interval: 160
@@ -957,6 +982,7 @@ Item {
         var notifications = payload.notifications
         root.notificationsEnabled = !!notifications && notifications.enabled === true
         root.notificationsPreview = !notifications || notifications.preview !== false
+        root.notificationsSound = !notifications || notifications.sound !== false
         root.notifyAvailable = payload.notify_available !== false
         root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
         root.sendReadReceipts = payload.send_read_receipts === true
@@ -1079,6 +1105,7 @@ Item {
       if (finishedKind === "notify-mode" && payload.notifications) {
         root.notificationsEnabled = payload.notifications.enabled === true
         root.notificationsPreview = payload.notifications.preview !== false
+        root.notificationsSound = payload.notifications.sound !== false
       }
       if (finishedKind !== "sync-mode" || accountIsCurrent)
         root.controlCompleted(finishedKind)
@@ -1196,6 +1223,7 @@ Item {
 
   Process {
     id: notifyProcess
+    objectName: "notifyProcess"
     property string payload: ""
     command: [root.helper, "notify"]
     stdinEnabled: true
@@ -1206,6 +1234,7 @@ Item {
       var payload = root.parseJson(notifyOutput.text)
       if (payload && payload.ok === true && payload.available === false)
         root.notifyAvailable = false
+      if (root.notifyPending) notifyDebounce.restart()
     }
   }
 

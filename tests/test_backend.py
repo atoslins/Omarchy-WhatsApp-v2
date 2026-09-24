@@ -23,6 +23,8 @@ SPEC = importlib.util.spec_from_loader(
 assert SPEC and SPEC.loader
 backend_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(backend_module)
+# The suite must never play a real notification sound on the developer's desk.
+backend_module.SOUND_PLAYER = Path("/nonexistent/omawhatsapp-test-player")
 
 
 SCHEMA = """
@@ -153,6 +155,17 @@ class BackendTests(unittest.TestCase):
         self.assertEqual({chat["name"] for chat in result["chats"]}, {"Design team", "Alex", "Archive"})
         self.assertEqual(result["chats"][0]["name"], "Design team")  # pinned first
         self.assertEqual(result["chats"][0]["unread"], 3)
+
+    def test_a_chat_marked_unread_elsewhere_counts_as_one(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET unread = 1, unread_count = 0 WHERE jid = 'archive@g.us'")
+        archive = next(chat for chat in self.backend.chats()["chats"] if chat["jid"] == "archive@g.us")
+        self.assertEqual(archive["unread"], 1)
+        self.assertEqual(archive["notification_unread"], 1)
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET unread = 0, unread_count = 0 WHERE jid = 'archive@g.us'")
+        archive = next(chat for chat in self.backend.chats()["chats"] if chat["jid"] == "archive@g.us")
+        self.assertEqual(archive["unread"], 0)
 
     def test_chat_search_is_literal(self) -> None:
         self.assertEqual(self.backend.chats("Design%team")["chats"], [])
@@ -422,15 +435,46 @@ class BackendTests(unittest.TestCase):
                              for call in deliver.call_args_list]
         return result, [call.args[:2] for call in deliver.call_args_list]
 
-    def test_desktop_notifications_are_off_until_notify_send_exists(self) -> None:
+    def test_desktop_notifications_are_on_by_default_but_need_notify_send(self) -> None:
+        # The owner found notifications "not working": they were off by default.
         self.assertEqual(self.backend._preferences()["notifications"],
-                         {"enabled": False, "preview": True})
+                         {"enabled": True, "preview": True, "sound": True})
         with mock.patch.object(self.backend, "_notify_send_ready", return_value=False):
             with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "notify-send"):
                 self.backend.set_notifications(True, None)
+            result = self.backend.notify()
+        self.assertTrue(result["enabled"])
+        self.assertFalse(result["available"])
+        self.assertEqual(result["sent"], 0)
+        self.backend.set_notifications(False, None)
         result, sent = self._notify()
         self.assertFalse(result["enabled"])
         self.assertEqual(sent, [])
+
+    def test_version_3_turns_notifications_on_and_photo_refresh_off(self) -> None:
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        target = state / "preferences.json"
+        target.write_text(json.dumps({
+            "version": 3, "auto_refresh_avatars": True,
+            "notifications": {"enabled": False, "preview": False},
+            "stores": {str(self.store): {"notified": {"team@g.us": {"unread": 1, "timestamp": 1}}}},
+        }), encoding="utf-8")
+        target.chmod(0o600)
+        preferences = self.backend._preferences()
+        self.assertEqual(preferences["notifications"],
+                         {"enabled": True, "preview": False, "sound": True},
+                         "the old off was a default; the preview choice is kept")
+        self.assertFalse(preferences["auto_refresh_avatars"])
+        self.assertEqual(preferences["stores"][str(self.store)]["notified"], {},
+                         "a fresh watermark adopts the archive instead of replaying it")
+        result, sent = self._notify()
+        self.assertTrue(result["seeded"])
+        self.assertEqual(sent, [])
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 4)
+        self.backend.settings({"auto_refresh_avatars": True})
+        self.assertTrue(self.backend._preferences()["auto_refresh_avatars"],
+                        "after the migration an explicit choice sticks")
 
     def test_enabling_notifications_adopts_the_archive_instead_of_replaying_it(self) -> None:
         self.backend._update_preferences(
@@ -441,12 +485,82 @@ class BackendTests(unittest.TestCase):
 
         self._enable_notifications()
         stored = json.loads((self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
-        self.assertEqual(stored["notifications"], {"enabled": True, "preview": True})
+        self.assertEqual(stored["notifications"], {"enabled": True, "preview": True, "sound": True})
         self.assertIn("team@g.us", stored["stores"][str(self.store)]["notified"])
 
         self._arrive("team@g.us", "t3", 31, 4)
         result, sent = self._notify()
         self.assertEqual(result["sent"], 1)
+
+    def test_media_notifications_read_like_the_phone(self) -> None:
+        preview = backend_module.Backend._notification_preview
+        self.assertEqual(preview({"preview": "hello", "last_media_type": ""}), "hello")
+        self.assertEqual(preview({"preview": "[image]", "last_media_type": "image"}), "📷 Photo")
+        self.assertEqual(preview({"preview": "look at this", "last_media_type": "image"}),
+                         "📷 look at this")
+        self.assertEqual(preview({"preview": "report.pdf", "last_media_type": "document"}),
+                         "📄 report.pdf")
+        self.assertEqual(preview({"preview": "[audio]", "last_media_type": "audio"}), "🎵 Audio")
+        self.assertEqual(preview({"preview": "", "last_media_type": "sticker"}), "Sticker")
+        self.assertEqual(preview({"preview": "[weird]", "last_media_type": "weird"}),
+                         "📎 Attachment")
+
+    def test_popup_carries_the_cached_chat_photo_and_the_app_icon(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4)
+
+        def attach(chats, accounts):
+            for chat in chats:
+                chat["avatar_path"] = str(self.preview)
+
+        with mock.patch.object(self.backend, "_attach_cached_avatars", side_effect=attach), \
+             mock.patch.object(self.backend, "_play_message_sound", return_value=False):
+            with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                 mock.patch.object(self.backend, "_deliver_notification",
+                                   return_value=True) as deliver:
+                self.backend.notify()
+        self.assertEqual(deliver.call_args.args[3], str(self.preview))
+        with mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            self.backend._deliver_notification(
+                "Design team", "Sam: new", {"account": "", "jid": "team@g.us"}, str(self.preview))
+        request = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
+        self.assertIn("--icon=whatsapp", request["command"])
+        self.assertIn(f"--hint=string:image-path:{self.preview}", request["command"])
+
+    def test_one_sound_per_pass_and_none_when_turned_off(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4)
+        self._arrive("alex@s.whatsapp.net", "a2", 41, 2)
+        with mock.patch.object(self.backend, "_play_message_sound", return_value=True) as play:
+            result, sent = self._notify()
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(play.call_count, 1)
+        self.assertTrue(result["sound"])
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True):
+            self.backend.set_notifications(None, None, False)
+        self._arrive("team@g.us", "t4", 50, 5)
+        with mock.patch.object(self.backend, "_play_message_sound", return_value=True) as play:
+            result, sent = self._notify()
+        self.assertEqual(len(sent), 1)
+        play.assert_not_called()
+        self.assertFalse(result["sound"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "sound"):
+            self.backend.set_notifications(None, None, "loud")
+
+    def test_the_sound_respects_omarchy_do_not_disturb(self) -> None:
+        dnd = self.root / "omarchy-notifications.json"
+        dnd.write_text(json.dumps({"dnd": True}), encoding="utf-8")
+        sound = self.root / "sound.oga"
+        sound.write_bytes(b"ogg")
+        with mock.patch.object(backend_module, "OMARCHY_NOTIFICATION_STATE", dnd), \
+             mock.patch.object(backend_module, "NOTIFY_SOUND", sound), \
+             mock.patch.object(backend_module, "SOUND_PLAYER", self.wacli), \
+             mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            self.assertFalse(self.backend._play_message_sound())
+            popen.assert_not_called()
+            dnd.write_text(json.dumps({"dnd": False}), encoding="utf-8")
+            self.assertTrue(self.backend._play_message_sound())
+            self.assertEqual(popen.call_args.args[0], [str(self.wacli), str(sound)])
 
     def test_group_popup_names_the_sender_and_counts_arrivals(self) -> None:
         self._enable_notifications()
@@ -1538,7 +1652,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(
             {name: defaults[name] for name in backend_module.UI_PREFERENCES},
             {"read_on_reply": True, "enter_sends": True, "show_avatars": True,
-             "auto_refresh_avatars": True, "rail_density": "comfortable"},
+             "auto_refresh_avatars": False, "rail_density": "comfortable"},
         )
         updated = self.backend.settings({
             "read_on_reply": False, "enter_sends": False,
@@ -2285,7 +2399,7 @@ sys.exit(0)
         target.chmod(0o600)
         self.assertTrue(self.backend.settings()["send_read_receipts"])
         self.backend.settings({"send_read_receipts": False})
-        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 3)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 4)
         self.assertFalse(self.backend.settings()["send_read_receipts"])
 
     def test_version_1_state_migrates_to_the_default_account(self) -> None:
@@ -2312,7 +2426,8 @@ sys.exit(0)
         self.assertFalse(migrated["online"])
         self.assertTrue(migrated["send_read_receipts"])
         self.assertIn("team@g.us", migrated["acknowledged_unread"])
-        self.assertIn("team@g.us", migrated["notified"])
+        # Version 4 restarts the popup watermark so the archive is adopted.
+        self.assertEqual(migrated["notified"], {})
 
         # The second account starts clean instead of inheriting that history.
         self.backend.use_account("home")

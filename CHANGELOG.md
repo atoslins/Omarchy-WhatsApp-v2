@@ -51,6 +51,20 @@
   "N unread messages" divider where unread messages start, and a jump-to-latest
   button with the count of messages that arrived while you read above; the
   bar dropdown gets the headers, the divider and the button too.
+- Desktop notifications are on by default; they were off by default, which
+  read as "notifications do not work". Preferences version 4 turns them on for
+  existing installs with a fresh watermark, so the archive is adopted instead
+  of replayed. A popup now shows the chat photo, reads media the way the phone
+  does ("📷 Photo", "📄 report.pdf"), plays one short sound per batch unless
+  Omarchy's do not disturb is on (new Sound setting), and appears as soon as
+  the message lands in the mirror instead of at the next 12-second tick.
+- Automatic chat-photo refresh is off by default. Every photo batch pauses
+  sync, and the short wacli connection that checks photos acknowledges every
+  message and receipt that arrives meanwhile without storing it; that is how a
+  chat read on another device could stay unread here. Settings says so.
+- A chat marked unread on the phone shows as unread (one) instead of read.
+- The bar badge counts unread chats instead of unread messages; the tooltip
+  names both.
 - Start a new chat from the button beside "Chats" (Ctrl+N) or from the bar
   dropdown. The dialog searches the people the account's mirror knows by name
   or number; a person with a chat opens it. A typed number is first checked

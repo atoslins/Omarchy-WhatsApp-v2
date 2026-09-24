@@ -55,6 +55,14 @@ Unregistered numbers are not kept. WhatsApp answers with the person's `@lid`;
 wacli sends to it and files the chat under the phone JID when it knows the
 mapping.
 
+Desktop notifications are on by default. A popup carries the chat name, the
+sender and message text (unless previews are off), and the chat's cached
+photo as its image, which Omarchy's notification service may copy into its
+own history directory. The helper reads only the `dnd` flag of
+`~/.local/state/omarchy/notifications.json` to keep the notification sound
+quiet under do not disturb; the sound is the freedesktop theme's
+`message-new-instant`, played with `pw-play`.
+
 If a foreground wacli operation briefly yields background sync, the helper
 stores a crash-recovery intent containing only the public systemd unit name and
 an opaque lock filename. It contains no account store path, chat identifier,

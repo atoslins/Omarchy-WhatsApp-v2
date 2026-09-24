@@ -71,7 +71,7 @@ TestCase {
   function test_clear_all_requires_confirmation_and_stays_local() {
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
     verify(dropdown !== null)
-    compare(dropdown.notificationCount, 4)
+    compare(dropdown.notificationCount, 2, "two unread chats, not four messages")
 
     verify(dropdown.requestClearNotifications())
     compare(dropdown.clearConfirmOpen, true)
@@ -79,7 +79,7 @@ TestCase {
     verify(confirmation !== null)
     verify(confirmation.handleKey({ key: Qt.Key_Escape }))
     compare(dropdown.clearConfirmOpen, false)
-    compare(dropdown.notificationCount, 4)
+    compare(dropdown.notificationCount, 2)
 
     verify(dropdown.requestClearNotifications())
     verify(confirmation.handleKey({ key: Qt.Key_Return }))

@@ -127,6 +127,16 @@ its companion socket. If that path is unavailable, the helper serializes a
 bounded fallback, briefly yields the user service, sends, and restarts sync in
 a `finally` block.
 
+A yield has a cost that the helper cannot avoid. The short command connects
+with the same WhatsApp session, and whatsmeow acknowledges to the server every
+message and receipt that reaches that connection, while the command registers
+no handler that stores them. Whatever arrives during the pause, including the
+read receipts from reading a chat on another device, never reaches the mirror.
+For that reason nothing yields by itself any more: automatic chat-photo refresh
+is off by default (preferences version 4 turns it off), and the remaining
+yields are user actions that wacli cannot delegate (files, voice notes,
+deletes, forwards, photo refresh and number checks).
+
 The offline choice (Settings → Background sync) is persisted privately and maps to
 `systemctl --user disable --now wacli-sync.service`. Read paths remain usable;
 all WhatsApp mutations fail closed until the user explicitly returns online.

@@ -80,6 +80,17 @@ MEDIA_DROPIN_OFF = (
 WL_PASTE = Path("/usr/bin/wl-paste")
 XDG_OPEN = Path("/usr/bin/xdg-open")
 NOTIFY_SEND = Path("/usr/bin/notify-send")
+NOTIFY_APP_ICON = "whatsapp"
+NOTIFY_SOUND = Path("/usr/share/sounds/freedesktop/stereo/message-new-instant.oga")
+SOUND_PLAYER = Path("/usr/bin/pw-play")
+# Omarchy's notification service keeps its do-not-disturb flag here.
+OMARCHY_NOTIFICATION_STATE = STATE_HOME / "omarchy" / "notifications.json"
+# What a notification says for media when there is no caption.
+NOTIFY_MEDIA_LABELS = {
+    "image": "📷 Photo", "video": "🎥 Video", "gif": "GIF", "sticker": "Sticker",
+    "document": "📄 Document", "audio": "🎵 Audio", "location": "📍 Location",
+    "contact": "👤 Contact", "poll": "📊 Poll", "album": "📷 Photos",
+}
 OMARCHY_SHELL = Path("/usr/share/omarchy/bin/omarchy-shell")
 MAX_MESSAGE = 4096
 # A new chat only goes to a user JID the mirror already knows or that WhatsApp
@@ -103,7 +114,7 @@ MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
 MAX_SENT_REPLY_STATE = 2 * 1024 * 1024
 # 3: opening a chat marks it read by default (the owner's decision; wacli's
 # mark-read syncs the user's own devices and sends no read receipt).
-PREFERENCES_VERSION = 3
+PREFERENCES_VERSION = 4
 MAX_NOTIFY_BURST = 5
 MAX_NOTIFY_SUMMARY = 96
 MAX_NOTIFY_SENDER = 48
@@ -167,7 +178,9 @@ UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
     "read_on_reply": (bool, True),
     "enter_sends": (bool, True),
     "show_avatars": (bool, True),
-    "auto_refresh_avatars": (bool, True),
+    # Off by default: every photo batch pauses sync, and whatever arrives in
+    # that window is acknowledged by the short wacli connection and lost.
+    "auto_refresh_avatars": (bool, False),
     "rail_density": (("comfortable", "compact"), "comfortable"),
 }
 
@@ -1175,13 +1188,23 @@ class Backend:
             # the store that was in use when it was written, which is the
             # default account, not whichever account this request selected.
             stores[self.account("").key] = self._store_state(value)
-        if bounded_int(value.get("version"), 1, 1, 1_000) < 3:
+        version = bounded_int(value.get("version"), 1, 1, 1_000)
+        if version < 3:
             # Before version 3 "off" was the default, not a choice anyone made.
             for state in stores.values():
                 state["send_read_receipts"] = True
         notifications = value.get("notifications")
         if not isinstance(notifications, dict):
             notifications = {}
+        if version < 4:
+            # Version 4: desktop notifications on by default (they were off by
+            # default, not by choice), starting from a fresh watermark so the
+            # archive is adopted instead of replayed; automatic photo refresh
+            # off, because each batch pauses sync and loses what arrives.
+            notifications = dict(notifications, enabled=True)
+            value = dict(value, auto_refresh_avatars=False)
+            for state in stores.values():
+                state["notified"] = {}
         dropdown_rows = bounded_int(value.get("dropdown_rows"), 7, 5, 9)
         if dropdown_rows not in {5, 7, 9}:
             dropdown_rows = 7
@@ -1205,6 +1228,7 @@ class Backend:
             "notifications": {
                 "enabled": notifications.get("enabled") is True,
                 "preview": notifications.get("preview") is not False,
+                "sound": notifications.get("sound") is not False,
             },
             "stores": stores,
         }
@@ -2178,6 +2202,7 @@ class Backend:
                     f"""
                     SELECT chats.jid, chats.kind, chats.last_message_ts, chats.archived,
                       chats.pinned, chats.muted_until, chats.unread_count,
+                      chats.unread AS unread_flag,
                       {name_sql} AS name,
                       CASE WHEN COALESCE(latest.media_type, '') <> '' THEN
                         COALESCE(NULLIF(CASE WHEN latest.media_type = 'audio'
@@ -2187,6 +2212,7 @@ class Backend:
                       ELSE COALESCE(NULLIF(latest.text, ''),
                         NULLIF(latest.display_text, ''), '') END AS preview,
                       COALESCE(latest.msg_id, '') AS last_message_id,
+                      COALESCE(latest.media_type, '') AS last_media_type,
                       COALESCE(latest.from_me, 0) AS last_from_me,
                       COALESCE(latest.sender_name, '') AS last_sender
                     FROM chats
@@ -2212,6 +2238,10 @@ class Backend:
             jid = str(row["jid"])
             timestamp = int(row["last_message_ts"] or 0)
             unread = int(row["unread_count"] or 0)
+            # "Mark as unread" on the phone (or here) sets only the flag;
+            # it counts as one, the way WhatsApp shows a dot.
+            if unread <= 0 and bool(row["unread_flag"]):
+                unread = 1
             archived = bool(row["archived"])
             muted = muted_until_active(row["muted_until"])
             notification_unread = unread
@@ -2232,6 +2262,7 @@ class Backend:
                 "account_label": account.label,
                 "timestamp": timestamp,
                 "last_message_id": str(row["last_message_id"] or "")[:256],
+                "last_media_type": str(row["last_media_type"] or "")[:32],
                 "preview": " ".join(str(row["preview"] or "").split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
                 "last_sender": " ".join(str(row["last_sender"] or "").split())[:MAX_NOTIFY_SENDER],
@@ -2330,6 +2361,7 @@ class Backend:
 
     def _deliver_notification(
         self, summary: str, body: str, target: dict[str, str] | None = None,
+        image: str = "",
     ) -> bool:
         """Hand one popup to the desktop; a failing daemon must not raise.
 
@@ -2338,7 +2370,10 @@ class Backend:
         and this helper returns at once.
         """
         command = [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
-                   "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}"]
+                   "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
+                   f"--icon={NOTIFY_APP_ICON}"]
+        if image:
+            command.append(f"--hint=string:image-path:{image}")
         if target and str(target.get("jid") or ""):
             command.append("--action=default=Open chat")
             command.extend(["--", summary or "OmaWhatsApp"])
@@ -2382,14 +2417,55 @@ class Backend:
             name = f"{name} ({account})"
         summary = f"{name} · {count} new" if count > 1 else name
         target = {"account": str(chat.get("account") or ""), "jid": str(chat.get("jid") or "")}
+        image = str(chat.get("avatar_path") or "")
+        if not image.startswith("/") or not Path(image).is_file():
+            image = ""
         if not preview:
             body = "1 new message" if count == 1 else f"{count} new messages"
-            return self._deliver_notification(summary, body, target)
-        body = self._notification_text(chat.get("preview"), MAX_NOTIFY_BODY, markup=True)
+            return self._deliver_notification(summary, body, target, image)
+        body = self._notification_text(
+            self._notification_preview(chat), MAX_NOTIFY_BODY, markup=True)
         sender = self._notification_text(chat.get("last_sender"), MAX_NOTIFY_SENDER, markup=True)
         if str(chat.get("kind") or "") == "group" and sender and body:
             body = f"{sender}: {body}"
-        return self._deliver_notification(summary, body, target)
+        return self._deliver_notification(summary, body, target, image)
+
+    @staticmethod
+    def _notification_preview(chat: dict[str, Any]) -> str:
+        """Media reads as the phone shows it: "📷 Photo", or the icon and caption."""
+        text = " ".join(str(chat.get("preview") or "").split())
+        media = str(chat.get("last_media_type") or "").lower()
+        if not media:
+            return text
+        label = NOTIFY_MEDIA_LABELS.get(media, "📎 Attachment")
+        if not text or re.fullmatch(r"\[[A-Za-z _:0-9]+\]", text):
+            return label
+        return f"{label.split(' ', 1)[0]} {text}" if " " in label else f"{label}: {text}"
+
+    @staticmethod
+    def _do_not_disturb() -> bool:
+        try:
+            if OMARCHY_NOTIFICATION_STATE.stat().st_size > 64 * 1024:
+                return False
+            value = json.loads(OMARCHY_NOTIFICATION_STATE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(value, dict) and value.get("dnd") is True
+
+    def _play_message_sound(self) -> bool:
+        """One short sound per notification pass; silent under do-not-disturb."""
+        if self._do_not_disturb() or not NOTIFY_SOUND.is_file() \
+                or not os.access(SOUND_PLAYER, os.X_OK):
+            return False
+        try:
+            subprocess.Popen(
+                [str(SOUND_PLAYER), str(NOTIFY_SOUND)], stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=True, start_new_session=True,
+            )
+        except OSError:
+            return False
+        return True
 
     @staticmethod
     def notify_open(request: Any) -> dict[str, Any]:
@@ -2421,9 +2497,12 @@ class Backend:
             return {"ok": True, "kind": "notify-open", "opened": False}
         return {"ok": True, "kind": "notify-open", "opened": True}
 
-    def set_notifications(self, enabled: Any = None, preview: Any = None) -> dict[str, Any]:
-        if enabled is None and preview is None:
+    def set_notifications(self, enabled: Any = None, preview: Any = None,
+                          sound: Any = None) -> dict[str, Any]:
+        if enabled is None and preview is None and sound is None:
             raise OmaWhatsAppError("Choose what to change about desktop notifications.")
+        if sound is not None and not isinstance(sound, bool):
+            raise OmaWhatsAppError("The notification sound must be on or off.")
         if enabled is not None and not isinstance(enabled, bool):
             raise OmaWhatsAppError("Desktop notifications must be on or off.")
         if preview is not None and not isinstance(preview, bool):
@@ -2450,6 +2529,8 @@ class Backend:
                 settings["enabled"] = bool(enabled)
             if preview is not None:
                 settings["preview"] = bool(preview)
+            if sound is not None:
+                settings["sound"] = bool(sound)
             for key, watermark in watermarks.items():
                 state = value["stores"].get(key)
                 if state is None:
@@ -2548,6 +2629,8 @@ class Backend:
             else:
                 watermark.pop(jid, None)
 
+        # The sender's cached photo becomes the popup image, as on the phone.
+        self._attach_cached_avatars([item[1] for item in pending[:MAX_NOTIFY_BURST]], accounts)
         for item in pending[:MAX_NOTIFY_BURST]:
             _, chat, count, label, _ = item
             if self._notify_chat(chat, count, settings["preview"], label):
@@ -2572,8 +2655,9 @@ class Backend:
                 lambda state, value=watermark: state.update({"notified": value}),
                 account,
             )
+        played = bool(sent) and settings.get("sound") is not False and self._play_message_sound()
         result = {"ok": True, "kind": "notify", "enabled": True, "sent": sent,
-                  "failed": failed, "pending": len(pending)}
+                  "failed": failed, "pending": len(pending), "sound": played}
         if seeded:
             result["seeded"] = True
             result["seeded_accounts"] = seeded
@@ -4716,7 +4800,8 @@ def main() -> int:
             return emit(backend.notify(str(payload.get("skip_jid") or "")))
         if args.command == "notify-mode":
             return emit(backend.set_notifications(payload.get("enabled"),
-                                                  payload.get("preview")))
+                                                  payload.get("preview"),
+                                                  payload.get("sound")))
         if args.command == "notify-open":
             return emit(Backend.notify_open(payload))
         if args.command == "save-media":

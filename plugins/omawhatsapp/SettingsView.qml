@@ -106,11 +106,17 @@ Rectangle {
     if (section === "notifications") return [
       { kind: "toggle", key: "notify", title: "Desktop notifications",
         subtitle: !notifyAvailable ? "Needs notify-send from libnotify."
-          : (notifyOn ? "Muted and archived chats stay silent." : "Off; the bar still counts new messages."),
+          : (notifyOn ? "Muted and archived chats stay silent." : "Off; the bar still counts unread chats."),
         checked: notifyOn, available: notifyAvailable || notifyOn, busy: controlBusy },
       { kind: "toggle", key: "notify_preview", title: "Message text in notifications",
-        subtitle: value("notificationsPreview", true) ? "Sender and message preview." : "Chat names only.",
+        subtitle: value("notificationsPreview", true)
+          ? "Sender, message text and the chat photo." : "Chat names only.",
         checked: value("notificationsPreview", true), available: notifyOn, busy: controlBusy },
+      { kind: "toggle", key: "notify_sound", title: "Sound",
+        subtitle: value("notificationsSound", true)
+          ? "One short sound per batch of new messages; silent while Omarchy's do not disturb is on."
+          : "Notifications arrive without sound.",
+        checked: value("notificationsSound", true), available: notifyOn, busy: controlBusy },
       { kind: "toggle", key: "show_unread_count", title: "Unread count in the bar",
         subtitle: "A local badge on the bar icon.",
         checked: value("showUnreadCount", true), busy: busy },
@@ -147,11 +153,11 @@ Rectangle {
             : "Media is downloaded only when you open it.",
           checked: value("autoDownloadMedia", true), busy: controlBusy },
         { kind: "toggle", key: "auto_refresh_avatars", title: "Refresh chat photos automatically",
-          subtitle: "At most once a day. wacli pauses sync for a few seconds while it checks photos.",
-          checked: value("autoRefreshAvatars", true), busy: busy },
+          subtitle: "Off by default. Checking photos pauses sync for up to 20 seconds, and messages or read state that arrive meanwhile never reach this computer.",
+          checked: value("autoRefreshAvatars", false), busy: busy },
         { kind: "action", key: "refresh_avatars", title: "Refresh chat photos now",
           subtitle: operations && operations.statusMessage ? operations.statusMessage
-            : "Checks the most recent chats for new photos.",
+            : "Checks the most recent chats for new photos. Sync pauses for up to 20 seconds.",
           button: operations && operations.avatarBusy ? "Refreshing…" : "Refresh",
           available: live && !!operations && !operations.avatarBusy && !operations.linkBusy }
       ]
@@ -230,6 +236,7 @@ Rectangle {
     switch (row.key) {
     case "notify": return service.setNotifications(next, null)
     case "notify_preview": return service.setNotifications(null, next)
+    case "notify_sound": return service.setNotifications(null, null, next)
     case "auto_download_media": return service.setAutoDownloadMedia(next)
     case "online": return service.setOnline(next)
     case "refresh_avatars": return service.accountOperations.refreshAvatars()

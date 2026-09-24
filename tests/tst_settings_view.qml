@@ -28,6 +28,7 @@ TestCase {
       property bool autoDownloadMedia: true
       property bool notificationsEnabled: true
       property bool notificationsPreview: true
+      property bool notificationsSound: true
       property bool notifyAvailable: true
       property bool showUnreadCount: true
       property int dropdownRows: 7
@@ -49,7 +50,8 @@ TestCase {
       property var calls: []
       function record(name, args) { calls = calls.concat([{ name: name, args: args }]) }
       function setPreference(key, value) { record("setPreference", [key, value]); return true }
-      function setNotifications(enabled, preview) { record("setNotifications", [enabled, preview]); return true }
+      function setNotifications(enabled, preview, sound) {
+        record("setNotifications", [enabled, preview, sound === undefined ? null : sound]); return true }
       function setAutoDownloadMedia(enabled) { record("setAutoDownloadMedia", [enabled]); return true }
       function setOnline(online) { record("setOnline", [online]); return true }
       property int aboutRequests: 0
@@ -96,8 +98,9 @@ TestCase {
     var cases = [
       ["reading", "send_read_receipts", "setPreference", ["send_read_receipts", false]],
       ["reading", "read_on_reply", "setPreference", ["read_on_reply", false]],
-      ["notifications", "notify", "setNotifications", [false, null]],
-      ["notifications", "notify_preview", "setNotifications", [null, false]],
+      ["notifications", "notify", "setNotifications", [false, null, null]],
+      ["notifications", "notify_preview", "setNotifications", [null, false, null]],
+      ["notifications", "notify_sound", "setNotifications", [null, null, false]],
       ["notifications", "show_unread_count", "setPreference", ["show_unread_count", false]],
       ["chats", "enter_sends", "setPreference", ["enter_sends", false]],
       ["chats", "show_avatars", "setPreference", ["show_avatars", false]],

@@ -143,6 +143,8 @@ TestCase {
 
   function test_photo_refresh_runs_by_itself_only_with_every_window_closed() {
     var service = createService(0)
+    compare(service.autoRefreshAvatars, false, "off by default: a batch pauses sync and loses events")
+    service.autoRefreshAvatars = true
     service.autoAvatarNotBefore = 0
     service.appOpen = true
     verify(!service.maybeAutoRefreshAvatars(), "an open window is never interrupted")

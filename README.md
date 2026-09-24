@@ -85,9 +85,13 @@ native, and visually at home in Omarchy.
   delete for you, and delete for everyone share the same action surface.
 - Keep a separate draft, reply/edit context, and pending attachment queue for
   every chat while switching between conversations.
-- Get a quiet bar badge without persistent desktop popups. Opening a chat
-  acknowledges that chat locally; middle-clicking the bar dismisses the current
-  batch. New incoming messages light it up again, while muted and archived
+- Get a desktop notification for each chat with new messages: the chat photo,
+  the sender and text (or just the chat name), one short sound unless
+  Omarchy's do not disturb is on, and a click that opens the chat. Muted and
+  archived chats stay silent, and so does the chat you are reading.
+- Get a quiet bar badge that counts unread chats, not messages; its tooltip
+  gives both. Opening a chat acknowledges that chat locally; middle-clicking
+  the bar dismisses the current batch. New incoming messages light it up again, while muted and archived
   chats remain readable without raising the bar badge.
 - Click the bar badge for a compact, anchored mini client with local search,
   unread state, recent messages, replies/reactions, clipboard attachments, a
