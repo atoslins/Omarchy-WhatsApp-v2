@@ -831,6 +831,110 @@ class BackendTests(unittest.TestCase):
                 self.backend.download_media("team@g.us", "t2")
         run.assert_not_called()
 
+    def _check_reply(self, digits: str, jid: str, registered: bool = True):
+        return subprocess.CompletedProcess([], 0, json.dumps({"success": True, "data": [{
+            "query": "+" + digits, "phone": digits, "jid": jid,
+            "registered": registered, "responded": True}]}), "")
+
+    def test_new_chat_search_lists_people_the_mirror_knows(self) -> None:
+        people = self.backend.contacts_search("")["people"]
+        self.assertEqual({person["jid"] for person in people}, {
+            "member@s.whatsapp.net", "admin@s.whatsapp.net", "alex@s.whatsapp.net"})
+        sam = self.backend.contacts_search("sam")["people"]
+        self.assertEqual([(p["name"], p["has_chat"]) for p in sam], [("Sam Rivera", False)])
+        by_phone = self.backend.contacts_search("+1 555 765")["people"]
+        self.assertEqual([p["jid"] for p in by_phone], ["admin@s.whatsapp.net"])
+        self.assertTrue(self.backend.contacts_search("alex")["people"][0]["has_chat"])
+        self.assertEqual(self.backend.contacts_search("%")["people"], [])
+
+    def test_checking_a_number_is_an_explicit_remote_read(self) -> None:
+        with mock.patch.object(self.backend, "_mutate") as mutate:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "remote-read"):
+                self.backend.check_number("+55 11 91234-5678")
+            for bad in ["", "abc", "12", "+55 11 9123 4567 8901 23", "0800 123 4567", "5511@x"]:
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "country code"):
+                    self.backend.check_number(bad, "remote-read")
+        mutate.assert_not_called()
+
+    def test_checking_a_number_respects_offline_mode(self) -> None:
+        with mock.patch.object(self.backend, "online", return_value=False), \
+             mock.patch.object(self.backend, "_run") as run, \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
+            self.backend.check_number("+55 11 91234-5678", "remote-read")
+        run.assert_not_called()
+
+    def test_first_message_needs_a_confirmed_or_known_recipient(self) -> None:
+        sent = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        with mock.patch.object(self.backend, "_write", return_value=sent) as write:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Check that number"):
+                self.backend.send_new({"phone": "+55 11 91234-5678"}, "hi")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Check that number"):
+                self.backend.send_new({"jid": "5511912345678@s.whatsapp.net"}, "hi")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "contacts"):
+                self.backend.send_new({"jid": "team@g.us"}, "hi")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Type a message"):
+                self.backend.send_new({"phone": "+55 11 91234-5678"}, "  ")
+        write.assert_not_called()
+
+    def test_a_confirmed_number_receives_the_first_message(self) -> None:
+        jid = "551191234567@s.whatsapp.net"
+        with mock.patch.object(self.backend, "_mutate",
+                               return_value=self._check_reply("5511912345678", jid)) as mutate:
+            checked = self.backend.check_number("+55 (11) 91234-5678", "remote-read")
+        self.assertEqual(mutate.call_args.args[0],
+                         ["--json", "contacts", "check", "+5511912345678"])
+        self.assertTrue(checked["registered"])
+        self.assertEqual(checked["jid"], jid, "WhatsApp's canonical JID wins over the typed digits")
+        self.assertFalse(checked["has_chat"])
+        sent = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        with mock.patch.object(self.backend, "_write", return_value=sent) as write:
+            result = self.backend.send_new({"phone": "5511912345678"}, "  hello  ")
+            self.backend.send_new({"jid": jid}, "again")
+        command = write.call_args_list[0].args[0]
+        self.assertEqual(command[command.index("--to") + 1], jid)
+        self.assertEqual(command[command.index("--message") + 1], "hello")
+        self.assertEqual(result["jid"], jid)
+        self.assertEqual(write.call_count, 2)
+
+    def test_an_unregistered_number_is_never_remembered(self) -> None:
+        with mock.patch.object(self.backend, "_mutate", return_value=self._check_reply(
+                "5511900000000", "", registered=False)):
+            checked = self.backend.check_number("+5511900000000", "remote-read")
+        self.assertFalse(checked["registered"])
+        self.assertEqual(checked["jid"], "")
+        with mock.patch.object(self.backend, "_write") as write, \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Check that number"):
+            self.backend.send_new({"phone": "+5511900000000"}, "hi")
+        write.assert_not_called()
+
+    def test_a_stale_check_must_be_repeated(self) -> None:
+        jid = "5511912345678@s.whatsapp.net"
+        with mock.patch.object(self.backend, "_mutate",
+                               return_value=self._check_reply("5511912345678", jid)):
+            self.backend.check_number("+5511912345678", "remote-read")
+        later = time.time() + backend_module.NEW_CHAT_CHECK_TTL + 5
+        with mock.patch.object(backend_module.time, "time", return_value=later), \
+             mock.patch.object(self.backend, "_write") as write, \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Check that number"):
+            self.backend.send_new({"phone": "+5511912345678"}, "hi")
+        write.assert_not_called()
+
+    def test_first_message_to_an_existing_chat_uses_the_normal_send(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO chats VALUES (?, 'dm', 'Known', 5, 0, 0, 0, 0, 0)",
+                               ["15550001111@s.whatsapp.net"])
+            connection.execute("INSERT INTO contacts VALUES (?, ?, '', 'Only contact', '', '', '', 1)",
+                               ["15550002222@s.whatsapp.net", "15550002222"])
+        with mock.patch.object(self.backend, "send") as send, \
+             mock.patch.object(self.backend, "_write") as write:
+            self.backend.send_new({"jid": "15550001111@s.whatsapp.net"}, "hi")
+            send.assert_called_once_with("15550001111@s.whatsapp.net", "hi")
+            write.return_value = subprocess.CompletedProcess(
+                [], 0, json.dumps({"success": True}), "")
+            self.backend.send_new({"jid": "15550002222@s.whatsapp.net"}, "hi")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--to") + 1], "15550002222@s.whatsapp.net")
+
     def test_save_media_copies_the_attachment_to_the_chosen_file(self) -> None:
         destination = self.root / "Downloads" / "saved.png"
         destination.parent.mkdir()

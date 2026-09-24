@@ -294,6 +294,11 @@ Item {
     mediaViewer.closeViewer()
     var selectedFromPayload = false
     if (pendingOpenChatJid !== "") selectedFromPayload = selectPendingOpenChat()
+    // {"newChat":true} opens the new chat dialog; demo captures may prefill it.
+    if (payload.newChat === true) {
+      var newChatQuery = demoMode && typeof payload.newChatQuery === "string" ? payload.newChatQuery : ""
+      Qt.callLater(function() { root.openNewChat(newChatQuery) })
+    }
     if (demoMode && payload.attachments === true) {
       pendingStickerPath = ""
       pendingAttachments = [
@@ -333,6 +338,47 @@ Item {
       }
       else root.focusComposer()
     })
+  }
+
+  // New chat works in the account the helper is serving; with several
+  // accounts the dialog title names it.
+  readonly property string newChatAccount: root.demoMode ? "work"
+    : String(root.service ? root.service.statusAccount || "" : "")
+  readonly property string newChatAccountLabel: {
+    if (!root.multiAccount) return ""
+    var entry = root.accountEntries.find(function(item) {
+      return String(item.account || "") === root.newChatAccount
+    })
+    return entry ? String(entry.label || entry.account || "") : root.newChatAccount
+  }
+  property var demoPeople: [
+    { jid: "demo-alex", name: "Alex", phone: "15557654321", has_chat: true },
+    { jid: "15551234567@s.whatsapp.net", name: "Sam Rivera", phone: "15551234567", has_chat: false },
+    { jid: "15552468101@s.whatsapp.net", name: "Nora Ali", phone: "15552468101", has_chat: false }
+  ]
+
+  function openNewChat(query) {
+    if (!opened) return false
+    settingsOpen = false
+    newChatDialog.open()
+    if (typeof query === "string" && query !== "")
+      Qt.callLater(function() { newChatDialog.typeQuery(query) })
+    return true
+  }
+
+  function openNewChatResult(jid) {
+    var account = root.demoMode ? "" : root.newChatAccount
+    var target = AccountModel.findChat(sourceChats, AccountModel.chatRef(account, jid))
+      || sourceChats.find(function(chat) { return String(chat.jid || "") === String(jid) })
+    if (target) selectChat(target, "composer")
+    return !!target
+  }
+
+  function followStartedChat(jid) {
+    if (root.demoMode) return
+    pendingOpenChatAccount = root.newChatAccount
+    pendingOpenChatJid = String(jid || "")
+    if (!selectPendingOpenChat() && service) service.refreshChats()
   }
 
   function selectPendingOpenChat() {
@@ -1362,6 +1408,12 @@ Item {
         onActivated: root.toggleSidebar()
       }
 
+      Shortcut {
+        sequence: "Ctrl+N"
+        context: Qt.WindowShortcut
+        onActivated: root.openNewChat()
+      }
+
       Process {
         id: filePickerProcess
         property string kind: "document"
@@ -1641,6 +1693,17 @@ Item {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
+              PanelActionButton {
+                objectName: "railNewChatButton"
+                iconText: "󱐒"
+                tooltipText: "New chat · Ctrl+N"
+                foreground: newChatDialog.opened ? root.accent : root.dim
+                hoverColor: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                size: Style.space(28)
+                onClicked: root.openNewChat()
+              }
               PanelActionButton {
                 objectName: "railSettingsButton"
                 iconText: "󰢻"
@@ -3536,6 +3599,26 @@ Item {
             }
           }
         }
+      }
+
+      NewChatDialog {
+        id: newChatDialog
+        service: root.demoMode ? null : root.service
+        demoMode: root.demoMode
+        demoPeople: root.demoPeople
+        chats: root.sourceChats.filter(function(chat) {
+          return root.demoMode || String(chat.account || "") === root.newChatAccount
+        })
+        showAvatars: root.showAvatars
+        accountLabel: root.newChatAccountLabel
+        foreground: root.foreground
+        surface: root.background
+        accent: root.accent
+        muted: root.dim
+        urgent: root.urgent
+        fontFamily: root.fontFamily
+        onOpenChatRequested: function(jid) { root.openNewChatResult(jid) }
+        onChatStarted: function(jid) { root.followStartedChat(jid) }
       }
 
       MediaViewer {

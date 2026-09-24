@@ -194,6 +194,45 @@ TestCase {
     verify(app.settingsOpen)
   }
 
+  function test_new_chat_is_a_rail_button_with_a_shortcut() {
+    var app = createHarness().app
+    var button = findChild(app, "railNewChatButton")
+    verify(button !== null)
+    compare(button.tooltipText, "New chat · Ctrl+N")
+    var dialog = findChild(app, "newChatDialog")
+    verify(dialog !== null)
+    verify(!dialog.opened)
+    button.clicked()
+    tryCompare(dialog, "opened", true)
+    dialog.close()
+    tryCompare(dialog, "opened", false)
+    app.forceActiveFocus()
+    keyClick(Qt.Key_N, Qt.ControlModifier)
+    tryCompare(dialog, "opened", true)
+  }
+
+  function test_new_chat_opens_an_existing_chat_in_the_rail() {
+    var h = createHarness()
+    var dialog = findChild(h.app, "newChatDialog")
+    h.app.openNewChat()
+    tryCompare(dialog, "opened", true)
+    dialog.openChatRequested("other@example")
+    compare(h.service.selectedChatJid, "other@example")
+  }
+
+  function test_a_started_chat_is_selected_once_it_syncs() {
+    var h = createHarness()
+    var dialog = findChild(h.app, "newChatDialog")
+    dialog.chatStarted("15550003333@s.whatsapp.net")
+    compare(h.app.pendingOpenChatJid, "15550003333@s.whatsapp.net")
+    compare(h.service.selectedChatJid, "shared@example", "not in the rail yet")
+    h.service.chats = [workChat, otherChat, {
+      account: "work", jid: "15550003333@s.whatsapp.net", name: "Synthetic started",
+      kind: "dm", preview: "", unread: 0 }]
+    compare(h.service.selectedChatJid, "15550003333@s.whatsapp.net")
+    compare(h.app.pendingOpenChatJid, "")
+  }
+
   function test_hidden_chat_list_offers_the_way_back_in_the_conversation() {
     var app = createHarness().app
     var show = findChild(app, "showChatListButton")

@@ -82,6 +82,13 @@ XDG_OPEN = Path("/usr/bin/xdg-open")
 NOTIFY_SEND = Path("/usr/bin/notify-send")
 OMARCHY_SHELL = Path("/usr/share/omarchy/bin/omarchy-shell")
 MAX_MESSAGE = 4096
+# A new chat only goes to a phone-number user JID the mirror already knows or
+# that WhatsApp confirmed moments ago; a typo never becomes a recipient.
+NEW_CHAT_JID = re.compile(r"^[0-9]{5,20}@s\.whatsapp\.net$")
+NEW_CHAT_CHECK_TTL = 15 * 60
+NEW_CHAT_CHECKS_FILE = "new-chat-checks.json"
+MAX_NEW_CHAT_CHECKS = 32
+MAX_NEW_CHAT_STATE = 16 * 1024
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 MAX_SENT_MEDIA_HINTS = 2000
@@ -3047,6 +3054,169 @@ class Backend:
         )
         return {"ok": True}
 
+    @staticmethod
+    def _phone_digits(value: Any) -> str:
+        raw = str(value or "").strip()
+        if not raw or len(raw) > 40 or not re.fullmatch(r"\+?[0-9 ().\-]+", raw):
+            raise OmaWhatsAppError("Type a phone number with its country code.")
+        digits = re.sub(r"\D", "", raw)
+        if not 7 <= len(digits) <= 15 or digits.startswith("0"):
+            raise OmaWhatsAppError("Type a phone number with its country code.")
+        return digits
+
+    def contacts_search(self, query: str = "", limit: int = 40) -> dict[str, Any]:
+        """Local only: the people this account's mirror knows, for a new chat."""
+        cleaned = " ".join(str(query or "").split())[:128]
+        limit = max(1, min(int(limit), 80))
+        digits = re.sub(r"\D", "", cleaned)
+        phone_sql = """COALESCE(NULLIF(contacts.phone, ''),
+          SUBSTR(people.jid, 1, INSTR(people.jid, '@') - 1))"""
+        name_sql = """COALESCE(NULLIF(chats.name, ''), NULLIF(contacts.business_name, ''),
+          NULLIF(contacts.full_name, ''), NULLIF(contacts.push_name, ''),
+          NULLIF(contacts.system_name, ''), NULLIF(contacts.first_name, ''), '')"""
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    f"""
+                    WITH people(jid) AS (
+                      SELECT jid FROM contacts WHERE jid LIKE '%@s.whatsapp.net'
+                      UNION
+                      SELECT jid FROM chats
+                      WHERE kind = 'dm' AND jid LIKE '%@s.whatsapp.net')
+                    SELECT people.jid AS jid, {name_sql} AS name, {phone_sql} AS phone,
+                      chats.jid IS NOT NULL AS has_chat,
+                      COALESCE(chats.last_message_ts, 0) AS ts
+                    FROM people
+                    LEFT JOIN contacts ON contacts.jid = people.jid
+                    LEFT JOIN chats ON chats.jid = people.jid
+                    WHERE ? = ''
+                      OR LOWER({name_sql}) LIKE LOWER(?) ESCAPE '\\'
+                      OR (? <> '' AND {phone_sql} LIKE ? ESCAPE '\\')
+                    ORDER BY {name_sql} = '', LOWER({name_sql}), {phone_sql}
+                    LIMIT ?
+                    """,
+                    [cleaned, self._like(cleaned), digits, self._like(digits), limit],
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        people = [{
+            "jid": str(row["jid"]),
+            "name": str(row["name"] or "")[:128],
+            "phone": str(row["phone"] or "")[:32],
+            "has_chat": bool(row["has_chat"]),
+        } for row in rows]
+        return {"ok": True, "query": cleaned, "people": people}
+
+    def _known_person(self, jid: str) -> dict[str, Any] | None:
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """SELECT (SELECT COUNT(*) FROM contacts WHERE jid = ?)
+                         + (SELECT COUNT(*) FROM chats WHERE jid = ?) AS known,
+                         (SELECT COUNT(*) FROM chats WHERE jid = ?) AS has_chat""",
+                    [jid, jid, jid],
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if row is None or not int(row["known"] or 0):
+            return None
+        return {"jid": jid, "has_chat": bool(int(row["has_chat"] or 0))}
+
+    def _new_chat_checks(self) -> dict[str, dict[str, Any]]:
+        value = self._read_state_json(NEW_CHAT_CHECKS_FILE, MAX_NEW_CHAT_STATE, {})
+        if not isinstance(value, dict):
+            return {}
+        now = int(time.time())
+        clean: dict[str, dict[str, Any]] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key.count("\n") != 1 or not isinstance(item, dict):
+                continue
+            jid = str(item.get("jid") or "")
+            checked = bounded_int(item.get("checked_at"), 0, 0, 2**63 - 1)
+            if NEW_CHAT_JID.fullmatch(jid) and now - checked < NEW_CHAT_CHECK_TTL:
+                clean[key] = {"jid": jid, "checked_at": checked}
+        return clean
+
+    def _remember_new_chat_check(self, digits: str, jid: str) -> None:
+        try:
+            with self._state_lock("new-chat-checks.lock"):
+                checks = self._new_chat_checks()
+                checks[f"{self.active.name}\n{digits}"] = {
+                    "jid": jid, "checked_at": int(time.time())}
+                ordered = sorted(checks.items(), key=lambda pair: pair[1]["checked_at"])
+                self._write_state_json(
+                    NEW_CHAT_CHECKS_FILE, dict(ordered[-MAX_NEW_CHAT_CHECKS:]),
+                    MAX_NEW_CHAT_STATE)
+        except (OmaWhatsAppError, OSError):
+            pass
+
+    def check_number(self, phone: Any, authorization: str = "") -> dict[str, Any]:
+        """Ask WhatsApp whether a number is registered; nothing is stored in wacli."""
+        if authorization != "remote-read":
+            raise OmaWhatsAppError(
+                "Checking a number asks WhatsApp; pass authorization='remote-read'."
+            )
+        digits = self._phone_digits(phone)
+        result = self._mutate(
+            ["--json", "contacts", "check", "+" + digits],
+            timeout=45, require_online=True,
+        )
+        envelope = self._envelope(result)
+        data = envelope.get("data")
+        rows = data if isinstance(data, list) else []
+        match = next((row for row in rows if isinstance(row, dict)
+                      and str(row.get("phone") or "") == digits), None)
+        if match is None and len(rows) == 1 and isinstance(rows[0], dict):
+            match = rows[0]
+        if match is None or match.get("responded") is not True:
+            raise OmaWhatsAppError("WhatsApp did not answer for that number. Try again.")
+        jid = str(match.get("jid") or "")
+        registered = match.get("registered") is True and bool(NEW_CHAT_JID.fullmatch(jid))
+        output: dict[str, Any] = {
+            "ok": True, "kind": "check-number", "phone": digits,
+            "registered": registered, "jid": jid if registered else "",
+            "has_chat": False, "name": "",
+        }
+        if registered:
+            self._remember_new_chat_check(digits, jid)
+            known = self._known_person(jid)
+            output["has_chat"] = bool(known and known["has_chat"])
+            if output["has_chat"]:
+                output["name"] = self._chat(jid)["name"]
+        return output
+
+    def send_new(self, target: Any, text: str) -> dict[str, Any]:
+        """First message to someone: the recipient is known locally or was just confirmed."""
+        request_target = target if isinstance(target, dict) else {}
+        message = str(text or "").strip()
+        if not message:
+            raise OmaWhatsAppError("Type a message first.")
+        if len(message) > MAX_MESSAGE:
+            raise OmaWhatsAppError("Message is too long (maximum 4096 characters).")
+        jid = str(request_target.get("jid") or "").strip()
+        if jid:
+            if not NEW_CHAT_JID.fullmatch(jid):
+                raise OmaWhatsAppError("Choose a person from your WhatsApp contacts.")
+            known = self._known_person(jid)
+            confirmed = any(item["jid"] == jid and key.startswith(self.active.name + "\n")
+                            for key, item in self._new_chat_checks().items())
+            if known is None and not confirmed:
+                raise OmaWhatsAppError("Check that number with WhatsApp first.")
+        else:
+            digits = self._phone_digits(request_target.get("phone"))
+            cached = self._new_chat_checks().get(f"{self.active.name}\n{digits}")
+            if cached is None:
+                raise OmaWhatsAppError("Check that number with WhatsApp first.")
+            jid = cached["jid"]
+            known = self._known_person(jid)
+        if known is not None and known["has_chat"]:
+            self.send(jid, message)
+            return {"ok": True, "kind": "send-new", "jid": jid}
+        command = ["--json", "send", "text", "--to", jid,
+                   "--message", message, "--post-send-wait", "0"]
+        self._envelope(self._write(command, timeout=45))
+        return {"ok": True, "kind": "send-new", "jid": jid}
+
     def react(self, jid: str, message_id: str, emoji: str) -> dict[str, Any]:
         chat, message = self._message(jid, message_id)
         reaction = emoji.strip()
@@ -4349,6 +4519,9 @@ def parser() -> argparse.ArgumentParser:
     messages.add_argument("--limit", type=int, default=160)
     commands.add_parser("members")
     commands.add_parser("send")
+    commands.add_parser("contacts-search")
+    commands.add_parser("check-number")
+    commands.add_parser("send-new")
     commands.add_parser("paste")
     commands.add_parser("discard-stage")
     commands.add_parser("files")
@@ -4453,6 +4626,14 @@ def main() -> int:
                                      str(payload.get("text") or ""),
                                      str(payload.get("reply_id") or ""),
                                      payload.get("mentions")))
+        if args.command == "contacts-search":
+            return emit(backend.contacts_search(str(payload.get("query") or "")))
+        if args.command == "check-number":
+            return emit(backend.check_number(payload.get("phone"),
+                                             str(payload.get("authorization") or "")))
+        if args.command == "send-new":
+            return emit(backend.send_new(payload.get("target"),
+                                         str(payload.get("text") or "")))
         if args.command == "paste":
             return emit(backend.paste(str(payload.get("jid") or "")))
         if args.command == "discard-stage":

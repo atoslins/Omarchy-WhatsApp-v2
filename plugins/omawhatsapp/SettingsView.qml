@@ -197,6 +197,7 @@ Rectangle {
       { kind: "info", title: "Super+Shift+W", value: "Open or close OmaWhatsApp" },
       { kind: "info", title: "Ctrl+F", value: "Find in this conversation" },
       { kind: "info", title: "Ctrl+B", value: "Hide or show the chat list" },
+      { kind: "info", title: "Ctrl+N", value: "Start a new chat" },
       { kind: "info", title: "/", value: "Search chats" },
       { kind: "info", title: "J · K", value: "Move through messages or chats" },
       { kind: "info", title: "R", value: "Reply to the selected message" },

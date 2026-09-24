@@ -51,6 +51,12 @@
   "N unread messages" divider where unread messages start, and a jump-to-latest
   button with the count of messages that arrived while you read above; the
   bar dropdown gets the headers, the divider and the button too.
+- Start a new chat from the button beside "Chats" (Ctrl+N) or from the bar
+  dropdown. The dialog searches the people the account's mirror knows by name
+  or number; a person with a chat opens it. A typed number is first checked
+  with WhatsApp (`contacts check`, an explicit remote read), and a first
+  message only goes to a person the mirror knows or to the JID WhatsApp just
+  confirmed, never to the typed digits.
 - Clicking a desktop notification opens that chat in the full app.
 - The chat list shows pinned and muted icons, and "Draft: …" for chats with an
   unsent message.

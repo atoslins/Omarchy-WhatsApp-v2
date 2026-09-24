@@ -52,6 +52,22 @@ TestCase {
     dropdown.close()
   }
 
+  function test_new_chat_hands_off_to_the_full_app_dialog() {
+    var dropdown = createTemporaryObject(dropdownComponent, testCase)
+    dropdown.toggle()
+    var button = findChild(dropdown, "dropdownNewChatButton")
+    verify(button !== null)
+    compare(button.tooltipText, "New chat · opens the full app")
+    var spy = createTemporaryObject(spyComponent, testCase,
+      { target: dropdown, signalName: "fullAppRequested" })
+    button.clicked()
+    compare(spy.count, 1)
+    compare(spy.signalArguments[0][0].newChat, true)
+    compare(dropdown.opened, false)
+  }
+
+  Component { id: spyComponent; SignalSpy {} }
+
   function test_clear_all_requires_confirmation_and_stays_local() {
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
     verify(dropdown !== null)

@@ -32,6 +32,8 @@ Item {
 
   function fallbackLabel() {
     if (chat && chat.kind === "group") return "󰠮"
+    // Someone known only by number: a person glyph, not the "+" of the number.
+    if (/^[+]?[0-9 ().-]+$/.test(String(chat && chat.name || "").trim())) return "󰀓"
     var parts = String(chat && chat.name || "?").trim().split(/\s+/)
       .filter(function(part) { return part !== "" })
     if (parts.length === 0) return "?"

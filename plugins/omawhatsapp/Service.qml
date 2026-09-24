@@ -35,6 +35,14 @@ Item {
   property bool autoDownloadMedia: true
   property var about: ({})
   property bool aboutLoading: false
+  // New chat: people this account's mirror knows, and WhatsApp's answer for a
+  // typed number. A first message only goes to one of those two.
+  property var newChatPeople: []
+  property string newChatPeopleQuery: ""
+  property bool newChatPeopleLoading: false
+  property bool newChatPeoplePending: false
+  property var numberCheck: ({ account: "", phone: "", loading: false, registered: false,
+    responded: false, jid: "", has_chat: false, name: "", error: "" })
   property var pendingReplyReadRef: ({ account: "", jid: "", key: "" })
   // A chat the user explicitly marked unread stays unread while it is open;
   // choosing it again reads it.
@@ -493,6 +501,57 @@ Item {
     return runWriteForChat("save-media", {
       id: String(item.id), destination: String(destination)
     }, chatRef, owner)
+  }
+  function searchPeople(query) {
+    newChatPeopleQuery = String(query || "").trim()
+    if (contactsProcess.running) { newChatPeoplePending = true; return true }
+    if (!statusReady || !ready) return false
+    newChatPeopleLoading = true
+    contactsProcess.account = statusAccount
+    contactsProcess.query = newChatPeopleQuery
+    contactsProcess.payload = JSON.stringify({ account: statusAccount, query: newChatPeopleQuery })
+    contactsProcess.stdinEnabled = true
+    contactsProcess.running = true
+    return true
+  }
+  function numberCheckFor(phone) {
+    var digits = String(phone || "").replace(/[^0-9]/g, "")
+    return String(numberCheck.phone || "") === digits
+      && String(numberCheck.account || "") === statusAccount ? numberCheck : null
+  }
+  function checkNumber(phone) {
+    var digits = String(phone || "").replace(/[^0-9]/g, "")
+    var base = { account: statusAccount, phone: digits, loading: false, registered: false,
+      responded: false, jid: "", has_chat: false, name: "", error: "" }
+    if (checkNumberProcess.running) return false
+    if (digits.length < 7 || digits.length > 15) {
+      numberCheck = Object.assign(base, { error: "Type a phone number with its country code." })
+      return false
+    }
+    if (offlineMode) {
+      numberCheck = Object.assign(base, {
+        error: "Offline mode is on. Go online to check a number with WhatsApp." })
+      return false
+    }
+    if (!statusReady || !ready) {
+      numberCheck = Object.assign(base, { error: "That account is still loading. Try again in a moment." })
+      return false
+    }
+    numberCheck = Object.assign(base, { loading: true })
+    checkNumberProcess.account = statusAccount
+    checkNumberProcess.phone = digits
+    checkNumberProcess.payload = JSON.stringify({
+      account: statusAccount, phone: String(phone), authorization: "remote-read" })
+    checkNumberProcess.stdinEnabled = true
+    checkNumberProcess.running = true
+    return true
+  }
+  function startNewChat(jid, text, owner) {
+    var value = String(text || "").trim()
+    var target = String(jid || "")
+    if (value === "" || !/^[0-9]{5,20}@s[.]whatsapp[.]net$/.test(target)) return false
+    return runWriteForChat("send-new", { target: { jid: target }, text: value },
+      AccountModel.chatRef(statusAccount, target), owner)
   }
   function reactTo(chatRef, item, emoji, owner) {
     if (!item || !item.id) return false
@@ -1022,6 +1081,59 @@ Item {
         root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
+    }
+  }
+
+  Process {
+    id: contactsProcess
+    objectName: "contactsProcess"
+    property string account: ""
+    property string query: ""
+    property string payload: ""
+    command: [root.helper, "contacts-search"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: contactsOutput }
+    stderr: StdioCollector { id: contactsError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.newChatPeopleLoading = false
+      var payload = root.parseJson(contactsOutput.text)
+      if (exitCode === 0 && payload && payload.ok === true && account === root.statusAccount
+          && query === root.newChatPeopleQuery)
+        root.newChatPeople = Array.isArray(payload.people) ? payload.people : []
+      if (root.newChatPeoplePending || query !== root.newChatPeopleQuery) {
+        root.newChatPeoplePending = false
+        Qt.callLater(function() { root.searchPeople(root.newChatPeopleQuery) })
+      }
+    }
+  }
+
+  Process {
+    id: checkNumberProcess
+    objectName: "checkNumberProcess"
+    property string account: ""
+    property string phone: ""
+    property string payload: ""
+    command: [root.helper, "check-number"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: checkNumberOutput }
+    stderr: StdioCollector { id: checkNumberError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var payload = root.parseJson(checkNumberOutput.text)
+      var result = { account: account, phone: phone, loading: false, registered: false,
+        responded: false, jid: "", has_chat: false, name: "", error: "" }
+      if (exitCode === 0 && payload && payload.ok === true) {
+        result.responded = true
+        result.registered = payload.registered === true
+        result.jid = String(payload.jid || "")
+        result.has_chat = payload.has_chat === true
+        result.name = String(payload.name || "")
+      } else {
+        result.error = (payload && payload.error)
+          || String(checkNumberError.text || "WhatsApp could not check that number.").trim()
+      }
+      root.numberCheck = result
     }
   }
 

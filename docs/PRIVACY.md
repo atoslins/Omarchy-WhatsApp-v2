@@ -40,10 +40,17 @@ local for retry or discard; confirmed sends remove their draft.
 Profile-photo refresh is an explicit remote read, never part of ordinary chat
 browsing. The helper accepts only public, hostname-verified HTTPS targets,
 pins each connection to the address it validated, and repeats that boundary at
-every redirect. It keeps at most 128 one-megabyte JPEG, PNG, or WebP files in
+every redirect. It keeps at most 2048 one-megabyte JPEG, PNG, or WebP files in
 an owner-private cache with opaque names. CDN URLs, query tokens, account store
 paths, and chat identifiers are not stored in that index or exposed to QML;
 the UI receives only a validated absolute local path.
+
+Checking a typed number for a new chat is also an explicit remote read: the
+helper runs `wacli contacts check`, which asks WhatsApp whether the number is
+registered and stores nothing in the mirror. The confirmed JID is kept for 15
+minutes in the owner-private `new-chat-checks.json` (mode `0600`, at most 32
+entries), so the first message can go to exactly that recipient; expired
+entries are dropped on the next read. Unregistered numbers are not kept.
 
 If a foreground wacli operation briefly yields background sync, the helper
 stores a crash-recovery intent containing only the public systemd unit name and

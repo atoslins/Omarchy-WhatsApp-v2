@@ -53,6 +53,9 @@ native, and visually at home in Omarchy.
 
 - Browse every locally synced direct message and group; search chats or the
   current conversation.
+- Start a new chat with `Ctrl+N` or the button beside "Chats": search the
+  people you know by name or number, or type a number with its country code.
+  WhatsApp confirms the number before the first message can be written.
 - Send multiline text, replies, edits, reactions, interactive options, polls,
   stickers, and up to 10 files with a caption.
 - Press `Ctrl+Shift+V` to start or stop a voice note from either client. The
@@ -272,11 +275,14 @@ Add the `Super+Shift+W` binding from
 | Dropdown `Enter` | Open the selected mini conversation and focus its composer |
 | Dropdown `Enter` / `Shift+Enter` | Send / add a line |
 | Dropdown paperclip / `Ctrl+O` | Choose and stage up to 10 local files |
-| Dropdown clipboard / `Ctrl+V` | Stage clipboard text, screenshots, GIFs, or files |
+| Dropdown `Ctrl+V` | Stage clipboard text, screenshots, GIFs, or files |
+| Dropdown emoji button | Insert an emoji at the cursor |
+| Dropdown new chat button | Open the full app's new chat dialog |
 | Dropdown `Ctrl+Shift+V` | Start/stop a voice note; stopping opens review and does not send |
 | Dropdown `Esc` | Composer → messages → recent chats → close |
 | Dropdown `O` | Expand the exact chat into the full app |
 | `Ctrl+F` | Find in the current conversation |
+| `Ctrl+N` | Start a new chat (also the rail's new chat button) |
 | `Ctrl+B` | Hide or show the chat list without losing context (also the rail's hide button, and the show button in the conversation while it is hidden) |
 | Chat list `/` | Focus chat search; `Esc` returns to list navigation |
 | `C` | Focus the composer |

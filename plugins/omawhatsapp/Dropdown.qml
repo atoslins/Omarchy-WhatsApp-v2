@@ -346,6 +346,17 @@ Panel {
     fullAppRequested(payload)
   }
 
+  // Starting a chat needs room for search, a number check and a first
+  // message, so the dropdown hands it to the full app's dialog.
+  function openNewChat() {
+    if (sending) return false
+    if (!demoMode && service) service.discardStages(pendingAttachments)
+    pendingAttachments = []
+    close()
+    fullAppRequested({ newChat: true })
+    return true
+  }
+
   function refresh() {
     if (!demoMode && service) {
       service.refreshChats()
@@ -746,6 +757,22 @@ Panel {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
+            }
+
+            PanelActionButton {
+              id: newChatButton
+              objectName: "dropdownNewChatButton"
+              anchors.right: notificationBadge.visible ? notificationBadge.left : parent.right
+              anchors.rightMargin: notificationBadge.visible ? Style.space(6) : Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󱐒"
+              tooltipText: "New chat · opens the full app"
+              foreground: root.muted
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.body
+              size: Style.space(28)
+              onClicked: root.openNewChat()
             }
 
             Rectangle {
