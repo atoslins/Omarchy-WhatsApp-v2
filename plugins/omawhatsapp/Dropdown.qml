@@ -335,6 +335,21 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  function scrollToNewest() {
+    messageList.positionViewAtBeginning()
+    Qt.callLater(function() {
+      messageList.positionViewAtBeginning()
+      Qt.callLater(function() { messageList.positionViewAtBeginning() })
+    })
+  }
+
+  function newestMessageOffset(contentY) {
+    if (messageList.count === 0) return 0
+    var item = messageList.itemAtIndex(0)
+    if (!item) return 100000
+    return item.mapToItem(messageList, 0, item.height).y - messageList.height
+  }
+
   // The day of the topmost message floats at the top while scrolling.
   property string floatingDayLabel: ""
   function showFloatingDay() {
@@ -1395,8 +1410,8 @@ Panel {
             id: compactJump
             objectName: "jumpToLatest"
             z: 20
-            readonly property bool away: messageList.count > 0
-              && messageList.contentY + messageList.height < -Style.space(48)
+            // Measured on the newest message itself, as in the full app.
+            readonly property bool away: root.newestMessageOffset(messageList.contentY) > Style.space(48)
             visible: away
             anchors.right: messageList.right
             anchors.bottom: messageList.bottom
@@ -1408,7 +1423,7 @@ Panel {
             fontFamily: root.fontFamily
             fontSize: Style.font.body
             bordered: true
-            onClicked: messageList.positionViewAtBeginning()
+            onClicked: root.scrollToNewest()
           }
 
           Rectangle {

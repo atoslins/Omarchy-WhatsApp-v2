@@ -477,7 +477,7 @@ Item {
     if (key === Qt.Key_PageUp) messageList.contentY = Math.max(minY, messageList.contentY - step)
     else if (key === Qt.Key_PageDown) messageList.contentY = Math.min(maxY, messageList.contentY + step)
     else if (key === Qt.Key_Home) messageList.positionViewAtEnd()
-    else if (key === Qt.Key_End) messageList.positionViewAtBeginning()
+    else if (key === Qt.Key_End) scrollToNewest()
     else return false
     return true
   }
@@ -491,6 +491,26 @@ Item {
     var item = index >= 0 ? root.visibleMessages[index] : null
     floatingDayLabel = item ? TimeFormat.dayLabel(item.timestamp) : ""
     floatingDayHold.restart()
+  }
+
+  // How far the newest message's bottom edge sits below the list's bottom
+  // edge (0 at the newest); a newest message scrolled out of the list counts
+  // as far away. `contentY` is passed so bindings re-evaluate on scroll.
+  // Positioning runs again once the newest bubbles have their real height
+  // (images, fonts): a single pass left the newest message cut at the bottom.
+  function scrollToNewest() {
+    messageList.positionViewAtBeginning()
+    Qt.callLater(function() {
+      messageList.positionViewAtBeginning()
+      Qt.callLater(function() { messageList.positionViewAtBeginning() })
+    })
+  }
+
+  function newestMessageOffset(list, contentY) {
+    if (!list || list.count === 0) return 0
+    var item = list.itemAtIndex(0)
+    if (!item) return 100000
+    return item.mapToItem(list, 0, item.height).y - list.height
   }
 
   function oldestMessageInView() {
@@ -2774,8 +2794,11 @@ Item {
         property string awayNewestId: ""
         // Bottom-to-top list: the newest item ends at y = 0, so the view is at
         // the latest message when its bottom edge reaches 0.
-        readonly property bool awayFromLatest: messageList.count > 0
-          && messageList.contentY + messageList.height < -Style.space(48)
+        // Measured on the newest message itself: contentY and originY move
+        // with the list's height estimates (a machine without the theme
+        // fonts showed the jump button at the bottom and not at the top).
+        readonly property bool awayFromLatest: root.newestMessageOffset(messageList, messageList.contentY)
+          > Style.space(48)
         onAwayFromLatestChanged: awayNewestId = awayFromLatest && root.visibleMessages.length > 0
           ? String(root.visibleMessages[0].id || "") : ""
         readonly property int newWhileAway: {
@@ -2839,7 +2862,7 @@ Item {
           fontFamily: root.fontFamily
           fontSize: Style.font.icon
           bordered: true
-          onClicked: messageList.positionViewAtBeginning()
+          onClicked: root.scrollToNewest()
           Rectangle {
             visible: jumpToLatest.parent.newWhileAway > 0
             anchors.right: parent.right

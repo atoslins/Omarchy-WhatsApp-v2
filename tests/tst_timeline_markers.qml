@@ -69,16 +69,28 @@ TestCase {
     compare(app.unreadDividerIndex, -1, "a read chat has no divider")
   }
 
+  // Enough older demo messages that the timeline always scrolls, whatever
+  // fonts the machine has (CI has none, which shrinks the text).
+  function longTimeline(app) {
+    var oldest = app.demoItems[app.demoItems.length - 1]
+    var extra = []
+    for (var i = 0; i < 8; i++)
+      extra.push({ id: "extra-" + i, text: "Older synthetic message " + i, sender: "Sam Rivera",
+        sender_jid: "sam@s.whatsapp.net", timestamp: Number(oldest.timestamp) - (i + 1) * 3600,
+        from_me: i % 2 === 0, done: false, media_type: "", mime_type: "", local_path: "", tags: [] })
+    app.demoItems = app.demoItems.concat(extra)
+  }
+
   function test_jump_to_latest_appears_when_reading_above() {
     var app = createTemporaryObject(appComponent, testCase)
     app.opened = true
     var list = findChild(app, "messageList")
     var jump = findChild(app, "jumpToLatest")
     verify(list !== null && jump !== null)
-    tryVerify(function() { return list.count > 0 })
-    list.positionViewAtBeginning()
-    wait(50)
-    verify(!jump.visible, "at the newest message there is nothing to jump to")
+    longTimeline(app)
+    tryVerify(function() { return list.count > 5 })
+    app.scrollToNewest()
+    tryVerify(function() { return !jump.visible }, 2000, "at the newest message there is nothing to jump to")
     verify(list.contentHeight > list.height + 60, "the demo timeline must scroll here")
     // Straight to the top of the content: positionViewAtEnd settles later on
     // slower machines (CI), where lazily created delegates move the end.
@@ -89,8 +101,7 @@ TestCase {
     var backing = findChild(app, "jumpToLatestBacking")
     verify(backing.visible && backing.color.a === 1, "the text never shows through the button")
     jump.clicked()
-    wait(50)
-    verify(!jump.visible)
+    tryVerify(function() { return !jump.visible }, 2000, "the button lands on the newest message, not beside it")
   }
 
   function test_the_conversation_has_a_scroll_bar_and_page_keys() {
@@ -105,8 +116,8 @@ TestCase {
     verify(app.pageConversation(Qt.Key_PageUp))
     verify(list.contentY < newest, "Page Up moves toward older messages")
     verify(app.pageConversation(Qt.Key_End))
-    wait(50)
-    verify(!findChild(app, "jumpToLatest").visible, "End goes back to the newest message")
+    tryVerify(function() { return !findChild(app, "jumpToLatest").visible }, 2000,
+      "End goes back to the newest message")
     verify(app.pageConversation(Qt.Key_Home))
     verify(!app.pageConversation(Qt.Key_A))
   }
@@ -116,6 +127,8 @@ TestCase {
     app.opened = true
     var list = findChild(app, "messageList")
     tryVerify(function() { return list.count > 0 })
+    longTimeline(app)
+    tryVerify(function() { return list.count > 5 })
     var pill = findChild(app, "floatingDay")
     verify(pill !== null)
     tryVerify(function() {
@@ -126,8 +139,8 @@ TestCase {
     verify(app.floatingDayLabel !== "", "the topmost message's day")
     tryVerify(function() { return pill.shown })
     tryVerify(function() { return !pill.shown }, 3000, "it fades on its own after scrolling stops")
-    list.positionViewAtBeginning()
-    wait(50)
+    app.scrollToNewest()
+    tryVerify(function() { return !findChild(app, "jumpToLatest").visible }, 2000)
     app.showFloatingDay()
     verify(!pill.shown, "at the newest message the day header below is enough")
   }

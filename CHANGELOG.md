@@ -77,6 +77,11 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- The jump-to-latest button and the floating day measure the distance on the
+  newest message itself, and jumping repositions once the newest bubbles have
+  their real height; a single pass could leave the newest message cut at the
+  bottom, and without the theme fonts the button showed at the bottom and not
+  at the top.
 - Full group control in the chat details. Right-click a participant (or
   use its menu button) to message them and, as an admin, make or dismiss
   admins and remove people. "Load group settings" reads the live settings
