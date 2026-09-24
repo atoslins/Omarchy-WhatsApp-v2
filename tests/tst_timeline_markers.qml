@@ -83,6 +83,8 @@ TestCase {
     list.positionViewAtEnd()
     wait(50)
     verify(jump.visible, "reading older messages offers the way back")
+    var backing = findChild(app, "jumpToLatestBacking")
+    verify(backing.visible && backing.color.a === 1, "the text never shows through the button")
     jump.clicked()
     wait(50)
     verify(!jump.visible)

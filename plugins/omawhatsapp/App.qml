@@ -2720,6 +2720,16 @@ Item {
             if (String(root.visibleMessages[i].id || "") === awayNewestId) return i
           return 0
         }
+        // The shell button is transparent; over the conversation the text
+        // would show through it, so it gets a solid backing.
+        Rectangle {
+          objectName: "jumpToLatestBacking"
+          z: 69
+          visible: jumpToLatest.visible
+          anchors.fill: jumpToLatest
+          radius: Style.cornerRadius
+          color: root.background
+        }
         PanelActionButton {
           id: jumpToLatest
           objectName: "jumpToLatest"

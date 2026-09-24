@@ -1344,6 +1344,14 @@ Panel {
             }
           }
 
+          Rectangle {
+            objectName: "jumpToLatestBacking"
+            z: 19
+            visible: compactJump.visible
+            anchors.fill: compactJump
+            radius: Style.cornerRadius
+            color: root.background
+          }
           PanelActionButton {
             id: compactJump
             objectName: "jumpToLatest"

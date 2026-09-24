@@ -458,7 +458,11 @@ Item {
       width: actionRow.implicitWidth + Style.space(6)
       height: actionRow.implicitHeight + Style.space(4)
       radius: height / 2
-      color: Style.normalFillFor(root.foreground, root.accent)
+      // Opaque: the theme's normal fill is about 4% alpha, so inside the
+      // bubble (the dropdown's layout) the message text showed through and
+      // the buttons looked buried under it.
+      color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
+        root.foreground.b, 0.12))
       border.width: 1
       border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
 

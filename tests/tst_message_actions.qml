@@ -57,6 +57,13 @@ TestCase {
     compare(findChild(bubble, "messageActions").z, 5, "the strip sits above the bubble's own content")
   }
 
+  function test_the_action_strip_is_opaque_so_text_never_shows_through() {
+    // The owner still saw the dropdown's buttons "under" the bubbles: the
+    // theme fill is 4% alpha, and inside the bubble the text showed through.
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    compare(findChild(bubble, "messageActions").color.a, 1)
+  }
+
   function test_incoming_actions_sit_right_of_the_bubble() {
     var bubble = createTemporaryObject(bubbleComponent, testCase)
     var actions = findChild(bubble, "messageActions")
