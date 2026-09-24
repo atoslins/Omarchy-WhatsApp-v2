@@ -77,6 +77,8 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Ctrl+K jumps to any chat by typing part of its name; arrows move, Enter
+  opens, and archived chats are found too.
 - The chat list gets All, Unread, Groups and Archived views under the search
   field. Archived chats move to their own view, as on the phone, and leave the
   bar dropdown's recent list; a search still finds them.

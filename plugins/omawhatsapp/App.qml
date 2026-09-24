@@ -428,6 +428,13 @@ Item {
     { jid: "15552468101@s.whatsapp.net", name: "Nora Ali", phone: "15552468101", has_chat: false }
   ]
 
+  function openQuickSwitcher() {
+    if (!opened) return false
+    settingsOpen = false
+    quickSwitcher.open()
+    return true
+  }
+
   function openNewChat(query) {
     if (!opened) return false
     settingsOpen = false
@@ -1487,6 +1494,12 @@ Item {
         sequence: "Ctrl+N"
         context: Qt.WindowShortcut
         onActivated: root.openNewChat()
+      }
+
+      Shortcut {
+        sequence: "Ctrl+K"
+        context: Qt.WindowShortcut
+        onActivated: root.openQuickSwitcher()
       }
 
       Process {
@@ -3767,6 +3780,18 @@ Item {
           if (!root.chatDetailsBeside) root.chatDetailsOpen = false
         }
         onOpenChatRequested: function(jid, name, phone) { root.openFromChatDetails(jid, name, phone) }
+      }
+
+      QuickSwitcher {
+        id: quickSwitcher
+        chats: root.sourceChats
+        showAvatars: root.showAvatars
+        foreground: root.foreground
+        surface: root.background
+        accent: root.accent
+        muted: root.dim
+        fontFamily: root.fontFamily
+        onChosen: function(chat) { root.selectChat(chat, "composer") }
       }
 
       NewChatDialog {

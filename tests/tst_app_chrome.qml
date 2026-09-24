@@ -198,6 +198,38 @@ TestCase {
     verify(app.settingsOpen)
   }
 
+  function test_ctrl_k_jumps_to_a_chat_by_name() {
+    var h = createHarness()
+    var switcher = findChild(h.app, "quickSwitcher")
+    verify(switcher !== null)
+    h.app.forceActiveFocus()
+    keyClick(Qt.Key_K, Qt.ControlModifier)
+    tryCompare(switcher, "opened", true)
+    switcher.query = "other"
+    compare(switcher.results.length, 1)
+    verify(switcher.accept())
+    compare(h.service.selectedChatJid, "other@example")
+    tryCompare(switcher, "opened", false)
+  }
+
+  function test_the_switcher_moves_with_the_arrows_and_finds_archived_chats() {
+    var h = createHarness()
+    h.service.chats = [workChat, otherChat,
+      { account: "work", jid: "old@example", name: "Synthetic archived", kind: "dm", unread: 0, archived: true }]
+    var switcher = findChild(h.app, "quickSwitcher")
+    h.app.openQuickSwitcher()
+    tryCompare(switcher, "opened", true)
+    compare(switcher.results.length, 2, "an empty query lists the chats without archived ones")
+    switcher.move(1)
+    compare(switcher.cursor, 1)
+    switcher.move(5)
+    compare(switcher.cursor, 1, "the cursor stays inside the list")
+    switcher.query = "archived"
+    compare(switcher.results.map(function(c) { return c.jid }), ["old@example"])
+    compare(switcher.cursor, 0)
+    switcher.close()
+  }
+
   function test_rail_views_filter_the_chat_list() {
     var h = createHarness()
     h.service.chats = [
