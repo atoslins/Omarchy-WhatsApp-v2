@@ -76,6 +76,18 @@ Rectangle {
   }
 
   color: surface
+
+  // Owns every click, hover and wheel inside the panel: without it, a right
+  // click on a participant reached the message bubble underneath and opened
+  // that message's menu.
+  MouseArea {
+    objectName: "panelPointerGuard"
+    anchors.fill: parent
+    z: -1
+    acceptedButtons: Qt.AllButtons
+    hoverEnabled: true
+    onWheel: function(wheel) { wheel.accepted = true }
+  }
   Rectangle {
     anchors.top: parent.top
     anchors.bottom: parent.bottom

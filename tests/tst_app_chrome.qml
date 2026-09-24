@@ -341,6 +341,23 @@ TestCase {
     tryCompare(findChild(h.app, "newChatDialog"), "opened", true)
   }
 
+  function test_panels_over_the_conversation_swallow_the_pointer() {
+    // The owner right-clicked a group participant and got a message menu:
+    // the pointer went through the details panel to the bubble under it.
+    var h = createHarness({ messages: [
+      { id: "m1", text: "under the panel", sender: "Synthetic", timestamp: 1787540100,
+        from_me: false, media_type: "", reactions: [] }] })
+    h.app.chatDetailsOpen = true
+    var panel = findChild(h.app, "chatDetailsPanel")
+    tryVerify(function() { return panel.visible && panel.width > 0 })
+    var guard = findChild(panel, "panelPointerGuard")
+    verify(guard !== null, "the panel owns every click and hover inside it")
+    verify(guard.acceptedButtons & Qt.RightButton)
+    verify(guard.hoverEnabled)
+    var browser = findChild(h.app, "mediaBrowser")
+    verify(findChild(browser, "panelPointerGuard") !== null)
+  }
+
   function test_media_links_and_docs_open_in_their_own_view_and_esc_goes_back() {
     // The owner could filter the conversation to media and then find no way
     // back to it; the conversation is no longer filtered at all.

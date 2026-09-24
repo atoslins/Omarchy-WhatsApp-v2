@@ -77,6 +77,8 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- The details and media panels own every click inside them: a right click on
+  a group participant opened the menu of the message bubble underneath.
 - Media, links and docs open in their own view (header button, or the counts
   in the chat details) with Media, Links and Docs tabs over the chat's whole
   local history: a photo grid that opens the viewer, links that open in the
