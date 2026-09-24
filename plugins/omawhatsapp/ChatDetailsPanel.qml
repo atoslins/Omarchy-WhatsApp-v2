@@ -19,6 +19,38 @@ Rectangle {
   property color accent: Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
+  property var service: null
+  property color urgent: "#e06c75"
+  readonly property string myRole: group && group.my_role ? String(group.my_role) : ""
+  readonly property bool admin: myRole === "admin" || myRole === "superadmin"
+  property var menuPerson: null
+  property string menuArmed: ""
+  signal copyRequested(string text)
+  function participantActions(person) {
+    if (!person) return []
+    var actions = [{ key: "message", label: "Message" }]
+    if (admin && person.me !== true && person.role !== "superadmin") {
+      actions.push(person.role === "admin"
+        ? { key: "demote", label: "Dismiss as admin" }
+        : { key: "promote", label: "Make group admin" })
+      actions.push({ key: "remove", label: menuArmed === "remove" ? "Confirm: remove from group" : "Remove from group",
+        destructive: true })
+    }
+    return actions
+  }
+  function runParticipantAction(key) {
+    var person = menuPerson
+    if (!person) return false
+    if (key === "message") {
+      participantMenu.close()
+      openChatRequested(String(person.jid || ""), String(person.name || ""), String(person.phone || ""))
+      return true
+    }
+    if (key === "remove" && menuArmed !== "remove") { menuArmed = "remove"; return false }
+    participantMenu.close()
+    menuArmed = ""
+    return !!service && service.groupAction(key, String(person.jid || ""), "app")
+  }
   readonly property bool isGroup: String(details && details.chat ? details.chat.kind : (chat ? chat.kind : "")) === "group"
   readonly property var person: details && details.person ? details.person : null
   readonly property var group: details && details.group ? details.group : null
@@ -125,6 +157,49 @@ Rectangle {
       fontSize: Style.font.body
       size: Style.space(30)
       onClicked: root.closeRequested()
+    }
+  }
+
+  Popup {
+    id: participantMenu
+    objectName: "participantMenu"
+    x: parent ? parent.width - width - Style.space(8) : 0
+    y: parent ? parent.height : 0
+    width: Style.space(230)
+    padding: Style.space(5)
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    onClosed: root.menuArmed = ""
+    background: Rectangle {
+      radius: Style.cornerRadius
+      color: root.surface
+      border.width: 1
+      border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+    }
+    contentItem: Column {
+      spacing: Style.space(2)
+      Repeater {
+        model: root.participantActions(root.menuPerson)
+        delegate: Rectangle {
+          required property var modelData
+          objectName: "participantAction-" + modelData.key
+          width: Style.space(220)
+          height: Style.space(32)
+          radius: Style.cornerRadius
+          color: participantActionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+          Text {
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            text: modelData.label
+            color: modelData.destructive ? root.urgent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          HoverHandler { id: participantActionHover }
+          TapHandler { onTapped: root.runParticipantAction(modelData.key) }
+        }
+      }
     }
   }
 
@@ -396,7 +471,58 @@ Rectangle {
             onTapped: root.openChatRequested(String(modelData.jid || ""), String(modelData.name || ""),
               String(modelData.phone || ""))
           }
+          TapHandler {
+            acceptedButtons: Qt.RightButton
+            enabled: root.isGroup
+            onTapped: {
+              root.menuPerson = modelData
+              root.menuArmed = ""
+              participantMenu.parent = parent
+              participantMenu.open()
+            }
+          }
+          PanelActionButton {
+            objectName: "participantMenuButton"
+            visible: root.isGroup && personHover.hovered && modelData.me !== true
+            anchors.right: roleText.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰇙"
+            tooltipText: "Participant actions"
+            foreground: root.muted
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            size: Style.space(26)
+            onClicked: {
+              root.menuPerson = modelData
+              root.menuArmed = ""
+              participantMenu.parent = parent
+              participantMenu.open()
+            }
+          }
         }
+      }
+
+      Rectangle {
+        visible: groupAdmin.visible
+        width: parent.width; height: 1
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+      }
+
+      GroupAdmin {
+        id: groupAdmin
+        visible: root.isGroup && !(root.group && root.group.left)
+        width: body.width
+        service: root.service
+        localRole: root.myRole
+        foreground: root.foreground
+        surface: root.surface
+        accent: root.accent
+        muted: root.muted
+        urgent: root.urgent
+        fontFamily: root.fontFamily
+        onCopyRequested: function(text) { root.copyRequested(text) }
       }
 
       Rectangle { width: parent.width; height: 1; color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08) }

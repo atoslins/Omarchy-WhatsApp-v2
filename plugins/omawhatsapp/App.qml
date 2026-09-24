@@ -4015,6 +4015,9 @@ Item {
         onActionRequested: function(action) { root.runChatDetailsAction(action) }
         onFilterRequested: function(filter) { root.openMediaBrowser(filter) }
         onOpenChatRequested: function(jid, name, phone) { root.openFromChatDetails(jid, name, phone) }
+        service: root.demoMode ? null : root.service
+        urgent: root.urgent
+        onCopyRequested: function(text) { root.copyText(text); root.showCopyToast() }
       }
 
       MediaBrowser {

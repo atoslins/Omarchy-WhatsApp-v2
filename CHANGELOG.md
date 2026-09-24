@@ -77,6 +77,14 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Full group control in the chat details. Right-click a participant (or
+  use its menu button) to message them and, as an admin, make or dismiss
+  admins and remove people. "Load group settings" reads the live settings
+  from WhatsApp on request (sync pauses a moment): rename, edit the
+  description, "only admins send messages", "only admins edit group info",
+  get, copy or reset the invite link, approve or reject join requests, add
+  people by number, and leave the group. Removing, resetting the link and
+  leaving take a second click to confirm.
 - The details and media panels own every click inside them: a right click on
   a group participant opened the menu of the message bubble underneath.
 - Media, links and docs open in their own view (header button, or the counts

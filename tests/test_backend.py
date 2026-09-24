@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from importlib.machinery import SourceFileLoader
 from contextlib import closing
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -1431,7 +1432,8 @@ class BackendTests(unittest.TestCase):
                                              "links": 0, "starred": 1})
         self.assertEqual(details["since"], 20)
         self.assertEqual(details["group"], {"created_ts": 100, "left": False,
-                                            "owner_name": "Alex Kim", "participant_count": 2})
+                                            "owner_name": "Alex Kim", "participant_count": 2,
+                                            "my_role": ""})
         self.assertEqual([m["role"] for m in details["participants"]], ["admin", "member"])
         self.assertTrue(details["pinned"])
         self.assertNotIn("person", details)
@@ -1450,6 +1452,80 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("participants", details)
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not available"):
             self.backend.chat_details("stranger@s.whatsapp.net")
+
+    def _cache_own_jid(self, jid: str) -> None:
+        key = hashlib.sha256(self.backend.account("").key.encode("utf-8")).hexdigest()[:24]
+        state = self.root / "state"
+        state.mkdir(mode=0o700, exist_ok=True)
+        path = state / backend_module.DOCTOR_CACHE_FILE
+        path.write_text(json.dumps({key: {"at": 0, "doctor": {"linked_jid": jid}}}), encoding="utf-8")
+        path.chmod(0o600)
+
+    def test_group_details_know_your_role_without_asking_wacli(self) -> None:
+        self._cache_own_jid("admin@s.whatsapp.net")
+        with mock.patch.object(self.backend, "_run") as run:
+            details = self.backend.chat_details("team@g.us")
+        run.assert_not_called()
+        self.assertEqual(details["group"]["my_role"], "admin")
+
+    def test_group_actions_build_exact_wacli_commands(self) -> None:
+        sent = subprocess.CompletedProcess([], 0, json.dumps({"success": True, "data": {}}), "")
+        cases = [
+            ("rename", "  New   name ", ["groups", "rename", "--jid", "team@g.us", "--name", "New name"]),
+            ("description", "About us", ["groups", "description", "--jid", "team@g.us", "--text", "About us"]),
+            ("announce", True, ["groups", "announce-only", "--jid", "team@g.us", "--on"]),
+            ("locked", False, ["groups", "locked", "--jid", "team@g.us", "--off"]),
+            ("add", ["+1 555 000 1111"], ["groups", "participants", "add", "--jid", "team@g.us",
+                                          "--user", "+15550001111"]),
+            ("promote", "member@s.whatsapp.net", ["groups", "participants", "promote", "--jid",
+                                                   "team@g.us", "--user", "member@s.whatsapp.net"]),
+            ("remove", "member@s.whatsapp.net", ["groups", "participants", "remove", "--jid",
+                                                  "team@g.us", "--user", "member@s.whatsapp.net"]),
+            ("leave", None, ["groups", "leave", "--jid", "team@g.us"]),
+        ]
+        for action, value, expected in cases:
+            with mock.patch.object(self.backend, "_write", return_value=sent) as write:
+                self.backend.group_action("team@g.us", action, value)
+            self.assertEqual(write.call_args.args[0], ["--json", *expected], action)
+
+    def test_group_actions_refuse_what_they_cannot_tie_to_the_group(self) -> None:
+        with mock.patch.object(self.backend, "_write") as write:
+            for action, value, message in [
+                ("remove", "stranger@s.whatsapp.net", "not indexed"),
+                ("rename", "", "1 to 100"),
+                ("announce", "yes", "on or off"),
+                ("add", [], "1 to 10"),
+                ("invite-get", None, "remote-read"),
+                ("approve", "not a jid", "pending request"),
+                ("explode", None, "not supported"),
+            ]:
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError, message):
+                    self.backend.group_action("team@g.us", action, value)
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not a group"):
+                self.backend.group_action("alex@s.whatsapp.net", "leave")
+        write.assert_not_called()
+
+    def test_invite_links_and_requests_come_back_parsed(self) -> None:
+        link = subprocess.CompletedProcess([], 0, json.dumps({"success": True, "data": {
+            "jid": "team@g.us", "link": "https://chat.whatsapp.com/SyntheticCode"}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=link):
+            self.assertEqual(self.backend.group_action("team@g.us", "invite-get", None, "remote-read")["link"],
+                             "https://chat.whatsapp.com/SyntheticCode")
+        requests = subprocess.CompletedProcess([], 0, json.dumps({"success": True, "data": [
+            {"JID": "123456789012345@lid", "phone_number": "15550009999", "RequestedAt": "2026-09-24T12:00:00Z"}]}), "")
+        with mock.patch.object(self.backend, "_write", return_value=requests):
+            listed = self.backend.group_action("team@g.us", "requests", None, "remote-read")["requests"]
+        self.assertEqual(listed[0]["jid"], "123456789012345@lid")
+
+    def test_live_group_settings_name_your_role(self) -> None:
+        self._cache_own_jid("admin@s.whatsapp.net")
+        info = subprocess.CompletedProcess([], 0, json.dumps({"success": True, "data": {
+            "Name": "Design team", "Topic": "About", "IsAnnounce": True, "IsLocked": False,
+            "Participants": [{"JID": "admin@s.whatsapp.net", "IsAdmin": True, "IsSuperAdmin": False}]}}), "")
+        with mock.patch.object(self.backend, "_mutate", return_value=info):
+            settings = self.backend.group_info("team@g.us", "remote-read")
+        self.assertEqual((settings["description"], settings["announce_only"], settings["locked"],
+                          settings["my_role"]), ("About", True, False, "admin"))
 
     def test_group_members_are_named_and_admins_sort_first(self) -> None:
         members = self.backend.members("team@g.us")["members"]

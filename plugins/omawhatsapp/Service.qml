@@ -116,6 +116,30 @@ Item {
     return true
   }
   property string browserPendingKind: ""
+  // Group control: live settings read on request (they pause sync a moment),
+  // and the last answer of a group action (an invite link, pending requests).
+  property var groupSettings: ({})
+  property bool groupSettingsLoading: false
+  property string groupSettingsError: ""
+  property var lastGroupResult: ({})
+  function loadGroupSettings() {
+    var ref = selectedChatRef()
+    if (String(ref.jid || "") === "" || selectedChatKind !== "group" || groupInfoProcess.running) return false
+    if (offlineMode) { groupSettingsError = "Offline mode is on. Go online to manage the group."; return false }
+    groupSettingsLoading = true
+    groupSettingsError = ""
+    groupInfoProcess.chatRef = ref
+    groupInfoProcess.payload = JSON.stringify({ account: ref.account, jid: ref.jid, authorization: "remote-read" })
+    groupInfoProcess.stdinEnabled = true
+    groupInfoProcess.running = true
+    return true
+  }
+  function groupAction(action, value, owner) {
+    var name = String(action || "")
+    var request = { action: name, value: value === undefined ? null : value }
+    if (name === "invite-get" || name === "requests") request.authorization = "remote-read"
+    return runWriteForChat("group-action", request, selectedChatRef(), owner || "app")
+  }
   // Chat details panel: what the mirror knows about the selected chat.
   property var chatDetails: ({})
   property bool chatDetailsLoading: false
@@ -243,11 +267,13 @@ Item {
     if (syncActive) return ""
     if (accountOperations && accountOperations.avatarBusy) return "checking chat photos"
     if (numberCheck && numberCheck.loading) return "checking a number"
+    if (groupSettingsLoading) return "reading group settings"
     if (!writing) return ""
     // Files, voice notes, text, stickers, polls and reactions go through the
     // sync process itself (wacli 0.18.3) and never pause it.
     switch (activeWriteKind) {
     case "chat-action": return "updating the chat"
+    case "group-action": return "updating the group"
     case "delete": return "deleting a message"
     case "forward": return "forwarding a message"
     case "send-new": return "starting a chat"
@@ -408,6 +434,9 @@ Item {
       olderMessages = []
       hasOlderMessages = true
       browserItems = []
+      groupSettings = ({})
+      groupSettingsError = ""
+      lastGroupResult = ({})
       chatDetails = ({})
       errorText = ""
       refreshMessages()
@@ -1379,6 +1408,26 @@ Item {
   }
 
   Process {
+    id: groupInfoProcess
+    objectName: "groupInfoProcess"
+    property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    command: [root.helper, "group-info"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: groupInfoOutput }
+    stderr: StdioCollector { id: groupInfoError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.groupSettingsLoading = false
+      var payload = root.parseJson(groupInfoOutput.text)
+      if (!AccountModel.sameRef(chatRef, root.selectedChatRef())) return
+      if (exitCode === 0 && payload && payload.ok === true) root.groupSettings = payload
+      else root.groupSettingsError = (payload && payload.error)
+        || String(groupInfoError.text || "WhatsApp could not read the group settings.").trim()
+    }
+  }
+
+  Process {
     id: stickersProcess
     objectName: "stickersProcess"
     property string payload: ""
@@ -1714,6 +1763,18 @@ Item {
         root.lastStartedChatJid = String(payload.chat_jid || finishedJid)
       if (finishedKind === "files")
         root.updatePendingSend(finishedRequest.local_id, { state: "sent", created: Date.now() })
+      if (finishedKind === "group-action") {
+        root.lastGroupResult = payload
+        // Settings the owner just changed are shown as changed at once.
+        var changed = ({ announce: "announce_only", locked: "locked", rename: "name", description: "description" })[
+          String(finishedRequest.action || "")]
+        if (changed && root.groupSettings && root.groupSettings.ok) {
+          var next = Object.assign({}, root.groupSettings)
+          next[changed] = finishedRequest.value
+          root.groupSettings = next
+        }
+        if (root.chatDetailsWanted) Qt.callLater(root.refreshChatDetails)
+      }
       if (finishedKind === "send" || finishedKind === "sticker")
         root.updatePendingSend(finishedRequest.local_id, {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })

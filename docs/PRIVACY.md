@@ -45,6 +45,12 @@ an owner-private cache with opaque names. CDN URLs, query tokens, account store
 paths, and chat identifiers are not stored in that index or exposed to QML;
 the UI receives only a validated absolute local path.
 
+Group settings are read from WhatsApp only when "Load group settings" is
+pressed (`wacli groups info`, an explicit remote read that pauses sync for a
+moment); the invite link and pending join requests are likewise fetched only
+on request. Group changes go through `wacli groups`, and a participant action
+must name someone the mirror lists in that exact group.
+
 Checking a typed number for a new chat is also an explicit remote read: the
 helper runs `wacli contacts check`, which asks WhatsApp whether the number is
 registered and stores nothing in the mirror. The confirmed JID is kept for 15

@@ -92,4 +92,32 @@ TestCase {
     verify(!service.applyChatActionLocally({ account: "work", jid: "new@s.whatsapp.net" }, "remove-local"),
       "only pin, mute and archive change the row locally")
   }
+
+  function test_group_actions_go_through_the_write_queue_and_update_the_settings() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    service.ready = true
+    service.statusReady = true
+    service.statusAccount = "work"
+    service.offlineMode = false
+    service.selectedChatAccount = "work"
+    service.selectedChatJid = "team@g.us"
+    service.selectedChatKind = "group"
+    service.groupSettings = { ok: true, announce_only: false, name: "Team" }
+    verify(service.groupAction("invite-get", null, "app"))
+    compare(service.activeWriteKind, "group-action")
+    var process = findChild(service, "writeProcess")
+    compare(JSON.parse(process.payload).authorization, "remote-read", "reading the link is an explicit remote read")
+    process.stdout.text = JSON.stringify({ ok: true, kind: "group-action", action: "invite-get", link: "https://chat.whatsapp.com/X" })
+    process.running = false
+    process.exited(0)
+    compare(service.lastGroupResult.link, "https://chat.whatsapp.com/X")
+    verify(service.groupAction("announce", true, "app"))
+    process.stdout.text = JSON.stringify({ ok: true, kind: "group-action", action: "announce" })
+    process.running = false
+    process.exited(0)
+    verify(service.groupSettings.announce_only, "the switch shows the change at once")
+    service.offlineMode = true
+    verify(!service.loadGroupSettings())
+    verify(service.groupSettingsError.indexOf("Offline") === 0)
+  }
 }

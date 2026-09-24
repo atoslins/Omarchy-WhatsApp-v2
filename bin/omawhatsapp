@@ -1876,7 +1876,7 @@ class Backend:
         doctor = self._doctor(account)
         if doctor.get("authenticated") is True and not doctor.get("store_error"):
             kept = {name: doctor.get(name) for name in
-                    ("authenticated", "fts_enabled", "store_dir") if name in doctor}
+                    ("authenticated", "fts_enabled", "store_dir", "linked_jid") if name in doctor}
             try:
                 with self._state_lock("doctor-cache.lock"):
                     current = self._read_state_json(DOCTOR_CACHE_FILE, MAX_DOCTOR_CACHE, {})
@@ -3194,6 +3194,128 @@ class Backend:
         return {"ok": True, "chat": chat, "query": cleaned, "messages": values,
                 "has_more": has_more}
 
+    def _own_jid(self, ask: bool = False) -> str:
+        """This account's own user JID, without the device part.
+
+        Read from the doctor answer the status poll keeps, so local views
+        never start wacli for it; ``ask`` refreshes it when it is missing.
+        """
+        key = hashlib.sha256(self.active.key.encode("utf-8")).hexdigest()[:24]
+        cache = self._read_state_json(DOCTOR_CACHE_FILE, MAX_DOCTOR_CACHE, {})
+        item = cache.get(key) if isinstance(cache, dict) else None
+        doctor = item.get("doctor") if isinstance(item, dict) else None
+        linked = str(doctor.get("linked_jid") or "") if isinstance(doctor, dict) else ""
+        if not linked and ask:
+            linked = str(self._doctor_cached(self.active).get("linked_jid") or "")
+        return re.sub(r":[0-9]+@", "@", linked)
+
+    def _group_chat(self, jid: str) -> dict[str, str]:
+        chat = self._chat(jid)
+        if chat["kind"] != "group":
+            raise OmaWhatsAppError("That chat is not a group.")
+        return chat
+
+    def group_info(self, jid: str, authorization: str = "") -> dict[str, Any]:
+        """Live group settings from WhatsApp: an explicit remote read."""
+        if authorization != "remote-read":
+            raise OmaWhatsAppError("Reading group settings asks WhatsApp; pass authorization='remote-read'.")
+        chat = self._group_chat(jid)
+        envelope = self._envelope(self._mutate(
+            ["--json", "groups", "info", "--jid", chat["jid"]], timeout=45, require_online=True))
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        own = self._own_jid(ask=True)
+        role = ""
+        participants = data.get("Participants") if isinstance(data.get("Participants"), list) else []
+        for item in participants:
+            if not isinstance(item, dict):
+                continue
+            ids = {str(item.get("JID") or ""), str(item.get("PhoneNumber") or "")}
+            if own and own in ids:
+                role = "superadmin" if item.get("IsSuperAdmin") else ("admin" if item.get("IsAdmin") else "member")
+        return {
+            "ok": True, "kind": "group-info", "jid": chat["jid"],
+            "name": str(data.get("Name") or chat["name"])[:128],
+            "description": str(data.get("Topic") or "")[:2048],
+            "announce_only": data.get("IsAnnounce") is True,
+            "locked": data.get("IsLocked") is True,
+            "approval_required": data.get("IsJoinApprovalRequired") is True,
+            "participant_count": len(participants),
+            "my_role": role,
+        }
+
+    def _group_user(self, value: Any) -> str:
+        raw = str(value or "").strip()
+        if NEW_CHAT_JID.fullmatch(raw):
+            return raw
+        return "+" + self._phone_digits(raw)
+
+    def group_action(self, jid: str, action: str, value: Any = None,
+                     authorization: str = "") -> dict[str, Any]:
+        """One admin or member action on a group, through wacli."""
+        chat = self._group_chat(jid)
+        target = chat["jid"]
+        result: dict[str, Any] = {"ok": True, "kind": "group-action", "action": action, "jid": target}
+        if action == "rename":
+            name = " ".join(str(value or "").split())
+            if not 1 <= len(name) <= 100:
+                raise OmaWhatsAppError("A group name needs 1 to 100 characters.")
+            command = ["groups", "rename", "--jid", target, "--name", name]
+        elif action == "description":
+            text = str(value or "").strip()
+            if len(text) > 2048:
+                raise OmaWhatsAppError("A group description can have up to 2048 characters.")
+            command = ["groups", "description", "--jid", target, "--text", text]
+        elif action in ("announce", "locked"):
+            if not isinstance(value, bool):
+                raise OmaWhatsAppError("That group setting must be on or off.")
+            leaf = "announce-only" if action == "announce" else "locked"
+            command = ["groups", leaf, "--jid", target, "--on" if value else "--off"]
+        elif action == "add":
+            users = value if isinstance(value, list) else [value]
+            if not 1 <= len(users) <= 10:
+                raise OmaWhatsAppError("Add 1 to 10 people at a time.")
+            command = ["groups", "participants", "add", "--jid", target]
+            for user in users:
+                command.extend(["--user", self._group_user(user)])
+        elif action in ("remove", "promote", "demote"):
+            user = str(value or "").strip()
+            self._group_participant(target, user)
+            command = ["groups", "participants", action, "--jid", target, "--user", user]
+        elif action in ("invite-get", "requests"):
+            if authorization != "remote-read":
+                raise OmaWhatsAppError("This asks WhatsApp; pass authorization='remote-read'.")
+            command = (["groups", "invite", "link", "get", "--jid", target] if action == "invite-get"
+                       else ["groups", "requests", "list", "--jid", target])
+        elif action == "invite-revoke":
+            command = ["groups", "invite", "link", "revoke", "--jid", target]
+        elif action in ("approve", "reject"):
+            user = str(value or "").strip()
+            if not re.fullmatch(r"[0-9]{5,20}@(?:s\.whatsapp\.net|lid)", user):
+                raise OmaWhatsAppError("Choose a pending request.")
+            command = ["groups", "requests", action, "--jid", target, "--user", user]
+        elif action == "leave":
+            command = ["groups", "leave", "--jid", target]
+        else:
+            raise OmaWhatsAppError("That group action is not supported.")
+        envelope = self._envelope(self._write(["--json", *command], timeout=60))
+        data = envelope.get("data")
+        if action in ("invite-get", "invite-revoke") and isinstance(data, dict):
+            link = str(data.get("link") or "")
+            if not link.startswith("https://chat.whatsapp.com/"):
+                raise OmaWhatsAppError("WhatsApp returned no invite link.")
+            result["link"] = link[:256]
+        elif action == "requests":
+            rows = data if isinstance(data, list) else []
+            result["requests"] = [{
+                "jid": str(row.get("JID") or "")[:160],
+                "phone": str(row.get("phone_number") or "")[:32],
+                "requested_at": str(row.get("RequestedAt") or "")[:40],
+            } for row in rows[:256] if isinstance(row, dict) and row.get("JID")]
+        elif action == "add" and isinstance(data, list):
+            result["failed"] = [str(row.get("JID") or "")[:160] for row in data
+                                if isinstance(row, dict) and int(row.get("Error") or 0) != 0]
+        return result
+
     def chat_details(self, jid: str) -> dict[str, Any]:
         """Everything the mirror knows about one chat. Local only: no WhatsApp call."""
         chat = self._chat(jid)
@@ -3285,7 +3407,12 @@ class Backend:
                 "owner_name": str(owner["name"]) if owner else "",
                 "participant_count": len(members),
             }
+            own = self._own_jid()
+            for member in members:
+                member["me"] = bool(own) and member.get("jid") == own
             output["participants"] = members[:256]
+            mine = next((m for m in members if m["me"]), None)
+            output["group"]["my_role"] = str(mine["role"]) if mine else ""
         holder = {"account": self.active.name, "jid": target}
         self._attach_cached_avatars([holder], self.accounts())
         output["avatar_path"] = str(holder.get("avatar_path") or "")
@@ -5145,6 +5272,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("members")
     commands.add_parser("chat-details")
     commands.add_parser("stickers")
+    commands.add_parser("group-info")
+    commands.add_parser("group-action")
     commands.add_parser("fetch-stickers")
     commands.add_parser("send")
     commands.add_parser("contacts-search")
@@ -5248,6 +5377,14 @@ def main() -> int:
                                          str(payload.get("query") or ""), args.limit,
                                          payload.get("before"),
                                          str(payload.get("kind") or "")))
+        if args.command == "group-info":
+            return emit(backend.group_info(str(payload.get("jid") or ""),
+                                           str(payload.get("authorization") or "")))
+        if args.command == "group-action":
+            return emit(backend.group_action(str(payload.get("jid") or ""),
+                                             str(payload.get("action") or ""),
+                                             payload.get("value"),
+                                             str(payload.get("authorization") or "")))
         if args.command == "stickers":
             return emit(backend.stickers())
         if args.command == "fetch-stickers":

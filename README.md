@@ -290,6 +290,8 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+N` | Start a new chat (also the rail's new chat button) |
 | `Ctrl+K` | Go to a chat by typing part of its name |
 | Conversation photo or name | Open the chat details panel; `Esc` closes it |
+| Group details → participant menu | Message, make or dismiss admin, remove (admins) |
+| Group details → Load group settings | Rename, description, who may send or edit, invite link, requests, add, leave |
 | Media button in the conversation header | Media, links and docs of the chat; `Esc` goes back |
 | `Page Up` / `Page Down` | Scroll the conversation a screen, even while typing |
 | `Home` / `End` | Oldest loaded message / newest message |
