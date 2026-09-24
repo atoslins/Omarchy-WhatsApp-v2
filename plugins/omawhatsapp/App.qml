@@ -21,6 +21,15 @@ Item {
   property bool opened: false
   property bool closingFromHost: false
   property bool demoMode: false
+  // Tell the service when the selected conversation is really on screen.
+  Binding {
+    target: root.service
+    property: "appConversationVisible"
+    when: !!root.service && !root.demoMode
+    value: root.opened && !root.settingsOpen && root.currentChatKey() !== ""
+      && (!root.narrow || root.narrowConversation)
+  }
+
   UpdateController {
     id: appUpdates
     active: root.opened && !root.demoMode

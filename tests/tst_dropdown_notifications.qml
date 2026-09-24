@@ -20,10 +20,16 @@ TestCase {
       property var accounts: []
       property string selectedChatJid: ""
       property string selectedChatAccount: ""
-      function selectChat(chat) { selectedChatJid = String(chat.jid) }
+      property bool dropdownConversationVisible: false
+      property bool dropdownOpen: false
+      function selectChat(chat) {
+        selectedChatJid = String(chat.jid)
+        selectedChatAccount = String(chat.account || "")
+      }
       function discardStages(paths) {}
       function stopVoiceForSurfaceClose() {}
       function refreshMessages() {}
+      function refreshChats() {}
     }
   }
 
@@ -93,5 +99,22 @@ TestCase {
     compare(dropdown.viewMode, "chats")
     service.activeWriteOwner = "dropdown"
     verify(dropdown.sending, "its own send still shows")
+  }
+
+  function test_only_the_conversation_view_counts_as_on_screen() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    verify(dropdown.opened)
+    compare(dropdown.viewMode, "chats")
+    verify(!service.dropdownConversationVisible, "the chat list is not the conversation")
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+    compare(dropdown.viewMode, "conversation")
+    verify(service.dropdownConversationVisible)
+    dropdown.backToChats()
+    verify(!service.dropdownConversationVisible)
+    dropdown.close()
   }
 }

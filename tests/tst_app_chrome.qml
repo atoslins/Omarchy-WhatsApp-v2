@@ -139,6 +139,7 @@ TestCase {
       property var lastNotifications: null
       property var lastChatRead: null
       property bool showAvatars: true
+      property bool appConversationVisible: false
       property string railDensity: "comfortable"
       function setChatRead(ref, read, owner) {
         lastChatRead = { ref: ref, read: read, owner: owner }
@@ -315,6 +316,16 @@ TestCase {
     verify(process.command.indexOf("--confirm-overwrite") >= 0)
     verify(process.command.filter(function(arg) {
       return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+  }
+
+  function test_app_reports_when_the_conversation_is_on_screen() {
+    var harness = createHarness()
+    verify(harness.service.appConversationVisible, "open app showing the selected chat")
+    harness.app.settingsOpen = true
+    verify(!harness.service.appConversationVisible, "settings cover the conversation")
+    harness.app.settingsOpen = false
+    harness.app.opened = false
+    verify(!harness.service.appConversationVisible, "a closed app shows nothing")
   }
 
   function test_desktop_notifications_live_in_settings() {

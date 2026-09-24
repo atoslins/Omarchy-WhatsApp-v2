@@ -80,7 +80,10 @@ TestCase {
     service.selectedChatAccount = "work"
     service.selectedChatJid = target.jid
     service.sendReadReceipts = true
-    service.appOpen = true
+    // The service's own hidden App instance owns appConversationVisible, so
+    // these tests put the conversation on screen through the dropdown flag.
+    service.dropdownOpen = true
+    service.dropdownConversationVisible = true
     service.syncActive = true
     return service
   }
@@ -106,7 +109,7 @@ TestCase {
 
   function test_a_closed_window_reads_nothing() {
     var service = openService(2)
-    service.appOpen = false
+    service.dropdownConversationVisible = false
     service.dropdownOpen = false
     verify(!service.readOpenChatIfUnread(service.chats[0]))
     wait(200)
@@ -172,5 +175,19 @@ TestCase {
       "saving a copy is allowed offline; the helper refuses only a download")
     compare(service.activeWriteKind, "save-media")
     compare(service.activeWriteChatJid, target.jid)
+  }
+
+  function test_dropdown_showing_only_the_list_reads_nothing() {
+    // The owner's report: a new message arrived, the bar dropdown was open on
+    // its chat list, and the last selected chat was marked read anyway.
+    var service = openService(2)
+    service.dropdownOpen = true
+    service.dropdownConversationVisible = false
+    verify(!service.readOpenChatIfUnread(service.chats[0]),
+      "the list is on screen, not the conversation")
+    wait(200)
+    compare(service.activeWriteKind, "")
+    service.dropdownConversationVisible = true
+    verify(service.readOpenChatIfUnread(service.chats[0]))
   }
 }

@@ -100,6 +100,12 @@ Panel {
     return AccountModel.filterChats(source, scope, needle,
       Math.max(1, Number(maxRows || 7)))
   }
+  Binding {
+    target: root.service
+    property: "dropdownConversationVisible"
+    when: !!root.service && !root.demoMode
+    value: root.opened && root.viewMode === "conversation" && root.serviceOnCurrentChat
+  }
   readonly property bool serviceOnCurrentChat: !!service
     && AccountModel.sameRef(
       AccountModel.chatRef(service.selectedChatAccount, service.selectedChatJid),

@@ -87,6 +87,12 @@ Item {
   readonly property alias accountOperations: accountOperations
 
   readonly property bool windowOpen: appOpen || dropdownOpen
+  // Set by the full app and the bar dropdown while the selected conversation
+  // itself is on screen. An open window showing only the chat list does not
+  // count: reading, badge clearing and popup suppression need the chat seen.
+  property bool appConversationVisible: false
+  property bool dropdownConversationVisible: false
+  readonly property bool conversationOnScreen: appConversationVisible || dropdownConversationVisible
   readonly property bool multiAccount: AccountModel.isMultiAccount(accounts)
   readonly property var storeDirectories:
     AccountModel.storeDirectories(accounts, storeDirectory)
@@ -205,7 +211,7 @@ Item {
     if (!railReady || !notificationsEnabled || notifyProcess.running) return
     notifyProcess.payload = JSON.stringify({
       account: selectedChatAccount,
-      skip_jid: windowOpen ? selectedChatJid : ""
+      skip_jid: conversationOnScreen ? selectedChatJid : ""
     })
     notifyProcess.stdinEnabled = true
     notifyProcess.running = true
@@ -317,6 +323,7 @@ Item {
     }
     Qt.callLater(function() {
       if (!AccountModel.sameRef(target, root.selectedChatRef())) return
+      if (!root.conversationOnScreen) return
       if (!root.statusReady || root.statusAccount !== String(target.account || "")) return
       if (!root.ready) return
       if (root.writing) return
@@ -526,7 +533,7 @@ Item {
   // arrive while it is open are marked read too, unless the user chose
   // "Mark as unread" for it. Throttled so a failing write cannot loop.
   function readOpenChatIfUnread(chat) {
-    if (!root.windowOpen || !chat || Number(chat.unread || 0) <= 0) return false
+    if (!root.conversationOnScreen || !chat || Number(chat.unread || 0) <= 0) return false
     // While sync is paused (a photo batch, a locked write) mark-read would
     // wait on the store lock and hold the write queue; a later refresh after
     // sync returns reads the chat instead.
@@ -965,7 +972,7 @@ Item {
         root.query = ""
         root.messages = []
         root.members = []
-        if (root.windowOpen)
+        if (root.conversationOnScreen)
           root.dismissNotifications(root.selectedChatJid, root.selectedChatAccount)
       }
       root.selectedChatName = String(selected.name || "WhatsApp chat")

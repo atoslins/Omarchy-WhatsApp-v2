@@ -53,6 +53,10 @@
 - The bar dropdown's count now filters the list to unread chats; right-click
   clears the badge. Background writes such as automatic reading no longer show
   "sending…" in the dropdown or block going back to the list.
+- Only a conversation that is actually on screen is read: the full app open on
+  it, or the bar dropdown showing it. The dropdown open on its chat list no
+  longer marks the last selected chat read when a message arrives, and no
+  longer clears its badge or suppresses its desktop popup.
 - Each chat-photo batch stops after 20 seconds of paused sync; the rest stays
   due for the next batch. Automatic reading waits for sync to be running.
 - Right-click a chat in the list for read or unread, pin, mute, archive and
