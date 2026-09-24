@@ -306,9 +306,15 @@ Panel {
     openConversation(filteredChats[selectedIndex])
   }
 
+  property var unreadMarker: ({ key: "", count: 0 })
+  readonly property int unreadDividerIndex: unreadMarker.key !== ""
+    && unreadMarker.key === AccountModel.refOf(currentChat).key && unreadMarker.count > 0
+    ? Math.min(unreadMarker.count, sourceMessages.length) - 1 : -1
+
   function openConversation(chat) {
     if (sending) return
     if (!chat || !chat.jid) return
+    unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0) }
     if (!demoMode && service) service.discardStages(pendingAttachments)
     stopPlayback()
     currentChat = chat
@@ -1158,12 +1164,71 @@ Panel {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             delegate: Item {
+              id: compactRow
               required property var modelData
               required property int index
               width: messageList.width
-              height: compactMessage.height
+              readonly property bool startsDay: TimeFormat.startsDay(root.sourceMessages, index)
+              height: compactDay.height + compactUnread.height + compactMessage.height
+              Item {
+                id: compactDay
+                objectName: "dayHeader"
+                visible: compactRow.startsDay
+                width: parent.width
+                height: visible ? Style.space(34) : 0
+                Rectangle {
+                  anchors.centerIn: parent
+                  width: compactDayLabel.implicitWidth + Style.space(18)
+                  height: Style.space(22)
+                  radius: height / 2
+                  color: root.subtle
+                  Text {
+                    textFormat: Text.PlainText
+                    id: compactDayLabel
+                    anchors.centerIn: parent
+                    text: TimeFormat.dayLabel(compactRow.modelData.timestamp)
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+              Item {
+                id: compactUnread
+                objectName: "unreadDivider"
+                anchors.top: compactDay.bottom
+                visible: compactRow.index === root.unreadDividerIndex
+                width: parent.width
+                height: visible ? Style.space(30) : 0
+                Rectangle {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width
+                  height: 1
+                  color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.45)
+                }
+                Rectangle {
+                  anchors.centerIn: parent
+                  width: compactUnreadLabel.implicitWidth + Style.space(18)
+                  height: Style.space(20)
+                  radius: height / 2
+                  color: root.background
+                  border.width: 1
+                  border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.6)
+                  Text {
+                    textFormat: Text.PlainText
+                    id: compactUnreadLabel
+                    anchors.centerIn: parent
+                    text: root.unreadMarker.count === 1 ? "1 unread message"
+                      : root.unreadMarker.count + " unread messages"
+                    color: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
               MessageBubble {
                 id: compactMessage
+                anchors.top: compactUnread.bottom
                 timeFormat: root.timeFormat
                 width: parent.width
                 message: modelData
@@ -1220,6 +1285,26 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
             }
+          }
+
+          PanelActionButton {
+            id: compactJump
+            objectName: "jumpToLatest"
+            z: 20
+            readonly property bool away: messageList.count > 0
+              && messageList.contentY + messageList.height < -Style.space(48)
+            visible: away
+            anchors.right: messageList.right
+            anchors.bottom: messageList.bottom
+            anchors.margins: Style.space(6)
+            size: Style.space(32)
+            iconText: "󰁅"
+            tooltipText: "Jump to latest"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            bordered: true
+            onClicked: messageList.positionViewAtBeginning()
           }
 
           Rectangle {

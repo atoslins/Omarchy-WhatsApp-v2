@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui as Ui
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
+import "LinkModel.js" as LinkModel
 
 // One WhatsApp-style timeline item: quote, content, interactive options,
 // reactions, delivery metadata, and the hover action surface stay together so
@@ -42,6 +43,7 @@ Item {
     { label: "Reply", action: "reply", show: true },
     { label: "React", action: "react", show: true },
     { label: "Copy text", action: "copy", show: root.bodyText !== "" },
+    { label: "Copy link", action: "copy-link", show: root.links.length > 0 },
     { label: "Edit", action: "edit", show: root.message.from_me && !root.message.media_type },
     { label: "Save as…", action: "save", show: root.hasMedia },
     { label: "Forward", action: "forward", show: true },
@@ -53,6 +55,7 @@ Item {
     if (action === "reply") root.replyRequested()
     else if (action === "react") reactionPicker.open()
     else if (action === "copy") root.copyRequested(root.bodyText)
+    else if (action === "copy-link") root.copyRequested(root.links[0].url)
     else if (action === "edit") root.editRequested()
     else if (action === "forward") root.forwardRequested()
     else if (action === "save") root.saveRequested()
@@ -65,6 +68,11 @@ Item {
     if (!message || message["text"] === undefined || message["text"] === null) return ""
     return String(message["text"])
   }
+  readonly property var links: LinkModel.extract(bodyText, 3)
+  readonly property string fullTimestampText: Qt.formatDateTime(
+    new Date(Number(message.timestamp || 0) * 1000),
+    Qt.locale().dateFormat(Locale.LongFormat) + " · "
+      + TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
   readonly property string timestampText: Qt.formatDateTime(
     new Date(Number(message.timestamp || 0) * 1000),
     TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
@@ -286,6 +294,54 @@ Item {
         }
       }
 
+      // Links open from chips under the text: the body stays plain text, so
+      // no markup is ever rendered from a message.
+      Flow {
+        objectName: "messageLinks"
+        visible: root.links.length > 0
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: root.links
+          delegate: Rectangle {
+            required property var modelData
+            objectName: "messageLink"
+            width: Math.min(linkLabel.implicitWidth + Style.space(30), parent ? parent.width : 400)
+            height: Style.space(26)
+            radius: Style.cornerRadius
+            color: linkHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+              : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10)
+            Text {
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰌹"
+              color: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Text {
+              textFormat: Text.PlainText
+              id: linkLabel
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(24)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              elide: Text.ElideMiddle
+              text: modelData.label
+              color: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            HoverHandler { id: linkHover; cursorShape: Qt.PointingHandCursor }
+            Ui.PanelToolTip { visible: linkHover.hovered; text: "Open " + modelData.url }
+            TapHandler { onTapped: Qt.openUrlExternally(modelData.url) }
+          }
+        }
+      }
+
       Column {
         visible: Array.isArray(root.message.buttons) && root.message.buttons.length > 0
         width: parent.width
@@ -342,10 +398,13 @@ Item {
         // receipts, so any tick here would be a claim the data cannot back.
         Text {
           textFormat: Text.PlainText
+          objectName: "messageTimestamp"
           text: root.timestampText
           color: root.dimmer
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
+          HoverHandler { id: timestampHover }
+          Ui.PanelToolTip { visible: timestampHover.hovered; text: root.fullTimestampText }
         }
       }
     }

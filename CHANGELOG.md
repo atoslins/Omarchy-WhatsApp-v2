@@ -47,6 +47,12 @@
   not upstream.
 - The dropdown footer just says "Open full app"; its key and the list keys
   are explained in tooltips instead of a bare row of letters.
+- The conversation shows day headers (Today, Yesterday, weekday, date), a
+  "N unread messages" divider where unread messages start, and a jump-to-latest
+  button with the count of messages that arrived while you read above; the
+  bar dropdown gets the headers, the divider and the button too.
+- Links in messages open from chips under the text, and the message menu gains
+  Copy link; the text itself stays plain. Hovering a time shows the full date.
 - Download attachments with `media download --read-only --output` into
   OmaWhatsApp's own media folder, so opening media no longer pauses sync.
 - Save as… for attachments, from the message menu and the media viewer.

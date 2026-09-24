@@ -842,8 +842,24 @@ Item {
     copyToastTimer.restart()
   }
 
+  // "N unread messages" divider: the count is captured when the chat is
+  // chosen, before automatic reading clears it.
+  property var unreadMarker: ({ key: "", count: 0 })
+  property bool unreadMarkerPositioned: true
+  readonly property int unreadDividerIndex: root.unreadMarker.key !== ""
+    && root.unreadMarker.key === root.currentChatKey() && root.unreadMarker.count > 0
+    ? Math.min(root.unreadMarker.count, root.visibleMessages.length) - 1 : -1
+  onVisibleMessagesChanged: {
+    if (root.unreadMarkerPositioned || root.unreadDividerIndex < 0) return
+    root.unreadMarkerPositioned = true
+    var target = root.unreadDividerIndex
+    Qt.callLater(function() { messageList.positionViewAtIndex(target, ListView.Contain) })
+  }
+
   function selectChat(chat, focusTarget) {
     if (!chat) return
+    root.unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0) }
+    root.unreadMarkerPositioned = Number(chat.unread || 0) <= 0
     saveComposerState()
     messageSearchField.text = ""
     cursorIndex = 0
@@ -2167,6 +2183,7 @@ Item {
 
         ListView {
           id: messageList
+          objectName: "messageList"
           anchors.top: conversationHeader.bottom
           anchors.bottom: composerBar.top
           anchors.left: parent.left
@@ -2184,10 +2201,73 @@ Item {
             required property var modelData
             required property int index
             width: messageList.width
-            height: renderedMessage.height
+            readonly property bool startsDay: TimeFormat.startsDay(root.visibleMessages, index)
+            readonly property bool startsUnread: index === root.unreadDividerIndex
+            height: dayHeader.height + unreadDivider.height + renderedMessage.height
+
+            // Newest-first list drawn bottom-to-top: the header sits above the
+            // oldest message of its day.
+            Item {
+              id: dayHeader
+              objectName: "dayHeader"
+              visible: messageRow.startsDay
+              width: parent.width
+              height: visible ? Style.space(40) : 0
+              Rectangle {
+                anchors.centerIn: parent
+                width: dayLabel.implicitWidth + Style.space(20)
+                height: Style.space(24)
+                radius: height / 2
+                color: Style.normalFillFor(root.foreground, root.accent)
+                Text {
+                  textFormat: Text.PlainText
+                  id: dayLabel
+                  anchors.centerIn: parent
+                  text: TimeFormat.dayLabel(messageRow.modelData.timestamp)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
+            Item {
+              id: unreadDivider
+              objectName: "unreadDivider"
+              anchors.top: dayHeader.bottom
+              visible: messageRow.startsUnread
+              width: parent.width
+              height: visible ? Style.space(34) : 0
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                height: 1
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.45)
+              }
+              Rectangle {
+                anchors.centerIn: parent
+                width: unreadLabel.implicitWidth + Style.space(20)
+                height: Style.space(22)
+                radius: height / 2
+                color: root.background
+                border.width: 1
+                border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.6)
+                Text {
+                  textFormat: Text.PlainText
+                  id: unreadLabel
+                  anchors.centerIn: parent
+                  text: root.unreadMarker.count === 1 ? "1 unread message"
+                    : root.unreadMarker.count + " unread messages"
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
 
             MessageBubble {
               id: renderedMessage
+              anchors.top: unreadDivider.bottom
               timeFormat: root.timeFormat
               width: parent.width
               message: modelData
@@ -2231,6 +2311,59 @@ Item {
                   root.service.selectOption(
                     root.currentChatRef(), modelData, optionIndex, "app")
               }
+            }
+          }
+        }
+
+        // Back to the newest message, with how many arrived while reading above.
+        property string awayNewestId: ""
+        // Bottom-to-top list: the newest item ends at y = 0, so the view is at
+        // the latest message when its bottom edge reaches 0.
+        readonly property bool awayFromLatest: messageList.count > 0
+          && messageList.contentY + messageList.height < -Style.space(48)
+        onAwayFromLatestChanged: awayNewestId = awayFromLatest && root.visibleMessages.length > 0
+          ? String(root.visibleMessages[0].id || "") : ""
+        readonly property int newWhileAway: {
+          if (awayNewestId === "") return 0
+          for (var i = 0; i < root.visibleMessages.length; i++)
+            if (String(root.visibleMessages[i].id || "") === awayNewestId) return i
+          return 0
+        }
+        PanelActionButton {
+          id: jumpToLatest
+          objectName: "jumpToLatest"
+          z: 70
+          visible: parent.awayFromLatest
+          anchors.right: messageList.right
+          anchors.bottom: messageList.bottom
+          anchors.rightMargin: Style.space(8)
+          anchors.bottomMargin: Style.space(8)
+          size: Style.space(36)
+          iconText: "󰁅"
+          tooltipText: parent.newWhileAway > 0
+            ? "Jump to latest · " + parent.newWhileAway + " new" : "Jump to latest"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.icon
+          bordered: true
+          onClicked: messageList.positionViewAtBeginning()
+          Rectangle {
+            visible: jumpToLatest.parent.newWhileAway > 0
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: -Style.space(4)
+            width: Math.max(Style.space(18), newCount.implicitWidth + Style.space(8))
+            height: Style.space(18)
+            radius: height / 2
+            color: root.accent
+            Text {
+              textFormat: Text.PlainText
+              id: newCount
+              anchors.centerIn: parent
+              text: jumpToLatest.parent.newWhileAway > 99 ? "99+" : String(jumpToLatest.parent.newWhileAway)
+              color: root.background
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
             }
           }
         }

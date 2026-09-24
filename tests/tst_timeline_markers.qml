@@ -1,0 +1,99 @@
+import QtQuick
+import QtTest
+import "../plugins/omawhatsapp" as Oma
+import "../plugins/omawhatsapp/TimeFormat.js" as TimeFormat
+import "../plugins/omawhatsapp/LinkModel.js" as LinkModel
+
+TestCase {
+  id: testCase
+  name: "TimelineMarkers"
+  width: 900
+  height: 420
+  visible: true
+  when: windowShown
+
+  Component { id: appComponent; Oma.App { width: 900; height: 420; demoMode: true } }
+  Component { id: dropdownComponent; Oma.Dropdown { demoMode: true } }
+  Component {
+    id: bubbleComponent
+    Oma.MessageBubble {
+      width: 600
+      message: ({ id: "m", text: "see https://example.org/page, and www.omarchy.org.",
+        sender: "Demo", timestamp: 1787540100, from_me: false, media_type: "", reactions: [] })
+      foreground: "#eeeeee"; background: "#111111"; accent: "#66ccaa"
+      dim: "#999999"; dimmer: "#777777"; fontFamily: "monospace"
+    }
+  }
+
+  function test_day_labels() {
+    var now = new Date(2026, 8, 24, 15, 0, 0)
+    var at = function(y, m, d, h) { return new Date(y, m, d, h, 0, 0).getTime() / 1000 }
+    compare(TimeFormat.dayLabel(at(2026, 8, 24, 9), now), "Today")
+    compare(TimeFormat.dayLabel(at(2026, 8, 23, 23), now), "Yesterday")
+    compare(TimeFormat.dayLabel(at(2026, 8, 21, 12), now), "Monday")
+    compare(TimeFormat.dayLabel(at(2026, 7, 2, 12), now), "2 Aug")
+    compare(TimeFormat.dayLabel(at(2025, 11, 31, 12), now), "31 Dec 2025")
+  }
+
+  function test_a_day_starts_at_its_oldest_message() {
+    var day1 = new Date(2026, 8, 23, 10).getTime() / 1000
+    var day2 = new Date(2026, 8, 24, 10).getTime() / 1000
+    var newestFirst = [{ timestamp: day2 + 60 }, { timestamp: day2 }, { timestamp: day1 + 30 }, { timestamp: day1 }]
+    compare([0, 1, 2, 3].map(function(i) { return TimeFormat.startsDay(newestFirst, i) }),
+      [false, true, false, true])
+  }
+
+  function test_links_are_extracted_safely() {
+    var links = LinkModel.extract("see https://example.org/page, and www.omarchy.org. ftp://x", 3)
+    compare(links.map(function(link) { return link.url }),
+      ["https://example.org/page", "https://www.omarchy.org"])
+    compare(LinkModel.extract("no links here").length, 0)
+  }
+
+  function test_bubble_shows_link_chips_and_offers_copy_link() {
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    compare(bubble.links.length, 2)
+    verify(findChild(bubble, "messageLinks").visible)
+    verify(bubble.menuActions.some(function(item) { return item.action === "copy-link" }))
+    verify(bubble.fullTimestampText.length > bubble.timestampText.length,
+      "the timestamp tooltip carries the full date")
+  }
+
+  function test_opening_an_unread_chat_marks_where_unread_starts() {
+    var app = createTemporaryObject(appComponent, testCase)
+    app.opened = true
+    app.selectChat(app.demoChats[1])
+    compare(app.demoChats[1].unread, 3)
+    compare(app.unreadDividerIndex, 2)
+    app.selectChat(app.demoChats[0])
+    compare(app.unreadDividerIndex, -1, "a read chat has no divider")
+  }
+
+  function test_jump_to_latest_appears_when_reading_above() {
+    var app = createTemporaryObject(appComponent, testCase)
+    app.opened = true
+    var list = findChild(app, "messageList")
+    var jump = findChild(app, "jumpToLatest")
+    verify(list !== null && jump !== null)
+    tryVerify(function() { return list.count > 0 })
+    list.positionViewAtBeginning()
+    wait(50)
+    verify(!jump.visible, "at the newest message there is nothing to jump to")
+    verify(list.contentHeight > list.height + 60, "the demo timeline must scroll here")
+    list.positionViewAtEnd()
+    wait(50)
+    verify(jump.visible, "reading older messages offers the way back")
+    jump.clicked()
+    wait(50)
+    verify(!jump.visible)
+  }
+
+  function test_dropdown_marks_unread_and_days_too() {
+    var dropdown = createTemporaryObject(dropdownComponent, testCase)
+    var unread = dropdown.demoChats.filter(function(chat) { return Number(chat.unread || 0) > 1 })[0]
+    dropdown.openConversation(unread)
+    compare(dropdown.unreadDividerIndex, Math.min(unread.unread, dropdown.sourceMessages.length) - 1)
+    verify(findChild(dropdown, "jumpToLatest") !== null)
+    verify(findChild(dropdown, "dayHeader") !== null)
+  }
+}
