@@ -35,6 +35,7 @@ Item {
   // Off by default: a photo batch pauses sync, and what arrives meanwhile is lost.
   property bool autoRefreshAvatars: false
   property string railDensity: "comfortable"
+  property int railWidth: 0
   property bool autoDownloadMedia: true
   property var about: ({})
   property bool aboutLoading: false
@@ -748,9 +749,36 @@ Item {
     }, chatRef, owner)
   }
   function chatAction(chatRef, action, owner) {
-    return runWriteForChat("chat-action", {
+    var started = runWriteForChat("chat-action", {
       action: String(action || "")
     }, chatRef, owner)
+    // wacli cannot delegate pin, mute or archive, so the write pauses sync
+    // for a few seconds; the rail shows the result at once instead of after
+    // the next refresh. A failure refreshes the rail back to the mirror.
+    if (started) applyChatActionLocally(chatRef, action)
+    return started
+  }
+  function applyChatActionLocally(chatRef, action) {
+    var changes = ({
+      pin: { pinned: true }, unpin: { pinned: false },
+      mute: { muted: true }, unmute: { muted: false },
+      archive: { archived: true }, unarchive: { archived: false }
+    })[String(action || "")]
+    if (!changes) return false
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    lastChatsRaw = ""
+    var next = chats.map(function(item) {
+      return AccountModel.sameRef(AccountModel.refOf(item), ref) ? Object.assign({}, item, changes) : item
+    })
+    // The helper's order: pinned first, then newest, then by name.
+    next.sort(function(a, b) {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+      var byTime = Number(b.timestamp || 0) - Number(a.timestamp || 0)
+      if (byTime !== 0) return byTime
+      return String(a.name || "").localeCompare(String(b.name || ""))
+    })
+    chats = next
+    return true
   }
   // A conversation on screen is a conversation being read: messages that
   // arrive while it is open are marked read too, unless the user chose
@@ -863,6 +891,7 @@ Item {
     root.showAvatars = payload.show_avatars !== false
     root.autoRefreshAvatars = payload.auto_refresh_avatars !== false
     root.railDensity = payload.rail_density === "compact" ? "compact" : "comfortable"
+    root.railWidth = Math.max(0, Math.min(640, Number(payload.rail_width || 0)))
   }
 
   // Replying shows you read the chat, so it clears the unread count the way
@@ -1557,6 +1586,10 @@ Item {
         if (finishedKind === "voice") root.voiceOwner = "service"
         if (finishedKind === "send" || finishedKind === "files")
           root.dropPendingSend(finishedRequest.local_id)
+        if (finishedKind === "chat-action") {
+          root.lastChatsRaw = ""
+          refreshDelay.restart()
+        }
         var details = Object.assign({},
           payload && payload.partial ? payload.partial : ({}))
         details.kind = finishedKind

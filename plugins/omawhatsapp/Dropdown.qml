@@ -992,9 +992,9 @@ Panel {
                         textFormat: Text.PlainText
                         visible: chatRow.modelData.pinned === true
                         text: "󰐃"
-                        color: root.muted
+                        color: root.accent
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.bodySmall
                       }
                     }
                   }
@@ -1222,6 +1222,7 @@ Panel {
               required property var modelData
               required property int index
               width: messageList.width
+              z: compactMessage.raised ? 3 : 0
               readonly property bool startsDay: TimeFormat.startsDay(root.sourceMessages, index)
               height: compactDay.height + compactUnread.height + compactMessage.height
               Item {

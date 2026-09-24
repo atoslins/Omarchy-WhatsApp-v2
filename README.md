@@ -290,6 +290,7 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+N` | Start a new chat (also the rail's new chat button) |
 | `Ctrl+K` | Go to a chat by typing part of its name |
 | Conversation photo or name | Open the chat details panel; `Esc` closes it |
+| Chat list edge | Drag to resize the list; double-click for the automatic width |
 | `Ctrl+B` | Hide or show the chat list without losing context (also the rail's hide button, and the show button in the conversation while it is hidden) |
 | Chat list `/` | Focus chat search; `Esc` returns to list navigation |
 | `C` | Focus the composer |

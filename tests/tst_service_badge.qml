@@ -70,4 +70,24 @@ TestCase {
     process.exited(0)
     compare(service.chats[0].unread, 1, "the mirror's answer wins again")
   }
+
+  function test_pinning_moves_the_chat_to_the_top_at_once() {
+    // wacli cannot delegate pin, so the write pauses sync for seconds; the
+    // owner found the wait for the rail to reorder too long.
+    var service = createTemporaryObject(serviceComponent, testCase)
+    service.ready = true
+    service.statusReady = true
+    service.statusAccount = "work"
+    service.offlineMode = false
+    service.chats = [
+      { account: "work", jid: "new@s.whatsapp.net", name: "Newest", timestamp: 30, pinned: false },
+      { account: "work", jid: "old@s.whatsapp.net", name: "Oldest", timestamp: 10, pinned: false }
+    ]
+    verify(service.chatAction({ account: "work", jid: "old@s.whatsapp.net" }, "pin", "app"))
+    compare(service.chats[0].jid, "old@s.whatsapp.net")
+    verify(service.chats[0].pinned)
+    compare(service.lastChatsRaw, "", "the mirror's next answer still applies")
+    verify(!service.applyChatActionLocally({ account: "work", jid: "new@s.whatsapp.net" }, "remove-local"),
+      "only pin, mute and archive change the row locally")
+  }
 }

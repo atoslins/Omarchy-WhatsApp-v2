@@ -77,6 +77,15 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- Drag the chat list's edge to resize it; the width is saved, and a double
+  click on the edge goes back to the automatic width.
+- The All/Unread/Groups/Archived chips scroll sideways, with the wheel too,
+  when the list is too narrow for them; the scroll bar shows only while moving.
+- Pin, mute and archive show in the chat list at once; wacli cannot delegate
+  them, so the write itself still pauses sync for a few seconds. The pin icon
+  is larger and in the accent colour.
+- A message row showing its hover actions or menus draws above its
+  neighbours, so the actions are no longer hidden under other messages.
 - Voice notes and audio play at 1×, 1.5× or 2× (one choice for every
   bubble, as on the phone), show elapsed and total time, and seek where the
   bar is clicked.

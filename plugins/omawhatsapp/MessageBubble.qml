@@ -43,6 +43,10 @@ Item {
   // Sent from here, not yet stored by the mirror: shown at once, with no
   // actions that need a WhatsApp message id.
   readonly property bool pending: message && message.pending === true
+  // While its actions or menus are showing, the row must draw above its
+  // neighbours: lists stack delegates in creation order, not by position.
+  readonly property bool raised: actionSurface.visible || reactionPicker.opened
+    || actionMenu.opened
   // The message menu, as data: tests and the right-click path share it.
   readonly property var menuActions: pending
     ? [{ label: "Copy text", action: "copy", show: true }]
@@ -438,6 +442,7 @@ Item {
     Rectangle {
       id: actionSurface
       objectName: "messageActions"
+      z: 5
       // Beside the bubble (incoming: right, outgoing: left) when the row has
       // room, so the actions never cover the text; inside its top corner in
       // the narrow single-pane layout.

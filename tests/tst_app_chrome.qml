@@ -270,6 +270,42 @@ TestCase {
     verify(findChild(h.app, "railViewEmpty").visible)
   }
 
+  function test_dragging_the_rail_edge_resizes_and_saves_it() {
+    var h = createHarness()
+    var handle = findChild(h.app, "railResizeHandle")
+    verify(handle !== null)
+    verify(handle.visible)
+    var before = h.app.railWidth
+    mousePress(handle, handle.width / 2, 100)
+    mouseMove(handle, handle.width / 2 + 60, 100)
+    mouseRelease(handle, handle.width / 2 + 60, 100)
+    verify(Math.abs(h.app.railWidth - (before + 60)) < 8, "the list follows the pointer")
+    compare(h.service.lastPreference.key, "rail_width")
+    verify(Math.abs(h.service.lastPreference.value - h.app.railWidth) < 1)
+    mousePress(handle, handle.width / 2, 100)
+    mouseMove(handle, handle.width / 2 + 2000, 100)
+    mouseRelease(handle, handle.width / 2 + 2000, 100)
+    compare(h.app.railWidth, h.app.railMaxWidth, "the conversation always keeps its room")
+    h.app.resetRailWidth()
+    compare(h.service.lastPreference.value, 0)
+    compare(h.app.railWidth, h.app.railAutoWidth)
+  }
+
+  function test_view_chips_scroll_instead_of_being_cut() {
+    var h = createHarness()
+    h.service.chats = [workChat,
+      { account: "work", jid: "old@example", name: "Synthetic archived", kind: "dm", unread: 3, archived: true }]
+    var views = findChild(h.app, "railViews")
+    views.width = 120
+    tryVerify(function() { return views.contentWidth > views.width }, 2000)
+    verify(views.interactive, "chips wider than the rail scroll sideways")
+    var archived = findChild(h.app, "railView-archived")
+    verify(archived !== null, "the last chip exists even when it does not fit")
+    views.contentX = views.contentWidth - views.width
+    verify(archived.mapToItem(views, 0, 0).x + archived.width <= views.width + 1,
+      "scrolled to the end, the last chip is fully in view")
+  }
+
   function test_the_header_opens_chat_details_and_escape_closes_them() {
     var h = createHarness()
     h.app.selectChat(workChat)

@@ -1851,12 +1851,22 @@ class BackendTests(unittest.TestCase):
                     missing.append(f"{path.name}:{index + 1}")
         self.assertEqual(missing, [])
 
+    def test_the_chat_list_width_is_a_bounded_whole_number(self) -> None:
+        self.assertEqual(self.backend.settings({"rail_width": 420})["rail_width"], 420)
+        self.assertEqual(self.backend.status()["rail_width"], 420)
+        for bad in (-1, 641, 300.5, "300", True):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsupported value"):
+                self.backend.settings({"rail_width": bad})
+        self.assertEqual(self.backend.settings({"rail_width": 0})["rail_width"], 0,
+                         "zero goes back to the automatic width")
+
     def test_fork_interface_preferences_default_validate_and_persist(self) -> None:
         defaults = self.backend.settings()
         self.assertEqual(
             {name: defaults[name] for name in backend_module.UI_PREFERENCES},
             {"read_on_reply": True, "enter_sends": True, "show_avatars": True,
-             "auto_refresh_avatars": False, "rail_density": "comfortable"},
+             "auto_refresh_avatars": False, "rail_density": "comfortable",
+             "rail_width": 0},
         )
         updated = self.backend.settings({
             "read_on_reply": False, "enter_sends": False,

@@ -191,7 +191,15 @@ UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
     # that window is acknowledged by the short wacli connection and lost.
     "auto_refresh_avatars": (bool, False),
     "rail_density": (("comfortable", "compact"), "comfortable"),
+    # Chat list width in pixels, set by dragging its edge; 0 means automatic.
+    "rail_width": (("int", 0, 640), 0),
 }
+
+
+def _int_range(allowed: Any) -> tuple[int, int] | None:
+    if isinstance(allowed, tuple) and len(allowed) == 3 and allowed[0] == "int":
+        return int(allowed[1]), int(allowed[2])
+    return None
 
 
 def ui_preference(value: dict[str, Any], name: str) -> Any:
@@ -199,6 +207,11 @@ def ui_preference(value: dict[str, Any], name: str) -> Any:
     raw = value.get(name, default)
     if allowed is bool:
         return raw if isinstance(raw, bool) else default
+    bounds = _int_range(allowed)
+    if bounds is not None:
+        valid = isinstance(raw, int) and not isinstance(raw, bool) \
+            and bounds[0] <= raw <= bounds[1]
+        return raw if valid else default
     return raw if isinstance(raw, str) and raw in allowed else default
 
 
@@ -206,6 +219,10 @@ def valid_ui_preference(name: str, setting: Any) -> bool:
     allowed, _ = UI_PREFERENCES[name]
     if allowed is bool:
         return isinstance(setting, bool)
+    bounds = _int_range(allowed)
+    if bounds is not None:
+        return isinstance(setting, int) and not isinstance(setting, bool) \
+            and bounds[0] <= setting <= bounds[1]
     return isinstance(setting, str) and setting in allowed
 
 

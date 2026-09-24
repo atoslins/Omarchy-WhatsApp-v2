@@ -49,6 +49,28 @@ Item {
   property bool narrowConversation: false
   property bool narrowSearchOpen: false
   property bool sidebarCollapsed: false
+  // The chat list's width: automatic until its edge is dragged; the chosen
+  // width is saved, and a double click on the edge goes back to automatic.
+  property real railDragWidth: -1
+  property int railWidthChoice: root.service && !root.demoMode ? Number(root.service.railWidth || 0) : 0
+  readonly property real railMinWidth: Style.space(240)
+  readonly property real railMaxWidth: Math.max(railMinWidth,
+    Math.min(Style.space(560), window.width - Style.space(360)))
+  readonly property real railAutoWidth: Math.min(Style.space(340),
+    Math.max(Style.space(250), window.width * 0.30))
+  readonly property real railWidth: railDragWidth >= 0 ? railDragWidth
+    : (railWidthChoice > 0 ? Math.max(railMinWidth, Math.min(railMaxWidth, railWidthChoice))
+      : railAutoWidth)
+  function setRailWidth(value) {
+    var width = Math.round(Math.max(railMinWidth, Math.min(railMaxWidth, Number(value || 0))))
+    railWidthChoice = width
+    if (root.service && !root.demoMode) root.service.setPreference("rail_width", width)
+    return width
+  }
+  function resetRailWidth() {
+    railWidthChoice = 0
+    if (root.service && !root.demoMode) root.service.setPreference("rail_width", 0)
+  }
   property bool settingsOpen: false
   property int composerMaxLines: service ? service.composerMaxLines : 6
   property string demoTimeFormat: "auto"
@@ -1712,13 +1734,13 @@ Item {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         visible: root.narrow ? !root.narrowConversation : width > 0
-        width: root.narrow ? parent.width : (root.sidebarCollapsed ? 0
-          : Math.min(Style.space(340), Math.max(Style.space(250), window.width * 0.30)))
+        width: root.narrow ? parent.width : (root.sidebarCollapsed ? 0 : root.railWidth)
         opacity: root.narrow || !root.sidebarCollapsed ? 1 : 0
         clip: true
         color: Style.normalFillFor(root.foreground, root.accent)
 
         Behavior on width {
+          enabled: root.railDragWidth < 0
           NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
         }
         Behavior on opacity { NumberAnimation { duration: 110 } }
@@ -1771,8 +1793,39 @@ Item {
           anchors.top: parent.top
           anchors.bottom: parent.bottom
           anchors.right: parent.right
-          width: 1
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+          width: railResizeArea.containsMouse || railResizeArea.pressed ? 2 : 1
+          color: railResizeArea.containsMouse || railResizeArea.pressed ? root.accent
+            : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+        }
+
+        MouseArea {
+          id: railResizeArea
+          objectName: "railResizeHandle"
+          visible: !root.narrow && !root.sidebarCollapsed
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          anchors.right: parent.right
+          width: Style.space(6)
+          z: 10
+          hoverEnabled: true
+          cursorShape: Qt.SizeHorCursor
+          preventStealing: true
+          onPressed: root.railDragWidth = sidebar.width
+          onPositionChanged: function(mouse) {
+            if (!pressed) return
+            var edge = mapToItem(sidebar, mouse.x, 0).x
+            root.railDragWidth = Math.max(root.railMinWidth, Math.min(root.railMaxWidth, edge))
+          }
+          onReleased: {
+            if (root.railDragWidth >= 0) root.setRailWidth(root.railDragWidth)
+            root.railDragWidth = -1
+          }
+          onCanceled: root.railDragWidth = -1
+          onDoubleClicked: root.resetRailWidth()
+          PanelToolTip {
+            visible: railResizeArea.containsMouse && !railResizeArea.pressed
+            text: "Drag to resize · double-click for the automatic width"
+          }
         }
 
         Column {
@@ -1855,10 +1908,34 @@ Item {
             }
           }
 
-          Row {
+          // The views scroll sideways when the rail is too narrow for them;
+          // the wheel scrolls them too, and the bar shows only while moving.
+          Flickable {
             id: railViews
             objectName: "railViews"
             width: parent.width
+            height: Style.space(26) + (railViewsBar.visible ? Style.space(6) : 0)
+            contentWidth: railViewsRow.implicitWidth
+            contentHeight: Style.space(26)
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentWidth > width
+            clip: true
+            ScrollBar.horizontal: ScrollBar {
+              id: railViewsBar
+              objectName: "railViewsBar"
+              policy: railViews.contentWidth > railViews.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+            WheelHandler {
+              acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+              onWheel: function(event) {
+                var delta = event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x
+                railViews.contentX = Math.max(0, Math.min(
+                  railViews.contentWidth - railViews.width, railViews.contentX - delta / 2))
+              }
+            }
+          Row {
+            id: railViewsRow
             spacing: Style.space(6)
             Repeater {
               model: root.chatViews
@@ -1890,6 +1967,7 @@ Item {
                 }
               }
             }
+          }
           }
 
           AccountSwitcher {
@@ -2035,9 +2113,11 @@ Item {
                       objectName: "chatPinnedIcon"
                       visible: modelData.pinned === true
                       text: "󰐃"
-                      color: root.dimmer
+                      // Accent and body size: the owner found the dim caption
+                      // pin too easy to miss.
+                      color: root.accent
                       font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.bodySmall
                     }
                   }
                 }
@@ -2509,6 +2589,7 @@ Item {
             required property var modelData
             required property int index
             width: messageList.width
+            z: renderedMessage.raised ? 3 : 0
             readonly property bool startsDay: TimeFormat.startsDay(root.visibleMessages, index)
             readonly property bool startsUnread: index === root.unreadDividerIndex
             height: dayHeader.height + unreadDivider.height + renderedMessage.height

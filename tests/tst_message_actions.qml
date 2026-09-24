@@ -48,6 +48,15 @@ TestCase {
     tryVerify(function() { return actions.visible })
   }
 
+  function test_a_row_showing_its_actions_is_raised_over_its_neighbours() {
+    // The owner saw the dropdown's hover actions drawn under other messages.
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    verify(!bubble.raised)
+    hoverRow(bubble)
+    tryVerify(function() { return bubble.raised }, 2000)
+    compare(findChild(bubble, "messageActions").z, 5, "the strip sits above the bubble's own content")
+  }
+
   function test_incoming_actions_sit_right_of_the_bubble() {
     var bubble = createTemporaryObject(bubbleComponent, testCase)
     var actions = findChild(bubble, "messageActions")
