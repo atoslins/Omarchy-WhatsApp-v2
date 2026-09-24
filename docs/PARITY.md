@@ -8,14 +8,15 @@ Evidence sources:
 
 - **Web** — authenticated WhatsApp Web behavior, inspected without copying
   private conversation content.
-- **Transport** — wacli 0.17.1 command help and the live local-store schema.
+- **Transport** — wacli 0.18.3 command help and the live local-store schema
+  (minimum accepted release: 0.17.1).
 - **App** — the private OmaWhatsApp worktree, installed Omarchy plugin, and
   rendered runtime checks.
 
 ## Agent transport parity
 
-The shared `$omawhatsapp` skill and helper account for all 103 command leaves
-in wacli 0.17.1. This is separate from graphical parity: channels, calls,
+The shared `$omawhatsapp` skill and helper account for all 104 command leaves
+in wacli 0.18.3. This is separate from graphical parity: channels, calls,
 Communities, profiles, accounts, and maintenance remain absent from the visual
 chat rail, but agents can perform them after the exact current request passes
 the operation's local-read, remote-read, local-write, sync, WhatsApp-write,

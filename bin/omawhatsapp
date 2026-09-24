@@ -117,7 +117,17 @@ SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   AND COALESCE(groups.linked_parent_jid, '') = ''
 ))"""
 
-WACLI_PARITY_VERSION = "0.17.1"
+# Oldest wacli whose CLI contract the helper relies on, and the newest release
+# the registry, tests, and CI were verified against. Any version in between
+# (or newer) is accepted; leaves unknown to the registry keep failing closed.
+WACLI_MINIMUM_VERSION = "0.17.1"
+WACLI_PARITY_VERSION = "0.18.3"
+# Leaves that only exist from a given wacli release. The parity check accepts
+# their absence on an older accepted release; there the gateway still
+# demands the exact target flags, so wacli itself rejects the call.
+WACLI_LEAF_MINIMUM_VERSIONS: dict[tuple[str, ...], str] = {
+    ("groups", "participants", "list"): "0.18.0",
+}
 WACLI_GLOBAL_FLAGS = frozenset({
     "--account", "--events", "--full", "--json", "--lock-wait",
     "--read-only", "--store", "--timeout",
@@ -138,7 +148,7 @@ WACLI_CHAT_TO_OPERATIONS = frozenset({
     ("send", "voice"),
 })
 
-# Existing-target selectors accepted by wacli 0.17.1. The gateway resolves
+# Existing-target selectors accepted by wacli 0.18.3. The gateway resolves
 # these against the selected account's local mirror so names, phone numbers,
 # and --pick can never choose a recipient or destructive target implicitly.
 WACLI_REQUIRED_CHAT_FLAGS: dict[tuple[str, ...], tuple[str, ...]] = {
@@ -183,6 +193,7 @@ WACLI_GROUP_JID_OPERATIONS = frozenset({
     ("groups", "locked"),
     ("groups", "participants", "add"),
     ("groups", "participants", "demote"),
+    ("groups", "participants", "list"),
     ("groups", "participants", "promote"),
     ("groups", "participants", "remove"),
     ("groups", "rename"),
@@ -221,7 +232,7 @@ WACLI_MESSAGE_TARGETS: dict[tuple[str, ...], tuple[str, str]] = {
     ("send", "select"): ("--to", "--id"),
 }
 
-# Every user-facing leaf in wacli 0.17.1 is classified here. Unknown leaves
+# Every user-facing leaf in wacli 0.18.3 is classified here. Unknown leaves
 # fail closed; a future wacli release can therefore never silently broaden an
 # agent's mutation surface. A few flag-dependent operations are narrowed by
 # _transport_policy (for example, cleanup --dry-run is a local read).
@@ -277,6 +288,7 @@ WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
     ("groups", "locked"): "whatsapp-write",
     ("groups", "participants", "add"): "whatsapp-write",
     ("groups", "participants", "demote"): "destructive",
+    ("groups", "participants", "list"): "local-read",
     ("groups", "participants", "promote"): "whatsapp-write",
     ("groups", "participants", "remove"): "destructive",
     ("groups", "prune"): "local-write",
@@ -3743,11 +3755,13 @@ class Backend:
             "operation": " ".join(path),
             "policy": policy,
             "authorization": "" if policy == "local-read" else policy,
+            "min_wacli": WACLI_LEAF_MINIMUM_VERSIONS.get(path, WACLI_MINIMUM_VERSION),
         } for path, policy in sorted(WACLI_OPERATION_POLICIES.items())]
         return {
             "ok": True,
             "kind": "capabilities",
             "wacli_parity_version": WACLI_PARITY_VERSION,
+            "wacli_minimum_version": WACLI_MINIMUM_VERSION,
             "operation_count": len(operations),
             "operations": operations,
             "conditional_authorizations": [

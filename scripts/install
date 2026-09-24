@@ -87,10 +87,24 @@ if [[ ! -x "$user_home/.local/bin/wacli" ]]; then
   exit 1
 fi
 
+# The helper relies on the wacli CLI contract introduced in the minimum
+# version; the tested version is the newest release the parity registry, the
+# tests, and CI were verified against. Newer releases are accepted: leaves the
+# registry does not know keep failing closed until they are classified.
+wacli_minimum_version=0.17.1
+wacli_tested_version=0.18.3
+wacli_operation_count=104
 wacli_version=$("$user_home/.local/bin/wacli" --version 2>&1 | sed -nE 's/^wacli[[:space:]]+v?([0-9]+([.][0-9]+)+).*/\1/p' | head -n 1)
-if [[ $wacli_version != 0.17.1 ]]; then
-  echo "OmaWhatsApp requires exactly wacli 0.17.1 (found: ${wacli_version:-unknown})." >&2
+if [[ -z $wacli_version ]]; then
+  echo "Could not read the wacli version from ~/.local/bin/wacli --version." >&2
   exit 1
+fi
+if [[ $(printf '%s\n' "$wacli_minimum_version" "$wacli_version" | sort -V | head -n 1) != "$wacli_minimum_version" ]]; then
+  echo "OmaWhatsApp requires wacli $wacli_minimum_version or newer (found: $wacli_version)." >&2
+  exit 1
+fi
+if [[ $(printf '%s\n' "$wacli_tested_version" "$wacli_version" | sort -V | tail -n 1) != "$wacli_tested_version" ]]; then
+  echo "Note: wacli $wacli_version is newer than the tested $wacli_tested_version; commands it added stay blocked until the parity registry classifies them." >&2
 fi
 
 if [[ ! -f "$shell_config" ]]; then
@@ -199,7 +213,8 @@ if $check_only; then
   rg -q '^name: omawhatsapp$' "$staged_skill/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staged_skill/SKILL.md"
   python3 "$repo_root/bin/omawhatsapp" capabilities \
-    | jq -e '.ok == true and .wacli_parity_version == "0.17.1" and .operation_count == 103' \
+    | jq -e --arg version "$wacli_tested_version" --argjson count "$wacli_operation_count" \
+      '.ok == true and .wacli_parity_version == $version and .operation_count == $count' \
       >/dev/null
   ! rg -q 'TODO|\[TODO' "$staged_skill"
   jq -e --arg plugin_id "$plugin_id" '
@@ -368,7 +383,8 @@ done
 
 # Validate the exact live set before backups become disposable.
 "$helper_target" capabilities \
-  | jq -e '.ok == true and .wacli_parity_version == "0.17.1" and .operation_count == 103' \
+  | jq -e --arg version "$wacli_tested_version" --argjson count "$wacli_operation_count" \
+    '.ok == true and .wacli_parity_version == $version and .operation_count == $count' \
     >/dev/null
 jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
   "$plugin_root/$install_plugin_dir/manifest.json" >/dev/null

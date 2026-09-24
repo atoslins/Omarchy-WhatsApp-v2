@@ -79,7 +79,8 @@ capabilities through the versioned parity registry without widening the chat
 rail or its default write paths.
 
 The advanced gateway is an argument-array adapter, not an arbitrary executable
-passthrough. Every wacli 0.17.1 leaf has a fixed policy. Local reads receive
+passthrough. Every wacli 0.18.3 leaf has a fixed policy (0.17.1 is the
+minimum accepted release). Local reads receive
 `--read-only`; network work respects offline mode; local writes, sync,
 WhatsApp writes, destructive operations, and interactive linking require
 distinct current-request authorization tokens. Global options are structured

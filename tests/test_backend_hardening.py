@@ -790,10 +790,14 @@ class BackendHardeningTests(unittest.TestCase):
         source = SCRIPT.parent.parent
         installer = (source / "scripts" / "install").read_text(encoding="utf-8")
         parity = (source / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
-        self.assertIn("[[ $wacli_version != 0.17.1 ]]", installer)
+        self.assertIn("wacli_minimum_version=0.17.1", installer)
+        self.assertIn("wacli_tested_version=0.18.3", installer)
+        self.assertIn("wacli_operation_count=104", installer)
+        self.assertIn("sort -V", installer)
         self.assertIn("list-unit-files", installer)
         self.assertIn("list-units --all", installer)
-        self.assertIn("requires exactly wacli", parity)
+        self.assertIn("WACLI_MINIMUM_VERSION", parity)
+        self.assertIn("or newer", parity)
 
 
 class AccountLifecycleTests(unittest.TestCase):

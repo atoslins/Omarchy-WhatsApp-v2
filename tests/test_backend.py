@@ -1213,18 +1213,28 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
             self.backend.send("alex@s.whatsapp.net", "x" * 4097)
 
-    def test_wacli_parity_registry_covers_every_0171_leaf(self) -> None:
+    def test_wacli_parity_registry_covers_every_0183_leaf(self) -> None:
         policies = backend_module.WACLI_OPERATION_POLICIES
-        self.assertEqual(len(policies), 103)
+        self.assertEqual(len(policies), 104)
+        self.assertEqual(policies[("groups", "participants", "list")], "local-read")
+        self.assertIn(("groups", "participants", "list"),
+                      backend_module.WACLI_GROUP_JID_OPERATIONS)
+        leaf_minimums = backend_module.WACLI_LEAF_MINIMUM_VERSIONS
+        self.assertEqual(leaf_minimums[("groups", "participants", "list")], "0.18.0")
+        self.assertTrue(set(leaf_minimums) <= set(policies))
         self.assertEqual(len(set(policies)), len(policies))
         self.assertEqual(set(policies.values()), {
             "local-read", "remote-read", "local-write", "sync",
             "whatsapp-write", "destructive", "interactive",
         })
         capabilities = self.backend.capabilities()
-        self.assertEqual(capabilities["wacli_parity_version"], "0.17.1")
+        self.assertEqual(capabilities["wacli_parity_version"], "0.18.3")
+        self.assertEqual(capabilities["wacli_minimum_version"], "0.17.1")
         self.assertEqual(capabilities["operation_count"], len(policies))
         self.assertEqual(len(capabilities["operations"]), len(policies))
+        by_name = {item["operation"]: item for item in capabilities["operations"]}
+        self.assertEqual(by_name["groups participants list"]["min_wacli"], "0.18.0")
+        self.assertEqual(by_name["send text"]["min_wacli"], "0.17.1")
 
     def test_wacli_local_read_is_json_and_read_only(self) -> None:
         completed = subprocess.CompletedProcess(

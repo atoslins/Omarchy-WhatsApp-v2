@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (fork)
+
+- Accept wacli 0.17.1 or newer instead of exactly 0.17.1. The parity
+  registry, tests, and CI are verified against 0.18.3; the installer reports
+  a newer release and keeps its unclassified commands blocked.
+- Classify the new `groups participants list` leaf (0.18.0) as a local read
+  scoped to a locally indexed group. The registry now covers 104 leaves and
+  records the release each leaf first appeared in (`min_wacli`).
+- Run CI against both wacli 0.17.1 and 0.18.3 on the Omarchy 4.0.4 shell API.
+
 ## 0.14.0 — 2026-09-16
 
 - Add `toggleDropdown` IPC for hot corners and keybindings, contributed by
