@@ -63,6 +63,11 @@ own history directory. The helper reads only the `dnd` flag of
 quiet under do not disturb; the sound is the freedesktop theme's
 `message-new-instant`, played with `pw-play`.
 
+So that the next message in a chat updates its popup instead of stacking a
+new one, the helper keeps each chat's last popup id for an hour in the
+owner-private `notify-ids.json` (mode `0600`, at most 64 entries, keyed by
+account and chat JID).
+
 If a foreground wacli operation briefly yields background sync, the helper
 stores a crash-recovery intent containing only the public systemd unit name and
 an opaque lock filename. It contains no account store path, chat identifier,

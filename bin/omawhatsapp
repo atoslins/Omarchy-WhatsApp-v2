@@ -121,6 +121,12 @@ MAX_NOTIFY_SENDER = 48
 MAX_NOTIFY_BODY = 180
 MAX_NOTIFY_WATERMARKS = 500
 NOTIFY_EXPIRE_MS = 8000
+# The popup id of each chat's last notification, so the next message in that
+# chat updates it instead of stacking another one.
+NOTIFY_IDS_FILE = "notify-ids.json"
+MAX_NOTIFY_IDS = 64
+NOTIFY_ID_TTL = 60 * 60
+MAX_NOTIFY_IDS_STATE = 16 * 1024
 SYNC_UNIT = "wacli-sync.service"
 SYNC_UNIT_TEMPLATE = "wacli-sync@{name}.service"
 SYNC_UNIT_NAME = re.compile(
@@ -2375,6 +2381,10 @@ class Backend:
         if image:
             command.append(f"--hint=string:image-path:{image}")
         if target and str(target.get("jid") or ""):
+            command.append("--print-id")
+            previous = self._notify_ids().get(self._notify_key(target))
+            if previous:
+                command.append(f"--replace-id={previous}")
             command.append("--action=default=Open chat")
             command.extend(["--", summary or "OmaWhatsApp"])
             if body:
@@ -2405,6 +2415,42 @@ class Backend:
         except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
             return False
         return result.returncode == 0
+
+    @staticmethod
+    def _notify_key(target: dict[str, Any]) -> str:
+        return f"{str(target.get('account') or '')}\n{str(target.get('jid') or '')}"
+
+    def _notify_ids(self) -> dict[str, int]:
+        value = self._read_state_json(NOTIFY_IDS_FILE, MAX_NOTIFY_IDS_STATE, {})
+        if not isinstance(value, dict):
+            return {}
+        now = int(time.time())
+        ids: dict[str, int] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key.count("\n") != 1 or not isinstance(item, dict):
+                continue
+            popup = bounded_int(item.get("id"), 0, 0, 2**31 - 1)
+            at = bounded_int(item.get("at"), 0, 0, 2**63 - 1)
+            if popup > 0 and now - at < NOTIFY_ID_TTL:
+                ids[key] = popup
+        return ids
+
+    def _remember_notify_id(self, key: str, popup: int) -> None:
+        if key.count("\n") != 1 or not 0 < popup < 2**31:
+            return
+        try:
+            with self._state_lock("notify-ids.lock"):
+                value = self._read_state_json(NOTIFY_IDS_FILE, MAX_NOTIFY_IDS_STATE, {})
+                current = value if isinstance(value, dict) else {}
+                current = {k: v for k, v in current.items()
+                           if isinstance(k, str) and isinstance(v, dict)}
+                current[key] = {"id": popup, "at": int(time.time())}
+                ordered = sorted(current.items(), key=lambda pair: bounded_int(
+                    pair[1].get("at"), 0, 0, 2**63 - 1))
+                self._write_state_json(NOTIFY_IDS_FILE, dict(ordered[-MAX_NOTIFY_IDS:]),
+                                       MAX_NOTIFY_IDS_STATE)
+        except (OmaWhatsAppError, OSError):
+            pass
 
     def _notify_chat(self, chat: dict[str, Any], count: int, preview: bool,
                      label: str = "") -> bool:
@@ -2467,9 +2513,13 @@ class Backend:
             return False
         return True
 
-    @staticmethod
-    def notify_open(request: Any) -> dict[str, Any]:
-        """Show one popup and open its chat in the full app when it is clicked."""
+    def notify_open(self, request: Any) -> dict[str, Any]:
+        """Show one popup and open its chat in the full app when it is clicked.
+
+        notify-send prints the popup id first and the chosen action later, so
+        the id is recorded while the popup is still on screen: the next
+        message in the same chat replaces it instead of stacking a new one.
+        """
         if not isinstance(request, dict):
             raise OmaWhatsAppError("Invalid notification request.")
         command = request.get("command")
@@ -2478,13 +2528,49 @@ class Backend:
                 or command[0] != str(NOTIFY_SEND)
                 or not all(isinstance(part, str) for part in command)):
             raise OmaWhatsAppError("Invalid notification command.")
+        key = self._notify_key(target) if str(target.get("jid") or "") else ""
+        closed = {"ok": True, "kind": "notify-open", "opened": False}
         try:
-            result = run_bounded(command, timeout=NOTIFY_EXPIRE_MS / 1000 + 60,
-                                 stdout_limit=4096, stderr_limit=4096)
-        except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
-            return {"ok": True, "kind": "notify-open", "opened": False}
-        if result.stdout.strip() != "default" or not str(target.get("jid") or ""):
-            return {"ok": True, "kind": "notify-open", "opened": False}
+            process = subprocess.Popen(
+                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, close_fds=True,
+            )
+        except OSError:
+            return closed
+        output = b""
+        recorded = False
+        deadline = time.monotonic() + NOTIFY_EXPIRE_MS / 1000 + 60
+        try:
+            assert process.stdout is not None
+            descriptor = process.stdout.fileno()
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                while len(output) <= 4096:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        break
+                    chunk = os.read(descriptor, 1024)
+                    if not chunk:
+                        break
+                    output += chunk
+                    if not recorded and b"\n" in output:
+                        recorded = True
+                        first = output.split(b"\n", 1)[0].strip()
+                        if key and first.isdigit():
+                            self._remember_notify_id(key, int(first))
+        except (OSError, AssertionError, ValueError):
+            pass
+        finally:
+            if process.poll() is None:
+                process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        words = output.decode("utf-8", errors="replace").split()
+        action = words[-1] if words and not words[-1].isdigit() else ""
+        if action != "default" or not str(target.get("jid") or ""):
+            return closed
         shell = OMARCHY_SHELL if OMARCHY_SHELL.exists() else Path(shutil.which("omarchy-shell") or "")
         if not str(shell) or not shell.exists():
             return {"ok": True, "kind": "notify-open", "opened": False}
@@ -2636,8 +2722,13 @@ class Backend:
 
         # The sender's cached photo becomes the popup image, as on the phone.
         self._attach_cached_avatars([item[1] for item in pending[:MAX_NOTIFY_BURST]], accounts)
+        popup_ids = self._notify_ids()
         for item in pending[:MAX_NOTIFY_BURST]:
             _, chat, count, label, _ = item
+            # A popup that replaces this chat's last one counts everything
+            # still unseen there, not just this pass's arrivals.
+            if self._notify_key(chat) in popup_ids:
+                count = max(count, int(chat.get("notification_unread") or 0))
             if self._notify_chat(chat, count, settings["preview"], label):
                 sent += 1
             else:
@@ -4808,7 +4899,7 @@ def main() -> int:
                                                   payload.get("preview"),
                                                   payload.get("sound")))
         if args.command == "notify-open":
-            return emit(Backend.notify_open(payload))
+            return emit(backend.notify_open(payload))
         if args.command == "save-media":
             return emit(backend.save_media(str(payload.get("jid") or ""),
                                            str(payload.get("id") or ""),

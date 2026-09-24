@@ -660,34 +660,77 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(request["command"][-2:], ["Design team", "hi"])
         self.assertEqual(request["target"]["jid"], "team@g.us")
 
+    @staticmethod
+    def _fake_notify_send(output: bytes):
+        read, write = os.pipe()
+        os.write(write, output)
+        os.close(write)
+        process = mock.MagicMock()
+        process.stdout = os.fdopen(read, "rb")
+        process.poll.return_value = 0
+        return process
+
     def test_clicking_the_popup_opens_that_chat_and_dismissing_does_nothing(self) -> None:
-        command = [str(backend_module.NOTIFY_SEND), "--action=default=Open chat", "--", "X"]
+        command = [str(backend_module.NOTIFY_SEND), "--print-id",
+                   "--action=default=Open chat", "--", "X"]
         calls = []
 
         def run(argv, **_kwargs):
             calls.append(list(argv))
-            output = "default\n" if argv[0] == str(backend_module.NOTIFY_SEND) else ""
-            return subprocess.CompletedProcess(argv, 0, output, "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
 
         shell = self.root / "omarchy-shell"
         shell.write_text("#!/bin/sh\n", encoding="utf-8")
-        with mock.patch.object(backend_module, "run_bounded", side_effect=run), \
+        with mock.patch.object(backend_module.subprocess, "Popen",
+                               return_value=self._fake_notify_send(b"42\ndefault\n")) as popen, \
+                mock.patch.object(backend_module, "run_bounded", side_effect=run), \
                 mock.patch.object(backend_module, "OMARCHY_SHELL", shell):
-            opened = backend_module.Backend.notify_open(
+            opened = self.backend.notify_open(
                 {"command": command, "target": {"account": "work", "jid": "team@g.us"}})
+        self.assertEqual(popen.call_args.args[0], command)
         self.assertTrue(opened["opened"])
-        self.assertEqual(calls[1][:3], [str(shell), backend_module.PLUGIN_ID, "openApp"])
-        self.assertEqual(json.loads(calls[1][3]), {"account": "work", "jid": "team@g.us"})
+        self.assertEqual(calls[0][:3], [str(shell), backend_module.PLUGIN_ID, "openApp"])
+        self.assertEqual(json.loads(calls[0][3]), {"account": "work", "jid": "team@g.us"})
+        self.assertEqual(self.backend._notify_ids(), {"work\nteam@g.us": 42},
+                         "the popup id is kept for the next message in that chat")
 
-        def dismissed(argv, **_kwargs):
-            return subprocess.CompletedProcess(argv, 0, "", "")
-
-        with mock.patch.object(backend_module, "run_bounded", side_effect=dismissed) as run2:
-            self.assertFalse(backend_module.Backend.notify_open(
+        with mock.patch.object(backend_module.subprocess, "Popen",
+                               return_value=self._fake_notify_send(b"43\n")), \
+                mock.patch.object(backend_module, "run_bounded") as run2:
+            self.assertFalse(self.backend.notify_open(
                 {"command": command, "target": {"jid": "team@g.us"}})["opened"])
-        self.assertEqual(run2.call_count, 1, "closing the popup opens nothing")
+        run2.assert_not_called()
         with self.assertRaises(backend_module.OmaWhatsAppError):
-            backend_module.Backend.notify_open({"command": ["/bin/sh", "-c", "id"]})
+            self.backend.notify_open({"command": ["/bin/sh", "-c", "id"]})
+
+    def test_the_next_message_in_a_chat_replaces_its_popup(self) -> None:
+        with mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            popen.return_value.stdin = mock.MagicMock()
+            self.backend._deliver_notification("Design team", "hi", {"account": "", "jid": "team@g.us"})
+        first = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
+        self.assertIn("--print-id", first["command"])
+        self.assertFalse(any(part.startswith("--replace-id") for part in first["command"]))
+        self.backend._remember_notify_id("\nteam@g.us", 42)
+        with mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            popen.return_value.stdin = mock.MagicMock()
+            self.backend._deliver_notification("Design team", "again", {"account": "", "jid": "team@g.us"})
+        second = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
+        self.assertIn("--replace-id=42", second["command"])
+        later = time.time() + backend_module.NOTIFY_ID_TTL + 5
+        with mock.patch.object(backend_module.time, "time", return_value=later):
+            self.assertEqual(self.backend._notify_ids(), {}, "an old popup id is forgotten")
+
+    def test_a_replacing_popup_counts_everything_still_unseen(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4)
+        result, sent = self._notify()
+        self.assertEqual(sent[0][0], "Design team")
+        self.assertEqual(self.last_targets[0]["account"], backend_module.LEGACY_ACCOUNT_NAME)
+        self.backend._remember_notify_id(f"{backend_module.LEGACY_ACCOUNT_NAME}\nteam@g.us", 42)
+        self._arrive("team@g.us", "t4", 32, 5)
+        result, sent = self._notify()
+        self.assertEqual(sent[0][0], "Design team · 5 new",
+                         "the replaced popup said 1; this one covers all five")
 
     def test_popup_text_stays_one_markup_inert_line(self) -> None:
         self._enable_notifications()

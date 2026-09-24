@@ -66,6 +66,8 @@
 - When this app stops sync for something wacli cannot delegate, the rail line
   says why ("Sync paused · sending files") instead of "Reconnecting…", and its
   tooltip says messages arriving in those seconds may not reach this computer.
+- A new message in a chat whose popup is still around updates that popup
+  ("Design team · 5 new") instead of stacking another one.
 - An edit or a reaction that moves a chat's time no longer pops up a
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
