@@ -141,6 +141,7 @@ TestCase {
       property bool showAvatars: true
       property bool appConversationVisible: false
       property string railDensity: "comfortable"
+      property string syncPauseReason: ""
       function setChatRead(ref, read, owner) {
         lastChatRead = { ref: ref, read: read, owner: owner }
         return true
@@ -192,6 +193,16 @@ TestCase {
     verify(collapse.visible)
     settings.clicked()
     verify(app.settingsOpen)
+  }
+
+  function test_the_rail_line_says_why_this_app_paused_sync() {
+    var h = createHarness({ syncActive: false })
+    var status = findChild(h.app, "railSyncStatus")
+    compare(status.label, "Reconnecting…")
+    h.service.syncPauseReason = "sending files"
+    compare(status.label, "Sync paused · sending files")
+    h.service.syncActive = true
+    compare(status.label, "")
   }
 
   function test_new_chat_is_a_rail_button_with_a_shortcut() {

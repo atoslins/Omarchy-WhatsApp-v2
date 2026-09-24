@@ -160,6 +160,22 @@ Item {
   readonly property int unreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.unread || 0)
   }, 0)
+  // Why sync is down when this app stopped it: wacli can do these only while
+  // it holds the store itself. Empty when the pause is not ours.
+  readonly property string syncPauseReason: {
+    if (syncActive) return ""
+    if (accountOperations && accountOperations.avatarBusy) return "checking chat photos"
+    if (numberCheck && numberCheck.loading) return "checking a number"
+    if (!writing) return ""
+    switch (activeWriteKind) {
+    case "files": return "sending files"
+    case "voice": return "sending a voice note"
+    case "delete": return "deleting a message"
+    case "forward": return "forwarding a message"
+    case "send-new": return "starting a chat"
+    default: return ""
+    }
+  }
   // The badge counts chats, as WhatsApp's own icon does: 3 means three
   // conversations are waiting, not three messages.
   readonly property int notificationUnreadCount: chats.reduce(function(total, chat) {

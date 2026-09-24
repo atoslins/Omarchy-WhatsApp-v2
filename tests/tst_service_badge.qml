@@ -10,6 +10,21 @@ TestCase {
 
   Component { id: serviceComponent; Oma.Service {} }
 
+  function test_a_pause_this_app_caused_names_its_reason() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    service.syncActive = true
+    service.writing = true
+    service.activeWriteKind = "files"
+    compare(service.syncPauseReason, "", "sync is up: nothing to explain")
+    service.syncActive = false
+    compare(service.syncPauseReason, "sending files")
+    service.activeWriteKind = "send"
+    compare(service.syncPauseReason, "", "a delegated send never pauses sync; this is a real outage")
+    service.writing = false
+    service.numberCheck = { loading: true }
+    compare(service.syncPauseReason, "checking a number")
+  }
+
   function test_the_badge_counts_chats_and_the_tooltip_names_both() {
     var service = createTemporaryObject(serviceComponent, testCase)
     service.railReady = true

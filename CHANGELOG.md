@@ -63,6 +63,9 @@
   message and receipt that arrives meanwhile without storing it; that is how a
   chat read on another device could stay unread here. Settings says so.
 - A chat marked unread on the phone shows as unread (one) instead of read.
+- When this app stops sync for something wacli cannot delegate, the rail line
+  says why ("Sync paused · sending files") instead of "Reconnecting…", and its
+  tooltip says messages arriving in those seconds may not reach this computer.
 - An edit or a reaction that moves a chat's time no longer pops up a
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip

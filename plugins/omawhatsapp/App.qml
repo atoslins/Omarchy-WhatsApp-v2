@@ -109,6 +109,8 @@ Item {
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
   readonly property bool showAvatars: root.demoMode || !root.service || root.service.showAvatars !== false
+  readonly property string syncPauseReason: !root.demoMode && root.service
+    && typeof root.service.syncPauseReason === "string" ? root.service.syncPauseReason : ""
   readonly property bool compactRail: !root.demoMode && !!root.service && root.service.railDensity === "compact"
   readonly property bool enterSends: root.demoMode || !root.service || root.service.enterSends !== false
   readonly property string composerHint: root.enterSends
@@ -1976,7 +1978,9 @@ Item {
             readonly property string label: root.demoMode ? ""
               : (!root.selectedStatusReady ? "Loading…"
                 : (root.offlineForSelectedAccount ? "Offline · local archive"
-                  : (root.service && root.service.syncActive ? "" : "Reconnecting…")))
+                  : (root.service && root.service.syncActive ? ""
+                    : (root.syncPauseReason !== "" ? "Sync paused · " + root.syncPauseReason
+                      : "Reconnecting…"))))
             width: parent.width
             height: Style.space(18)
             visible: label !== ""
@@ -2015,7 +2019,9 @@ Item {
                 ? "Background sync is paused. Click to resume it."
                 : (railSyncStatus.label === "Loading…"
                   ? "Reading the account state."
-                  : "Background sync is not connected. Local history stays readable; new messages arrive once it reconnects.")
+                  : root.syncPauseReason !== ""
+                    ? "wacli can do this only with background sync stopped; it restarts right after. Messages that arrive in these seconds may not reach this computer."
+                    : "Background sync is not connected. Local history stays readable; new messages arrive once it reconnects.")
             }
           }
         }
