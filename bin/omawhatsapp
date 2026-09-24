@@ -3327,10 +3327,11 @@ class Backend:
         command.extend(reply_args)
         result = self._write(command, timeout=45)
         envelope = self._envelope(result)
-        self._remember_sent_reply_best_effort(
-            chat["jid"], self._sent_message_id(envelope), quoted_id
-        )
-        return {"ok": True}
+        message_id = self._sent_message_id(envelope)
+        self._remember_sent_reply_best_effort(chat["jid"], message_id, quoted_id)
+        # The UI shows the message at once as pending and swaps in the stored
+        # row carrying this id.
+        return {"ok": True, "message_id": message_id[:256]}
 
     @staticmethod
     def _phone_digits(value: Any) -> str:

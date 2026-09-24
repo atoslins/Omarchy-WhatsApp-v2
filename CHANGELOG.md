@@ -72,6 +72,11 @@
   notification with the old message; only a new last message does.
 - The bar badge counts unread chats instead of unread messages; the tooltip
   names both.
+- A sent message shows at once as a pending bubble with a clock, in both
+  clients, instead of appearing only after WhatsApp confirmed the send and the
+  mirror stored it; the stored row then takes its place. Files show one pending
+  bubble with the file name and caption. A failed send removes the bubble and
+  puts the text back in the composer.
 - Chat details: click the chat's photo or name in the header (or Chat actions →
   Chat details) for a contact or group panel read entirely from the local
   mirror, so it never pauses sync: photo, phone and other names, mute, pin,

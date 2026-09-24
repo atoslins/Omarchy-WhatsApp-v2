@@ -38,8 +38,13 @@ Item {
   signal copyRequested(string text)
   signal saveRequested()
 
+  // Sent from here, not yet stored by the mirror: shown at once, with no
+  // actions that need a WhatsApp message id.
+  readonly property bool pending: message && message.pending === true
   // The message menu, as data: tests and the right-click path share it.
-  readonly property var menuActions: [
+  readonly property var menuActions: pending
+    ? [{ label: "Copy text", action: "copy", show: true }]
+    : [
     { label: "Reply", action: "reply", show: true },
     { label: "React", action: "react", show: true },
     { label: "Copy text", action: "copy", show: root.bodyText !== "" },
@@ -157,6 +162,7 @@ Item {
   Rectangle {
     id: bubble
     objectName: "messageBubbleSurface"
+    opacity: root.pending ? 0.72 : 1
     anchors.right: root.message.from_me ? parent.right : undefined
     anchors.left: root.message.from_me ? undefined : parent.left
     width: root.desiredWidth
@@ -396,6 +402,22 @@ Item {
         }
         // No delivery tick: wacli's mirror records no delivery or read
         // receipts, so any tick here would be a claim the data cannot back.
+        // A pending message shows a clock until the stored row replaces it.
+        Text {
+          textFormat: Text.PlainText
+          objectName: "messagePending"
+          visible: root.pending
+          text: "󰅐"
+          color: root.dimmer
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          HoverHandler { id: pendingHover }
+          Ui.PanelToolTip {
+            visible: pendingHover.hovered
+            text: root.message.send_state === "sent"
+              ? "Sent · saving it on this computer" : "Sending…"
+          }
+        }
         Text {
           textFormat: Text.PlainText
           objectName: "messageTimestamp"
@@ -417,7 +439,7 @@ Item {
       // the narrow single-pane layout.
       readonly property bool outside: !root.narrow
         && root.width - bubble.width >= width + Style.space(16)
-      visible: rowHover.hovered || reactionPicker.opened || actionMenu.opened
+      visible: !root.pending && (rowHover.hovered || reactionPicker.opened || actionMenu.opened)
       // Positioned explicitly: conditional anchors keep the previous edge when
       // `outside` flips, which pinned both sides to the bubble's right edge.
       x: outside

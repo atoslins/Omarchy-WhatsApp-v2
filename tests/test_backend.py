@@ -1171,9 +1171,12 @@ class BackendTests(unittest.TestCase):
             self.backend.send("unknown@g.us", "hello")
 
     def test_send_targets_selected_local_chat(self) -> None:
-        completed = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        completed = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"id": "SYNTHETIC-ID"}}), "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:
-            self.backend.send("alex@s.whatsapp.net", "hello")
+            result = self.backend.send("alex@s.whatsapp.net", "hello")
+        self.assertEqual(result, {"ok": True, "message_id": "SYNTHETIC-ID"},
+                         "the id lets the pending bubble give way to the stored row")
         command = write.call_args.args[0]
         self.assertEqual(command[command.index("--to") + 1], "alex@s.whatsapp.net")
         self.assertEqual(command[command.index("--message") + 1], "hello")

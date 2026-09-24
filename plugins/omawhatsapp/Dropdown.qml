@@ -112,7 +112,7 @@ Panel {
       currentChatRef())
   readonly property var sourceMessages: demoMode
     ? demoItems : (serviceOnCurrentChat && Array.isArray(service.messages)
-      ? service.messages : [])
+      ? (Array.isArray(service.selectedMessages) ? service.selectedMessages : service.messages) : [])
   readonly property int rowHeight: Style.space(62)
   readonly property int chatListHeight: Math.max(2,
     Math.min(Math.max(2, maxRows), Math.max(2, filteredChats.length))) * rowHeight

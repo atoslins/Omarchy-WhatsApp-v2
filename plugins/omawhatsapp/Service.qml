@@ -44,6 +44,24 @@ Item {
   property string newChatPeopleQuery: ""
   property bool newChatPeopleLoading: false
   property bool newChatPeoplePending: false
+  // Messages sent from here that the mirror has not stored yet. They show at
+  // once as pending bubbles: the send itself takes a second or more.
+  property var pendingSends: []
+  property int pendingSendSerial: 0
+  readonly property var selectedMessages: {
+    var key = selectedChatRef().key
+    var stored = {}
+    for (var i = 0; i < messages.length; i++) stored[String(messages[i].id || "")] = true
+    var waiting = pendingSends.filter(function(item) {
+      return item.key === key && !(item.message_id !== "" && stored[item.message_id])
+    }).map(function(item) {
+      return { id: item.local_id, text: item.text, sender: "You", sender_jid: "",
+        timestamp: item.timestamp, from_me: true, done: false, media_type: "",
+        mime_type: "", local_path: "", tags: [], quoted_id: item.reply_id,
+        pending: true, send_state: item.state }
+    })
+    return waiting.length > 0 ? waiting.reverse().concat(messages) : messages
+  }
   // Chat details panel: what the mirror knows about the selected chat.
   property var chatDetails: ({})
   property bool chatDetailsLoading: false
@@ -451,11 +469,53 @@ Item {
   }
   function sendText(chatRef, text, replyId, mentions, owner) {
     var value = String(text || "").trim()
-    return value !== "" && runWriteForChat("send", {
+    if (value === "") return false
+    pendingSendSerial += 1
+    var localId = "pending:" + pendingSendSerial
+    var started = runWriteForChat("send", {
       text: value,
       reply_id: String(replyId || ""),
-      mentions: Array.isArray(mentions) ? mentions : []
+      mentions: Array.isArray(mentions) ? mentions : [],
+      local_id: localId
     }, chatRef, owner)
+    if (started) {
+      var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+      pendingSends = pendingSends.concat([{
+        local_id: localId, key: ref.key, text: value, reply_id: String(replyId || ""),
+        timestamp: Math.floor(Date.now() / 1000), created: Date.now(),
+        state: "sending", message_id: ""
+      }])
+    }
+    return started
+  }
+  function updatePendingSend(localId, changes) {
+    var id = String(localId || "")
+    if (id === "") return
+    pendingSends = pendingSends.map(function(item) {
+      return item.local_id === id ? Object.assign({}, item, changes) : item
+    })
+  }
+  function dropPendingSend(localId) {
+    var id = String(localId || "")
+    pendingSends = pendingSends.filter(function(item) { return item.local_id !== id })
+  }
+  // A pending bubble gives way once the mirror holds its message, and never
+  // outlives a sane delay if the stored row never matches.
+  function prunePendingSends() {
+    if (pendingSends.length === 0) return
+    var key = selectedChatRef().key
+    var stored = {}
+    for (var i = 0; i < messages.length; i++) stored[String(messages[i].id || "")] = true
+    var now = Date.now()
+    var next = pendingSends.filter(function(item) {
+      if (item.message_id !== "" && item.key === key && stored[item.message_id]) return false
+      // Files land as several rows (an album, a caption); the first refresh
+      // after the upload finished carries them.
+      if (item.kind === "files" && item.state === "sent") return false
+      if (item.state === "sent" && now - item.created > 90000) return false
+      return now - item.created < 300000
+    })
+    if (next.length !== pendingSends.length) pendingSends = next
   }
   function pasteClipboard(chatRef, owner) {
     return runWriteForChat("paste", {}, chatRef, owner)
@@ -490,11 +550,28 @@ Item {
     }, chatRef, owner)
   }
   function sendFilesReply(chatRef, paths, caption, replyId, owner) {
-    return runWriteForChat("files", {
-      paths: Array.isArray(paths) ? paths : [],
-      caption: String(caption || "").trim(),
-      reply_id: String(replyId || "")
+    var files = Array.isArray(paths) ? paths : []
+    pendingSendSerial += 1
+    var localId = "pending:" + pendingSendSerial
+    var text = String(caption || "").trim()
+    var started = runWriteForChat("files", {
+      paths: files,
+      caption: text,
+      reply_id: String(replyId || ""),
+      local_id: localId
     }, chatRef, owner)
+    if (started && files.length > 0) {
+      var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+      var name = decodeURIComponent(String(files[0]).split("/").pop() || "file")
+      var label = "📎 " + (files.length === 1 ? name : files.length + " files")
+      pendingSends = pendingSends.concat([{
+        local_id: localId, key: ref.key, kind: "files",
+        text: text !== "" ? label + "\n" + text : label, reply_id: String(replyId || ""),
+        timestamp: Math.floor(Date.now() / 1000), created: Date.now(),
+        state: "sending", message_id: ""
+      }])
+    }
+    return started
   }
   function toggleVoice(account, jid, chatName, replyId, owner) {
     var origin = ["app", "dropdown"].indexOf(String(owner || "")) >= 0
@@ -969,6 +1046,7 @@ Item {
     onTriggered: {
       root.refreshChats()
       root.runNotify()
+      root.prunePendingSends()
       if (root.windowOpen) root.refreshMessages()
     }
   }
@@ -1327,6 +1405,7 @@ Item {
         root.errorText = (payload && payload.error) || String(messagesError.text || "Messages could not be read.").trim()
       } else if (payload && payload.ok === true && responseIsCurrent) {
         root.messages = Array.isArray(payload.messages) ? payload.messages : []
+        root.prunePendingSends()
         root.selectedChatName = String(payload.chat.name || root.selectedChatName)
         root.selectedChatKind = String(payload.chat.kind || root.selectedChatKind)
       }
@@ -1364,6 +1443,7 @@ Item {
 
   Process {
     id: writeProcess
+    objectName: "writeProcess"
     property string kind: ""
     property string payload: ""
     property var chatRef: ({ account: "", jid: "", key: "" })
@@ -1397,6 +1477,8 @@ Item {
         if (finishedKind === "voice")
           voiceRecorder.markSendFailed(message, finishedAccount, finishedJid)
         if (finishedKind === "voice") root.voiceOwner = "service"
+        if (finishedKind === "send" || finishedKind === "files")
+          root.dropPendingSend(finishedRequest.local_id)
         var details = Object.assign({},
           payload && payload.partial ? payload.partial : ({}))
         details.kind = finishedKind
@@ -1425,6 +1507,11 @@ Item {
       }
       if (finishedKind === "send-new")
         root.lastStartedChatJid = String(payload.chat_jid || finishedJid)
+      if (finishedKind === "files")
+        root.updatePendingSend(finishedRequest.local_id, { state: "sent", created: Date.now() })
+      if (finishedKind === "send")
+        root.updatePendingSend(finishedRequest.local_id, {
+          state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
       if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()

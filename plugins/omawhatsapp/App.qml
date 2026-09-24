@@ -137,7 +137,7 @@ Item {
   readonly property bool textEntryActive: composer.activeFocus
     || messageSearchField.activeFocus || chatSearchField.activeFocus
   readonly property var sourceItems: root.demoMode
-    ? root.demoItems : (root.service ? root.service.messages : [])
+    ? root.demoItems : (root.service ? (root.service.selectedMessages || root.service.messages) : [])
   readonly property var sourceChats: root.demoMode
     ? root.demoChats : (root.service ? root.service.chats : [])
   readonly property var accountEntries: root.demoMode
@@ -1278,7 +1278,7 @@ Item {
     if (visibleMessages.length === 0) return false
     var index = Math.max(0, Math.min(cursorIndex, visibleMessages.length - 1))
     var item = visibleMessages[index]
-    if (!item) return false
+    if (!item || item.pending === true) return false
     root.startReply(item)
     return true
   }
