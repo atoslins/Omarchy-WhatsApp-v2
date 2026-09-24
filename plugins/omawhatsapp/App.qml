@@ -836,6 +836,24 @@ Item {
     selectChat(visibleChats[chatCursorIndex], "composer")
   }
 
+  function chatIsUnread(chat) {
+    return !!chat && Number(chat.unread || 0) > 0
+  }
+  function toggleChatRead(chat) {
+    if (!chat) return false
+    var read = root.chatIsUnread(chat)
+    if (root.demoMode) {
+      root.demoChats = root.demoChats.map(function(item) {
+        if (String(item.jid) !== String(chat.jid)) return item
+        var next = Object.assign({}, item)
+        next.unread = read ? 0 : 1
+        return next
+      })
+      return true
+    }
+    return !!root.service && root.service.setChatRead(AccountModel.refOf(chat), read, "app")
+  }
+
   function toggleSidebar() {
     if (root.narrow) {
       if (root.narrowConversation) root.narrowConversation = false
@@ -2087,6 +2105,8 @@ Item {
               border.width: keyboardSelected ? 1 : 0
               border.color: root.accent
 
+              HoverHandler { id: chatRowHover }
+
               ChatAvatar {
                 id: chatAvatar
                 anchors.left: parent.left
@@ -2106,7 +2126,7 @@ Item {
               Column {
                 anchors.left: chatAvatar.right
                 anchors.leftMargin: Style.space(9)
-                anchors.right: unreadBadge.left
+                anchors.right: chatTrailing.left
                 anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(3)
@@ -2132,12 +2152,37 @@ Item {
                 }
               }
 
-              Rectangle {
-                id: unreadBadge
+              // The unread count, or on hover the read/unread toggle, in one
+              // fixed slot above the row's click area.
+              Item {
+                id: chatTrailing
+                z: 2
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                visible: Number(modelData.unread || 0) > 0
+                width: Math.max(Style.space(28), unreadBadge.width)
+                height: Style.space(28)
+
+                PanelActionButton {
+                  objectName: "chatReadToggle"
+                  anchors.centerIn: parent
+                  visible: chatRowHover.hovered
+                  iconText: root.chatIsUnread(modelData) ? "󰄭" : "󱥂"
+                  tooltipText: root.chatIsUnread(modelData) ? "Mark as read" : "Mark as unread"
+                  foreground: root.dim
+                  hoverColor: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.body
+                  size: Style.space(28)
+                  onClicked: root.toggleChatRead(modelData)
+                }
+              }
+
+              Rectangle {
+                id: unreadBadge
+                parent: chatTrailing
+                anchors.centerIn: parent
+                visible: Number(modelData.unread || 0) > 0 && !chatRowHover.hovered
                 width: Math.max(Style.space(20), unreadText.implicitWidth + Style.space(8))
                 height: Style.space(20)
                 radius: height / 2
@@ -2380,6 +2425,20 @@ Item {
                 root.narrowSearchOpen = true
                 Qt.callLater(function() { messageSearchField.forceActiveFocus() })
               }
+            }
+
+            PanelActionButton {
+              objectName: "conversationReadToggle"
+              visible: !!root.selectedChat
+              width: visible ? implicitWidth : 0
+              iconText: root.chatIsUnread(root.selectedChat) ? "󰄭" : "󱥂"
+              tooltipText: root.chatIsUnread(root.selectedChat) ? "Mark as read" : "Mark as unread"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.icon
+              size: Style.space(32)
+              onClicked: root.toggleChatRead(root.selectedChat)
             }
 
             PanelActionButton {

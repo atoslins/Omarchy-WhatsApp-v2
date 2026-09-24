@@ -27,6 +27,12 @@ Item {
   property bool controlWriting: false
   property bool settingsWriting: false
   property bool sendReadReceipts: false
+  property bool readOnReply: true
+  property bool enterSends: true
+  property bool showAvatars: true
+  property bool autoRefreshAvatars: true
+  property string railDensity: "comfortable"
+  property var pendingReplyReadRef: ({ account: "", jid: "", key: "" })
   property bool showUnreadCount: true
   property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
@@ -470,6 +476,22 @@ Item {
       action: String(action || "")
     }, chatRef, owner)
   }
+  // Mark one exact chat read or unread on WhatsApp. The count changes at once
+  // and the next refresh confirms it from the mirror.
+  function setChatRead(chatRef, read, owner) {
+    var target = AccountModel.chatRef(String(chatRef && chatRef.account || ""),
+      String(chatRef && chatRef.jid || ""))
+    if (String(target.jid || "") === "") return false
+    if (!root.chatAction(target, read ? "read" : "unread", owner)) return false
+    root.chats = root.chats.map(function(item) {
+      if (!root.sameChat(item, target.account, target.jid)) return item
+      var next = Object.assign({}, item)
+      next.unread = read ? 0 : Math.max(1, Number(item.unread || 0))
+      if (read) next.notification_unread = 0
+      return next
+    })
+    return true
+  }
   function clearNotificationCount(jid, account) {
     var target = String(jid || "")
     root.chats = root.chats.map(function(chat) {
@@ -513,6 +535,61 @@ Item {
     controlProcess.running = true
     return true
   }
+  function applyInterfacePreferences(payload) {
+    root.readOnReply = payload.read_on_reply !== false
+    root.enterSends = payload.enter_sends !== false
+    root.showAvatars = payload.show_avatars !== false
+    root.autoRefreshAvatars = payload.auto_refresh_avatars !== false
+    root.railDensity = payload.rail_density === "compact" ? "compact" : "comfortable"
+  }
+
+  // Replying shows you read the chat, so it clears the unread count the way
+  // the phone does. wacli's mark-read only syncs the read state to your own
+  // devices; it never sends the other side a read receipt.
+  readonly property var replyKinds: ["send", "files", "voice", "sticker", "poll"]
+  function markReadAfterReply(chatRef) {
+    if (!root.readOnReply || root.offlineMode) return false
+    var target = AccountModel.chatRef(String(chatRef && chatRef.account || ""),
+      String(chatRef && chatRef.jid || ""))
+    if (String(target.jid || "") === "") return false
+    var chat = null
+    for (var i = 0; i < root.chats.length; i++) {
+      if (root.sameChat(root.chats[i], target.account, target.jid)) { chat = root.chats[i]; break }
+    }
+    if (!chat || Number(chat.unread || 0) <= 0) return false
+    root.chats = root.chats.map(function(item) {
+      if (!root.sameChat(item, target.account, target.jid)) return item
+      var next = Object.assign({}, item)
+      next.unread = 0
+      next.notification_unread = 0
+      return next
+    })
+    root.pendingReplyReadRef = target
+    replyReadRetry.attempts = 0
+    replyReadRetry.restart()
+    return true
+  }
+
+  Timer {
+    id: replyReadRetry
+    // A write in flight delays the mark-read; a write that keeps being refused
+    // (offline, account unavailable) is dropped after a few seconds.
+    property int attempts: 0
+    interval: 150
+    repeat: false
+    onTriggered: {
+      var target = root.pendingReplyReadRef
+      if (String(target.jid || "") === "") return
+      attempts += 1
+      if (!root.writing && root.chatAction(target, "read")) {
+        root.pendingReplyReadRef = AccountModel.chatRef("", "")
+        return
+      }
+      if (attempts < 40) restart()
+      else root.pendingReplyReadRef = AccountModel.chatRef("", "")
+    }
+  }
+
   function setPreference(key, value) {
     if (settingsProcess.running) return false
     var settings = ({})
@@ -733,6 +810,7 @@ Item {
           ? Number(payload.composer_max_lines) : 6
         root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
           ? payload.time_format : "auto"
+        root.applyInterfacePreferences(payload)
         root.ready = readiness.accountReady
         if (root.ready) root.errorText = ""
         root.maybeSendAutomaticReceipt()
@@ -880,6 +958,7 @@ Item {
         ? Number(payload.composer_max_lines) : 6
       root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
         ? payload.time_format : "auto"
+      root.applyInterfacePreferences(payload)
       root.errorText = ""
       root.settingsCompleted()
       root.refreshStatus()
@@ -1028,6 +1107,7 @@ Item {
         root.voiceOwner = "service"
       }
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
+      if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()
     }
   }

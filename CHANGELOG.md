@@ -22,6 +22,16 @@
   bubbles or chat previews, and uncaptioned voice notes no longer carry the
   "[Audio]" text. Drop the delivery tick, which the mirror has no data for.
 - Show the WhatsApp mark in the empty conversation pane.
+- Replying to a chat marks it read, so its unread count clears the way it does
+  on the phone. wacli's mark-read only syncs the read state to your own
+  devices; it sends the other side no read receipt.
+- Mark a chat read or unread from a button in the conversation header, or from
+  the rail row on hover, where it takes the place of the unread count.
+- Show reactions that wacli stored under the contact's opaque @lid chat
+  instead of the phone chat of the reacted message; a sent reaction used to
+  vanish from the bubble.
+- Add interface preferences to the helper: read on reply, Enter sends, chat
+  photos, automatic photo refresh, and rail density.
 - Add `make dev`, which copies working-tree changes over an existing install
   and restarts the shell when QML changed, and `make demo`. The installer and
   test gate find qmllint in /usr/lib/qt6/bin on their own.

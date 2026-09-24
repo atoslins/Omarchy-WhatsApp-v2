@@ -635,6 +635,25 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(item["starred"])
         self.assertEqual(item["location_name"], "Studio")
 
+    def test_reaction_stored_under_the_contacts_lid_chat_still_shows(self) -> None:
+        # wacli 0.18.3 can store an outgoing reaction under the contact's
+        # opaque @lid chat while the reacted message lives in the phone chat.
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id, reaction_emoji)
+                VALUES (?, '', ?, ?, '', ?, ?, '', ?, ?)""",
+                [
+                    ("123456789012345@lid", "r-lid", "me@s.whatsapp.net", 45, 1, "a1", "👍"),
+                    ("other@s.whatsapp.net", "r-foreign", "other@s.whatsapp.net", 46, 0, "a1", "😡"),
+                ],
+            )
+        item = next(value for value in self.backend.messages("alex@s.whatsapp.net")["messages"]
+                    if value["id"] == "a1")
+        self.assertEqual([reaction["emoji"] for reaction in item["reactions"]], ["👍"],
+                         "an @lid reaction joins its target; another contact's chat never does")
+
     def test_reaction_changes_keep_only_each_users_latest_emoji(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.executemany(
@@ -1257,6 +1276,31 @@ class BackendTests(unittest.TestCase):
                 if next_line != "textFormat: Text.PlainText":
                     missing.append(f"{path.name}:{index + 1}")
         self.assertEqual(missing, [])
+
+    def test_fork_interface_preferences_default_validate_and_persist(self) -> None:
+        defaults = self.backend.settings()
+        self.assertEqual(
+            {name: defaults[name] for name in backend_module.UI_PREFERENCES},
+            {"read_on_reply": True, "enter_sends": True, "show_avatars": True,
+             "auto_refresh_avatars": True, "rail_density": "comfortable"},
+        )
+        updated = self.backend.settings({
+            "read_on_reply": False, "enter_sends": False,
+            "show_avatars": False, "auto_refresh_avatars": False,
+            "rail_density": "compact",
+        })
+        self.assertFalse(updated["read_on_reply"])
+        self.assertEqual(updated["rail_density"], "compact")
+        status = self.backend.status()
+        self.assertFalse(status["enter_sends"])
+        self.assertFalse(status["show_avatars"])
+        self.assertEqual(status["rail_density"], "compact")
+        for bad in ({"read_on_reply": "yes"}, {"rail_density": "tiny"},
+                    {"enter_sends": 1}):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsupported value"):
+                self.backend.settings(bad)
+        self.assertFalse(self.backend.settings()["read_on_reply"],
+                         "a rejected update must not change the saved value")
 
     def test_oversized_message_is_rejected(self) -> None:
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):

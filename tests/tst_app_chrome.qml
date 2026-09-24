@@ -137,6 +137,11 @@ TestCase {
       function reactTo() { return false }
       function selectOption() { return false }
       property var lastNotifications: null
+      property var lastChatRead: null
+      function setChatRead(ref, read, owner) {
+        lastChatRead = { ref: ref, read: read, owner: owner }
+        return true
+      }
       function setNotifications(enabled, preview) {
         lastNotifications = { enabled: enabled, preview: preview }
         return true
@@ -229,6 +234,36 @@ TestCase {
   function test_ctrl_number_chat_jumps_are_gone() {
     var app = createHarness().app
     verify(typeof app.selectChatAt === "undefined")
+  }
+
+  function test_conversation_header_toggles_read_state_of_the_open_chat() {
+    var harness = createHarness()
+    var toggle = findChild(harness.app, "conversationReadToggle")
+    verify(toggle !== null)
+    compare(toggle.tooltipText, "Mark as unread")
+    compare(toggle.iconText, "󱥂")
+    toggle.clicked()
+    compare(harness.service.lastChatRead.read, false)
+    compare(harness.service.lastChatRead.ref.jid, workChat.jid)
+    compare(harness.service.lastChatRead.ref.account, "work")
+
+    var unreadChat = Object.assign({}, workChat, { unread: 3 })
+    harness.service.chats = [unreadChat, otherChat]
+    compare(toggle.tooltipText, "Mark as read")
+    compare(toggle.iconText, "󰄭")
+    toggle.clicked()
+    compare(harness.service.lastChatRead.read, true)
+  }
+
+  function test_rail_row_offers_the_read_toggle_on_hover() {
+    var harness = createHarness()
+    var toggle = findChild(harness.app, "chatReadToggle")
+    verify(toggle !== null, "every rail row carries the toggle")
+    verify(!toggle.visible, "hidden until the row is hovered")
+    mouseMove(toggle.parent, toggle.parent.width / 2, toggle.parent.height / 2)
+    tryVerify(function() { return toggle.visible })
+    toggle.clicked()
+    verify(harness.service.lastChatRead !== null)
   }
 
   function test_desktop_notifications_live_in_settings() {

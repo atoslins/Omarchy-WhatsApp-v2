@@ -131,6 +131,33 @@ def synthetic_message_sql(table: str) -> str:
 # caption; the voice bubble already says what it is.
 SYNTHETIC_AUDIO_TEXT = "[Audio]"
 
+# Global interface preferences added by the fork. Each entry is
+# (allowed values, default); a bool entry accepts True or False. Older keys
+# keep their own validation and error messages below.
+UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
+    "read_on_reply": (bool, True),
+    "enter_sends": (bool, True),
+    "show_avatars": (bool, True),
+    "auto_refresh_avatars": (bool, True),
+    "rail_density": (("comfortable", "compact"), "comfortable"),
+}
+
+
+def ui_preference(value: dict[str, Any], name: str) -> Any:
+    allowed, default = UI_PREFERENCES[name]
+    raw = value.get(name, default)
+    if allowed is bool:
+        return raw if isinstance(raw, bool) else default
+    return raw if isinstance(raw, str) and raw in allowed else default
+
+
+def valid_ui_preference(name: str, setting: Any) -> bool:
+    allowed, _ = UI_PREFERENCES[name]
+    if allowed is bool:
+        return isinstance(setting, bool)
+    return isinstance(setting, str) and setting in allowed
+
+
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
@@ -1136,6 +1163,7 @@ class Backend:
             "dropdown_rows": dropdown_rows,
             "composer_max_lines": composer_max_lines,
             "time_format": time_format,
+            **{name: ui_preference(value, name) for name in UI_PREFERENCES},
             # The desktop popup is a separate surface from the bar badge, so it
             # keeps its own settings. Its watermark is per account, next to the
             # badge acknowledgements it must never read.
@@ -1199,6 +1227,7 @@ class Backend:
                 "check_updates_on_launch",
                 "composer_max_lines",
                 "time_format",
+                *UI_PREFERENCES,
             }
             if any(key not in allowed for key in update):
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
@@ -1217,6 +1246,9 @@ class Backend:
                 or update["time_format"] not in {"auto", "12h", "24h"}
             ):
                 raise OmaWhatsAppError("Time format must be auto, 12h, or 24h.")
+            for name in UI_PREFERENCES:
+                if name in update and not valid_ui_preference(name, update[name]):
+                    raise OmaWhatsAppError(f"The {name.replace('_', ' ')} setting has an unsupported value.")
 
             key = self.active.key
 
@@ -1243,6 +1275,7 @@ class Backend:
             "dropdown_rows": value.get("dropdown_rows", 7),
             "composer_max_lines": value.get("composer_max_lines", 6),
             "time_format": value.get("time_format", "auto"),
+            **{name: ui_preference(value, name) for name in UI_PREFERENCES},
         }
 
     def _sent_hint_key(self, jid: str, message_id: str) -> str:
@@ -1813,6 +1846,7 @@ class Backend:
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "composer_max_lines": preferences.get("composer_max_lines", 6),
             "time_format": preferences.get("time_format", "auto"),
+            **{name: ui_preference(preferences, name) for name in UI_PREFERENCES},
             "fts_enabled": current["fts_enabled"],
             "error": current["error"],
         }
@@ -2459,15 +2493,20 @@ class Backend:
                               ORDER BY ts DESC, rowid DESC
                             ) AS actor_rank
                           FROM messages
-                          WHERE chat_jid = ? AND reaction_to_id IN ({placeholders})
+                          WHERE reaction_to_id IN ({placeholders})
                             AND deleted_at IS NULL
+                            -- wacli can store a reaction under the contact's
+                            -- opaque @lid chat instead of this chat's phone
+                            -- JID; an @lid row joins only the message it
+                            -- targets, never another contact's chat.
+                            AND (chat_jid = ? OR chat_jid LIKE '%@lid')
                         )
                         SELECT reaction_to_id, reaction_emoji, from_me,
                           sender_name, sender_jid
                         FROM ranked_reactions
                         WHERE actor_rank = 1 AND COALESCE(reaction_emoji, '') <> ''
                         ORDER BY ts ASC, rowid ASC""",
-                        [chat["jid"], *message_ids],
+                        [*message_ids, chat["jid"]],
                     ).fetchall()
                     for reaction in reaction_rows:
                         reactions.setdefault(str(reaction["reaction_to_id"]), []).append({
