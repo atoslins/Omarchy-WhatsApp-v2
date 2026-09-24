@@ -80,9 +80,12 @@ TestCase {
     wait(50)
     verify(!jump.visible, "at the newest message there is nothing to jump to")
     verify(list.contentHeight > list.height + 60, "the demo timeline must scroll here")
-    list.positionViewAtEnd()
-    wait(50)
-    verify(jump.visible, "reading older messages offers the way back")
+    // Straight to the top of the content: positionViewAtEnd settles later on
+    // slower machines (CI), where lazily created delegates move the end.
+    tryVerify(function() {
+      list.contentY = list.originY
+      return jump.visible
+    }, 3000, "reading older messages offers the way back")
     var backing = findChild(app, "jumpToLatestBacking")
     verify(backing.visible && backing.color.a === 1, "the text never shows through the button")
     jump.clicked()
@@ -115,10 +118,10 @@ TestCase {
     tryVerify(function() { return list.count > 0 })
     var pill = findChild(app, "floatingDay")
     verify(pill !== null)
-    list.positionViewAtBeginning()
-    wait(50)
-    list.positionViewAtEnd()
-    tryVerify(function() { return findChild(app, "jumpToLatest").parent.awayFromLatest }, 2000)
+    tryVerify(function() {
+      list.contentY = list.originY
+      return findChild(app, "jumpToLatest").parent.awayFromLatest
+    }, 3000)
     app.showFloatingDay()
     verify(app.floatingDayLabel !== "", "the topmost message's day")
     tryVerify(function() { return pill.shown })
