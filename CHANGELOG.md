@@ -2,6 +2,11 @@
 
 ## Unreleased (fork)
 
+- Picked messages can be deleted together from the selection bar: for you,
+  or for everyone when they are all yours, after one confirmation, one
+  WhatsApp action at a time, with a single notice at the end. With the
+  matching wacli a delete goes through the running sync instead of stopping
+  it.
 - In a group, the photo (or initials, in the color of their name) of whoever
   wrote sits beside the last message of each of their runs, in a column that
   keeps the run aligned. The bar dropdown keeps its narrow bubbles without it.

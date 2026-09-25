@@ -1659,6 +1659,37 @@ Item {
     return true
   }
 
+  // Delete the picked messages: for you, or for everyone when all are yours.
+  readonly property bool selectionAllMine: {
+    var picked = root.selectingMessages ? root.selectedMessages() : []
+    return picked.length > 0 && picked.every(function(item) { return item.from_me === true })
+  }
+  function requestDeleteSelection() {
+    if (selectedMessageIds.length === 0) return false
+    batchDeleteConfirm.open()
+    return true
+  }
+  function deleteSelection(forMe) {
+    var items = selectedMessages()
+    var origin = forwardOriginRef
+    batchDeleteConfirm.close()
+    if (items.length === 0 || (forMe !== true && !selectionAllMine)) return false
+    if (demoMode) {
+      var ids = items.map(function(item) { return String(item.id) })
+      demoItems = forMe === true
+        ? demoItems.filter(function(item) { return ids.indexOf(String(item.id)) < 0 })
+        : demoItems.map(function(item) {
+            return ids.indexOf(String(item.id)) < 0 ? item : Object.assign({}, item, { revoked: true, text: "" }) })
+      cancelSelection()
+      showToast(items.length === 1 ? "message deleted" : items.length + " messages deleted")
+      return true
+    }
+    if (!service || !service.deleteMany(origin, items, forMe === true, "app")) return false
+    cancelSelection()
+    showToast("deleting " + (items.length === 1 ? "1 message" : items.length + " messages") + "…")
+    return true
+  }
+
   function openForwardDialog() {
     var items = selectedMessages()
     if (items.length === 0) return false
@@ -1982,6 +2013,16 @@ Item {
       root.showToast((action === "unread" ? "could not mark unread · " : "could not mark read · ")
         + String(message || "WhatsApp did not answer"))
     }
+    function onDeleteBatchFinished(summary) {
+      if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
+      var deleted = Number(summary.total || 0) - Number(summary.failed || 0)
+      if (Number(summary.failed || 0) === 0)
+        root.showToast(deleted === 1 ? "message deleted" : deleted + " messages deleted")
+      else
+        root.showToast(Number(summary.failed) + " of " + Number(summary.total)
+          + " could not be deleted" + (summary.errors && summary.errors.length > 0
+            ? " · " + String(summary.errors[0]) : ""))
+    }
     function onForwardBatchFinished(summary) {
       if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
       var targets = summary.targets || []
@@ -1999,8 +2040,8 @@ Item {
       var sameChat = key === root.composerChatKey
       var kind = String(details && details.kind || root.pendingWriteKind)
       var request = details && details.request ? details.request : ({})
-      // A forward batch reports its failures together when it ends.
-      if (kind === "forward" && request.batch === true) return
+      // A batch reports its failures together when it ends.
+      if ((kind === "forward" || kind === "delete") && request.batch === true) return
       if (kind === "send-new" && root.contactDraftSending) {
         root.contactDraftSending = false
         root.contactDraftError = String(message || "The message could not be sent.")
@@ -2101,7 +2142,7 @@ Item {
       Shortcut {
         sequence: "Escape"
         context: Qt.WindowShortcut
-        enabled: root.selectingMessages && !forwardPicker.opened
+        enabled: root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
         onActivated: root.cancelSelection()
       }
 
@@ -3175,7 +3216,8 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(6)
               Repeater {
-                model: [{ id: "copy", label: "Copy" }, { id: "forward", label: "Forward" }]
+                model: [{ id: "delete", label: "Delete" }, { id: "copy", label: "Copy" },
+                  { id: "forward", label: "Forward" }]
                 delegate: Rectangle {
                   id: selectionAction
                   required property var modelData
@@ -3193,7 +3235,8 @@ Item {
                     id: selectionActionLabel
                     anchors.centerIn: parent
                     text: selectionAction.modelData.label
-                    color: selectionAction.primary ? root.background : root.foreground
+                    color: selectionAction.primary ? root.background
+                      : selectionAction.modelData.id === "delete" ? root.urgent : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.weight: selectionAction.primary ? Font.Bold : Font.Normal
@@ -3201,7 +3244,9 @@ Item {
                   HoverHandler { id: selectionActionHover; cursorShape: Qt.PointingHandCursor }
                   TapHandler {
                     enabled: selectionAction.enabledHere
-                    onTapped: selectionAction.primary ? root.openForwardDialog() : root.copySelection()
+                    onTapped: selectionAction.primary ? root.openForwardDialog()
+                      : selectionAction.modelData.id === "delete" ? root.requestDeleteSelection()
+                      : root.copySelection()
                   }
                 }
               }
@@ -4623,6 +4668,87 @@ Item {
           elide: Text.ElideRight
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
+        }
+      }
+
+      // Deleting several picked messages at once.
+      Popup {
+        id: batchDeleteConfirm
+        objectName: "batchDeleteConfirm"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(Style.space(400), window.width - Style.space(28))
+        height: batchDeleteColumn.implicitHeight + Style.space(28)
+        padding: Style.space(14)
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+          radius: Style.cornerRadius
+          color: root.background
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+        }
+        contentItem: Column {
+          id: batchDeleteColumn
+          spacing: Style.space(12)
+          Text {
+            textFormat: Text.PlainText
+            objectName: "batchDeleteTitle"
+            text: root.selectedMessageIds.length === 1 ? "Delete 1 message?"
+              : "Delete " + root.selectedMessageIds.length + " messages?"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+          }
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: root.selectionAllMine
+              ? "For you, they disappear from this device's history. For everyone, WhatsApp may refuse older ones; the rest are gone for everyone."
+              : "Some are not yours, so they can only be deleted for you."
+            color: root.dim
+            wrapMode: Text.Wrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Row {
+            anchors.right: parent.right
+            spacing: Style.space(8)
+            Repeater {
+              model: [
+                { id: "cancel", label: "Cancel" },
+                { id: "me", label: "Delete for me" },
+                { id: "all", label: "Delete for everyone" }
+              ]
+              delegate: Rectangle {
+                id: batchDeleteButton
+                required property var modelData
+                objectName: "batchDelete-" + modelData.id
+                visible: modelData.id !== "all" || root.selectionAllMine
+                width: batchDeleteLabel.implicitWidth + Style.space(24)
+                height: Style.space(34)
+                radius: Style.cornerRadius
+                color: modelData.id === "cancel" ? Style.normalFillFor(root.foreground, root.accent) : root.urgent
+                Text {
+                  textFormat: Text.PlainText
+                  id: batchDeleteLabel
+                  anchors.centerIn: parent
+                  text: batchDeleteButton.modelData.label
+                  color: batchDeleteButton.modelData.id === "cancel" ? root.foreground : root.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                  onTapped: {
+                    if (batchDeleteButton.modelData.id === "cancel") batchDeleteConfirm.close()
+                    else root.deleteSelection(batchDeleteButton.modelData.id === "me")
+                  }
+                }
+              }
+            }
+          }
         }
       }
 

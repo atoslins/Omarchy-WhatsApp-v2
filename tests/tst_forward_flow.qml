@@ -129,7 +129,7 @@ TestCase {
     verify(finished !== null, "the batch reports when it ends")
     compare(finished.failed, 0)
     compare(finished.targets.length, 2)
-    compare(service.forwardBatch, null)
+    compare(service.writeBatch, null)
   }
 
   function test_a_failed_forward_is_counted_and_the_rest_go_on() {
@@ -155,5 +155,58 @@ TestCase {
     var service = createService()
     verify(!service.forwardMany(origin, [{ id: "M1" }],
       [{ account: "home", jid: "a@s.whatsapp.net" }], "", "app"))
+  }
+
+  // L224: the selection bar also deletes, one WhatsApp action at a time.
+  function test_the_service_deletes_picked_messages_one_by_one() {
+    var service = createService()
+    var finished = null
+    service.deleteBatchFinished.connect(function(summary) { finished = summary })
+    var process = findChild(service, "writeProcess")
+    var mine = [{ id: "M1", from_me: true, timestamp: 1 }, { id: "M2", from_me: true, timestamp: 2 }]
+    verify(service.deleteMany(origin, mine, false, "app"))
+    var first = JSON.parse(process.payload)
+    compare(first.id, "M1")
+    compare(first.for_me, false)
+    process.running = true
+    finish(service, 1, { ok: false, error: "Too old to delete for everyone." })
+    compare(JSON.parse(process.payload).id, "M2", "the rest still go")
+    process.running = true
+    finish(service, 0, { ok: true, kind: "delete" })
+    verify(finished !== null)
+    compare(finished.total, 2)
+    compare(finished.failed, 1)
+    compare(finished.errors, ["Too old to delete for everyone."])
+    compare(service.writeBatch, null)
+  }
+
+  function test_only_your_own_messages_go_for_everyone() {
+    var service = createService()
+    var mixed = [{ id: "M1", from_me: true }, { id: "T1", from_me: false }]
+    verify(!service.deleteMany(origin, mixed, false, "app"), "not all yours: not for everyone")
+    verify(service.deleteMany(origin, mixed, true, "app"), "for you is always possible")
+    compare(JSON.parse(findChild(service, "writeProcess").payload).for_me, true)
+  }
+
+  function test_the_bar_deletes_the_picked_messages_after_asking() {
+    var app = createTemporaryObject(appComponent, testCase)
+    verify(app.startForward(app.demoItems[1]))       // yours
+    verify(app.toggleMessageSelection(app.demoItems[0])) // theirs
+    verify(app.requestDeleteSelection())
+    var dialog = findChild(app, "batchDeleteConfirm")
+    verify(dialog.opened)
+    compare(findChild(dialog.contentItem, "batchDeleteTitle").text, "Delete 2 messages?")
+    verify(!findChild(dialog.contentItem, "batchDelete-all").visible, "someone else's message: for you only")
+    verify(app.deleteSelection(true))
+    verify(!dialog.opened)
+    verify(!app.selectingMessages)
+    verify(app.demoItems.every(function(item) { return item.id !== "demo-5" && item.id !== "demo-1" }))
+    // All yours: for everyone leaves the placeholder.
+    verify(app.startForward(app.demoItems[0]))
+    compare(app.demoItems[0].from_me, true)
+    verify(app.requestDeleteSelection())
+    verify(findChild(dialog.contentItem, "batchDelete-all").visible)
+    verify(app.deleteSelection(false))
+    verify(app.demoItems[0].revoked)
   }
 }

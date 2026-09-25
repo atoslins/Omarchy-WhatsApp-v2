@@ -445,6 +445,8 @@ Item {
   signal writeFailed(string message, var chatRef, var details, string owner)
   // A forward to several chats ended: who got it, and what failed.
   signal forwardBatchFinished(var summary)
+  // Several messages deleted together: how many went, and what failed.
+  signal deleteBatchFinished(var summary)
   signal controlCompleted(string kind)
   signal controlFailed(string message)
   signal settingsCompleted()
@@ -642,7 +644,7 @@ Item {
       runNextDiscard()
       // Once the process that just ended is fully gone.
       if (sendQueue.length > 0) Qt.callLater(runNextQueuedSend)
-      else if (forwardBatch) Qt.callLater(runNextForwardJob)
+      else if (writeBatch) Qt.callLater(runNextBatchJob)
     }
   }
   function search(value) {
@@ -1081,8 +1083,8 @@ Item {
   // Several messages to several chats of the same account, with an optional
   // note after them in each chat. One WhatsApp action at a time, in order:
   // each chat gets the messages oldest first, then the note.
-  property var forwardJobs: []
-  property var forwardBatch: null
+  property var batchJobs: []
+  property var writeBatch: null
   function forwardMany(originRef, items, targets, note, owner) {
     var origin = AccountModel.chatRef(originRef ? originRef.account : "", originRef ? originRef.jid : "")
     var messages = (Array.isArray(items) ? items : []).filter(function(item) {
@@ -1090,7 +1092,7 @@ Item {
     var chats = (Array.isArray(targets) ? targets : []).filter(function(chat) {
       return chat && String(chat.jid || "") !== ""
         && String(chat.account || "") === String(origin.account || "") })
-    if (origin.jid === "" || messages.length === 0 || chats.length === 0 || forwardBatch) return false
+    if (origin.jid === "" || messages.length === 0 || chats.length === 0 || writeBatch) return false
     var refusal = writeRefusal("forward", ({}), origin)
     if (refusal !== "") {
       errorText = refusal
@@ -1105,49 +1107,74 @@ Item {
       })
       if (text !== "") jobs.push({ kind: "note", text: text, target: chat })
     })
-    forwardBatch = { origin: origin, owner: writeOwner(owner), targets: chats.map(function(chat) {
+    writeBatch = { kind: "forward", origin: origin, owner: writeOwner(owner), targets: chats.map(function(chat) {
       return { account: String(chat.account || ""), jid: String(chat.jid), name: String(chat.name || "") } }),
       total: jobs.length, done: 0, failed: 0, errors: [], note: text }
-    forwardJobs = jobs
-    runNextForwardJob()
+    batchJobs = jobs
+    runNextBatchJob()
     return true
   }
-  function runNextForwardJob() {
-    if (!forwardBatch) return false
-    while (!writing && !writeProcess.running && sendQueue.length === 0 && forwardJobs.length > 0) {
-      var job = forwardJobs[0]
-      forwardJobs = forwardJobs.slice(1)
+  function runNextBatchJob() {
+    if (!writeBatch) return false
+    while (!writing && !writeProcess.running && sendQueue.length === 0 && batchJobs.length > 0) {
+      var job = batchJobs[0]
+      batchJobs = batchJobs.slice(1)
       var started = job.kind === "note"
-        ? sendText(AccountModel.refOf(job.target), job.text, "", [], forwardBatch.owner)
+        ? sendText(AccountModel.refOf(job.target), job.text, "", [], writeBatch.owner)
+        : job.kind === "delete"
+        ? runWriteForChat("delete", { id: String(job.item.id), for_me: job.forMe === true,
+            batch: true }, writeBatch.origin, writeBatch.owner)
         : runWriteForChat("forward", { id: String(job.item.id), to_jid: String(job.target.jid),
-            batch: true }, forwardBatch.origin, forwardBatch.owner)
+            batch: true }, writeBatch.origin, writeBatch.owner)
       if (job.kind === "note") {
         // The note is one more queued text; it reports like any send.
-        finishForwardJob(started, started ? "" : (errorText || "The note could not be sent."))
+        finishBatchJob(started, started ? "" : (errorText || "The note could not be sent."))
         continue
       }
       if (started) return true
-      finishForwardJob(false, errorText || "WhatsApp could not forward that message.")
+      finishBatchJob(false, errorText || (job.kind === "delete"
+        ? "WhatsApp could not delete that message." : "WhatsApp could not forward that message."))
     }
-    if (forwardJobs.length === 0 && !writing && !writeProcess.running) endForwardBatch()
+    if (batchJobs.length === 0 && !writing && !writeProcess.running) endBatch()
     return false
   }
-  function finishForwardJob(ok, message) {
-    if (!forwardBatch) return
-    var next = Object.assign({}, forwardBatch)
+  function finishBatchJob(ok, message) {
+    if (!writeBatch) return
+    var next = Object.assign({}, writeBatch)
     next.done += 1
     if (!ok) {
       next.failed += 1
       if (String(message || "") !== "" && next.errors.indexOf(String(message)) < 0)
         next.errors = next.errors.concat([String(message)])
     }
-    forwardBatch = next
+    writeBatch = next
   }
-  function endForwardBatch() {
-    if (!forwardBatch || forwardJobs.length > 0) return
-    var summary = forwardBatch
-    forwardBatch = null
-    forwardBatchFinished(summary)
+  function endBatch() {
+    if (!writeBatch || batchJobs.length > 0) return
+    var summary = writeBatch
+    writeBatch = null
+    if (summary.kind === "delete") deleteBatchFinished(summary)
+    else forwardBatchFinished(summary)
+  }
+  // Several messages of one chat deleted together, for you or (all yours)
+  // for everyone, one WhatsApp action at a time.
+  function deleteMany(chatRef, items, forMe, owner) {
+    var origin = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    var messages = (Array.isArray(items) ? items : []).filter(function(item) {
+      return item && String(item.id || "") !== "" && item.pending !== true && item.revoked !== true })
+    if (origin.jid === "" || messages.length === 0 || writeBatch) return false
+    if (forMe !== true && messages.some(function(item) { return item.from_me !== true })) return false
+    var refusal = writeRefusal("delete", ({}), origin)
+    if (refusal !== "") {
+      errorText = refusal
+      writeFailed(refusal, origin, ({ kind: "delete" }), writeOwner(owner))
+      return false
+    }
+    writeBatch = { kind: "delete", origin: origin, owner: writeOwner(owner), forMe: forMe === true,
+      total: messages.length, done: 0, failed: 0, errors: [] }
+    batchJobs = messages.map(function(item) { return { kind: "delete", item: item, forMe: forMe === true } })
+    runNextBatchJob()
+    return true
   }
   property var lastWriteResult: ({})
   function exportChat(chatRef, destination, owner) {
@@ -2320,11 +2347,11 @@ Item {
         // The failed text stays on screen as a bubble to retry, so surfaces
         // must not also put it back into the composer.
         if (finishedKind === "send") details.pending_kept = true
-        if (finishedKind === "forward" && finishedRequest.batch === true)
-          root.finishForwardJob(false, message)
+        if ((finishedKind === "forward" || finishedKind === "delete") && finishedRequest.batch === true)
+          root.finishBatchJob(false, message)
         root.writeFailed(message, finishedChat, details, finishedOwner)
         root.runNextQueuedSend()
-        root.runNextForwardJob()
+        root.runNextBatchJob()
         return
       }
       if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
@@ -2355,14 +2382,14 @@ Item {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
       if (["contact-alias", "contact-tag", "download-pending"].indexOf(finishedKind) >= 0
           && root.chatDetailsWanted) Qt.callLater(root.refreshChatDetails)
-      if (finishedKind === "forward" && finishedRequest.batch === true)
-        root.finishForwardJob(true, "")
+      if ((finishedKind === "forward" || finishedKind === "delete") && finishedRequest.batch === true)
+        root.finishBatchJob(true, "")
       // What the helper answered, for surfaces that report it (exports, downloads).
       root.lastWriteResult = payload
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
       // Queued texts go before anything a handler above started later.
       root.runNextQueuedSend()
-      root.runNextForwardJob()
+      root.runNextBatchJob()
       if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()
     }
