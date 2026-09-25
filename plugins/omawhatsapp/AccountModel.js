@@ -257,3 +257,14 @@ function hasStoredMessages(messages) {
     if (items[i] && items[i].pending !== true) return true
   return false
 }
+
+// Two messages form one run when the same person sent them within ten
+// minutes: timelines tighten the gap and name the sender once.
+function sameRun(older, newer) {
+  if (!older || !newer) return false
+  if ((older.from_me === true) !== (newer.from_me === true)) return false
+  if (older.from_me !== true
+      && String(older.sender_jid || older.sender || "") !== String(newer.sender_jid || newer.sender || ""))
+    return false
+  return Math.abs(Number(newer.timestamp || 0) - Number(older.timestamp || 0)) < 600
+}

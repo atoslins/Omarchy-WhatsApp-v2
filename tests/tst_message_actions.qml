@@ -89,6 +89,8 @@ TestCase {
   function test_a_narrow_row_with_room_puts_the_actions_beside_the_bubble() {
     // The dropdown is narrow; with the actions inside, they covered the text.
     var bubble = createTemporaryObject(bubbleComponent, testCase, { narrow: true, width: 340 })
+    // The time now shares the text's line, so "room" means a short text.
+    bubble.message = Object.assign({}, bubble.message, { text: "Ok" })
     var actions = findChild(bubble, "messageActions")
     var surface = findChild(bubble, "messageBubbleSurface")
     hoverRow(bubble)

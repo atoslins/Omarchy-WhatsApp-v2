@@ -1358,7 +1358,8 @@ Panel {
             anchors.left: parent.left
             anchors.right: parent.right
             clip: true
-            spacing: Style.space(7)
+            // Gaps come from each row: tight inside one person's run.
+            spacing: 0
             model: root.sourceMessages
             currentIndex: root.messageIndex
             verticalLayoutDirection: ListView.BottomToTop
@@ -1372,10 +1373,22 @@ Panel {
               width: messageList.width
               z: compactMessage.raised ? 3 : 0
               readonly property bool startsDay: TimeFormat.startsDay(root.sourceMessages, index)
-              height: compactDay.height + compactUnread.height + compactMessage.height
+              readonly property bool joinsAbove: !startsDay && index !== root.unreadDividerIndex
+                && AccountModel.sameRun(root.sourceMessages[index + 1], modelData)
+              readonly property bool joinsBelow: index > 0
+                && !TimeFormat.startsDay(root.sourceMessages, index - 1)
+                && index - 1 !== root.unreadDividerIndex
+                && AccountModel.sameRun(modelData, root.sourceMessages[index - 1])
+              height: compactGap.height + compactDay.height + compactUnread.height + compactMessage.height
+              Item {
+                id: compactGap
+                width: parent.width
+                height: compactRow.joinsAbove ? Style.space(2) : Style.space(7)
+              }
               Item {
                 id: compactDay
                 objectName: "dayHeader"
+                anchors.top: compactGap.bottom
                 visible: compactRow.startsDay
                 width: parent.width
                 height: visible ? Style.space(34) : 0
@@ -1442,6 +1455,8 @@ Panel {
                 dimmer: root.muted
                 fontFamily: root.fontFamily
                 groupChat: root.currentChat && root.currentChat.kind === "group"
+                joinsAbove: compactRow.joinsAbove
+                joinsBelow: compactRow.joinsBelow
                 selected: index === root.messageIndex
                 narrow: true
                 surfaceActive: root.opened && root.viewMode === "conversation"

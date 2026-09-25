@@ -43,6 +43,23 @@ Item {
   // Retry or discard a message that failed to send.
   signal pendingSendRequested(string action)
 
+  // Neighbours from the same person, as the timeline sees them: the bubble
+  // tightens its corners where they join and names the sender once.
+  property bool joinsAbove: false
+  property bool joinsBelow: false
+  // One color per person in a group, derived from the theme's accent so it
+  // follows the theme: the same hue turned, same strength.
+  function senderColor(key) {
+    var text = String(key || "")
+    if (text === "") return root.accent
+    var hash = 0
+    for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0
+    var base = root.accent.hslHue >= 0 ? root.accent.hslHue : 0.6
+    var saturation = Math.max(0.45, root.accent.hslSaturation)
+    var lightness = Math.min(0.78, Math.max(0.62, root.accent.hslLightness))
+    return Qt.hsla((base + (hash % 8) / 8) % 1, saturation, lightness, 1)
+  }
+
   // Sent from here, not yet stored by the mirror: shown at once, with no
   // actions that need a WhatsApp message id.
   readonly property bool pending: message && message.pending === true
@@ -154,10 +171,22 @@ Item {
     + (message.edited === true ? editedMetrics.advanceWidth + Style.space(6) : 0)
     + (message.starred === true ? Style.space(16) : 0)
     + (showsTicks ? Style.space(18) : 0)
+    + (pending ? Style.space(16) : 0)
+  // Room for a short text and its time on one line.
   readonly property real naturalTextWidth: Math.max(
-    messageMetrics.advanceWidth,
-    senderMetrics.advanceWidth,
-    metadataWidth)
+    messageMetrics.advanceWidth + Style.space(10) + metadataWidth,
+    senderMetrics.advanceWidth)
+  // The text ends the bubble and its last line leaves room for the time.
+  readonly property bool textEndsBubble: messageText.visible && links.length === 0
+    && buttonItems.length === 0 && poll === null && contactCards.length === 0
+  readonly property real lastLineEnd: {
+    // Named so the binding follows the text's layout.
+    var layout = [messageText.width, messageText.contentHeight, messageText.text]
+    return textEndsBubble && layout.length > 0
+      ? messageText.positionToRectangle(messageText.length).x : 0
+  }
+  readonly property bool metaInline: !sticker && textEndsBubble
+    && lastLineEnd + Style.space(10) + messageMeta.width <= messageText.width
   readonly property bool hasMedia: String(message.media_type || "") !== ""
   // Stickers stand on their own, as on the phone: no bubble, a fixed size.
   readonly property bool sticker: String(message.media_type || "") === "sticker"
@@ -238,10 +267,22 @@ Item {
     anchors.right: root.message.from_me ? parent.right : undefined
     anchors.left: root.message.from_me ? undefined : parent.left
     width: root.desiredWidth
-    height: bubbleColumn.implicitHeight + Style.space(18)
-    radius: Style.cornerRadius
+    // Time and ticks share the last line of text when it has room, as on
+    // the phone, instead of taking a line of their own.
+    height: bubbleColumn.implicitHeight + Style.space(9) + (root.sticker
+      ? messageMeta.height + Style.space(4)
+      : root.metaInline ? Style.space(9) : messageMeta.height + Style.space(11))
+    // Rounded, with a tight corner on the sender's side where messages of
+    // one person join and at the bottom of the last one, in place of a tail.
+    readonly property real roundCorner: Style.space(12)
+    readonly property real tightCorner: Style.space(4)
+    radius: roundCorner
+    topLeftRadius: !root.message.from_me && root.joinsAbove ? tightCorner : roundCorner
+    bottomLeftRadius: root.message.from_me ? roundCorner : tightCorner
+    topRightRadius: root.message.from_me && root.joinsAbove ? tightCorner : roundCorner
+    bottomRightRadius: root.message.from_me ? tightCorner : roundCorner
     color: root.sticker ? "transparent" : root.message.from_me
-      ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
+      ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
       : Style.normalFillFor(root.foreground, root.accent)
     border.width: root.selected ? 1 : 0
     border.color: root.accent
@@ -268,28 +309,22 @@ Item {
 
       Text {
         textFormat: Text.PlainText
-        visible: !root.message.from_me && root.groupChat
+        objectName: "messageSender"
+        visible: !root.message.from_me && root.groupChat && !root.joinsAbove
         text: String(root.message.sender || "")
-        color: root.accent
+        color: root.senderColor(root.message.sender_jid || root.message.sender)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
+        font.weight: Font.DemiBold
       }
 
       Rectangle {
         visible: String(root.message.quoted_id || "") !== ""
         width: parent.width
         height: quoteColumn.implicitHeight + Style.space(12)
-        radius: Style.cornerRadius
-        color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.52)
-
-        Rectangle {
-          anchors.left: parent.left
-          anchors.top: parent.top
-          anchors.bottom: parent.bottom
-          width: Style.space(3)
-          radius: width / 2
-          color: root.accent
-        }
+        objectName: "messageQuote"
+        radius: Style.space(8)
+        color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.42)
 
         Column {
           id: quoteColumn
@@ -301,10 +336,13 @@ Item {
           spacing: Style.space(2)
           Text {
             textFormat: Text.PlainText
+            objectName: "messageQuoteAuthor"
             text: String(root.message.quoted_sender || "WhatsApp")
-            color: root.accent
+            color: String(root.message.quoted_sender || "") === "You" ? root.accent
+              : root.senderColor(root.message.quoted_sender)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            font.weight: Font.DemiBold
           }
           Text {
             textFormat: Text.PlainText
@@ -683,97 +721,102 @@ Item {
         }
       }
 
-      // Time and marks; under a sticker they sit in a small pill, as on
-      // the phone, instead of floating on their own.
-      Item {
-        objectName: "messageMeta"
-        anchors.right: parent.right
-        width: metaRow.implicitWidth + (root.sticker ? Style.space(14) : 0)
-        height: metaRow.implicitHeight + (root.sticker ? Style.space(6) : 0)
-        Rectangle {
-          objectName: "stickerTimePill"
-          visible: root.sticker
-          anchors.fill: parent
-          radius: height / 2
-          color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
-            root.foreground.b, 0.12))
-        }
-      Row {
-        id: metaRow
-        anchors.centerIn: parent
-        spacing: Style.space(6)
-        Text {
-          textFormat: Text.PlainText
-          visible: root.message.edited === true
-          text: "edited"
-          color: root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.italic: true
-        }
-        Text {
-          textFormat: Text.PlainText
-          visible: root.message.starred === true
-          text: "󰓎"
-          color: root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-        // A message still on its way from here shows a clock until the stored
-        // row replaces it, or an alert when it could not be sent.
-        Text {
-          textFormat: Text.PlainText
-          objectName: "messagePending"
-          visible: root.pending
-          text: root.sendFailed ? "󰀦" : "󰅐"
-          color: root.sendFailed ? Color.urgent : root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          HoverHandler { id: pendingHover }
-          Ui.PanelToolTip {
-            visible: pendingHover.hovered
-            text: root.sendFailed ? "Not sent · right-click to try again"
-              : root.message.send_state === "sent" ? "Sent · saving it on this computer"
-              : root.message.send_state === "queued" ? "Waiting for the message before it…"
-              : "Sending…"
-          }
-        }
-        Text {
-          textFormat: Text.PlainText
-          objectName: "messageTimestamp"
-          text: root.timestampText
-          color: root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          HoverHandler { id: timestampHover }
-          Ui.PanelToolTip { visible: timestampHover.hovered; text: root.fullTimestampText }
-        }
-        // Ticks only for a state wacli recorded: a guess would be a claim the
-        // data cannot back.
-        Text {
-          textFormat: Text.PlainText
-          objectName: "messageTicks"
-          visible: root.showsTicks
-          text: root.deliveryStatus === "sent" ? "󰄬"
-            : root.deliveryStatus === "pending" ? "󰅐"
-            : root.deliveryStatus === "error" ? "󰀦" : "󰄭"
-          color: root.deliveryStatus === "read" || root.deliveryStatus === "played" ? root.accent
-            : root.deliveryStatus === "error" ? Color.urgent : root.dimmer
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          HoverHandler { id: ticksHover }
-          Ui.PanelToolTip {
-            visible: ticksHover.hovered
-            text: root.deliveryStatus === "sent" ? "Sent"
-              : root.deliveryStatus === "delivered" ? (root.groupChat ? "Delivered to everyone" : "Delivered")
-              : root.deliveryStatus === "read" ? (root.groupChat ? "Read by everyone" : "Read")
-              : root.deliveryStatus === "played" ? (root.groupChat ? "Played by everyone" : "Played")
-              : root.deliveryStatus === "pending" ? "Waiting to go out from your phone"
-              : "Your phone could not send it"
-          }
+    }
+
+    // Time and marks; under a sticker they sit in a small pill, as on
+    // the phone, instead of floating on their own.
+    Item {
+      id: messageMeta
+      objectName: "messageMeta"
+      anchors.right: parent.right
+      anchors.rightMargin: root.sticker ? 0 : Style.space(10)
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: root.sticker ? 0 : Style.space(6)
+      width: metaRow.implicitWidth + (root.sticker ? Style.space(14) : 0)
+      height: metaRow.implicitHeight + (root.sticker ? Style.space(6) : 0)
+      Rectangle {
+        objectName: "stickerTimePill"
+        visible: root.sticker
+        anchors.fill: parent
+        radius: height / 2
+        color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
+          root.foreground.b, 0.12))
+      }
+    Row {
+      id: metaRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      Text {
+        textFormat: Text.PlainText
+        visible: root.message.edited === true
+        text: "edited"
+        color: root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.italic: true
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: root.message.starred === true
+        text: "󰓎"
+        color: root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      // A message still on its way from here shows a clock until the stored
+      // row replaces it, or an alert when it could not be sent.
+      Text {
+        textFormat: Text.PlainText
+        objectName: "messagePending"
+        visible: root.pending
+        text: root.sendFailed ? "󰀦" : "󰅐"
+        color: root.sendFailed ? Color.urgent : root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        HoverHandler { id: pendingHover }
+        Ui.PanelToolTip {
+          visible: pendingHover.hovered
+          text: root.sendFailed ? "Not sent · right-click to try again"
+            : root.message.send_state === "sent" ? "Sent · saving it on this computer"
+            : root.message.send_state === "queued" ? "Waiting for the message before it…"
+            : "Sending…"
         }
       }
+      Text {
+        textFormat: Text.PlainText
+        objectName: "messageTimestamp"
+        text: root.timestampText
+        color: root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        HoverHandler { id: timestampHover }
+        Ui.PanelToolTip { visible: timestampHover.hovered; text: root.fullTimestampText }
       }
+      // Ticks only for a state wacli recorded: a guess would be a claim the
+      // data cannot back.
+      Text {
+        textFormat: Text.PlainText
+        objectName: "messageTicks"
+        visible: root.showsTicks
+        text: root.deliveryStatus === "sent" ? "󰄬"
+          : root.deliveryStatus === "pending" ? "󰅐"
+          : root.deliveryStatus === "error" ? "󰀦" : "󰄭"
+        color: root.deliveryStatus === "read" || root.deliveryStatus === "played" ? root.accent
+          : root.deliveryStatus === "error" ? Color.urgent : root.dimmer
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        HoverHandler { id: ticksHover }
+        Ui.PanelToolTip {
+          visible: ticksHover.hovered
+          text: root.deliveryStatus === "sent" ? "Sent"
+            : root.deliveryStatus === "delivered" ? (root.groupChat ? "Delivered to everyone" : "Delivered")
+            : root.deliveryStatus === "read" ? (root.groupChat ? "Read by everyone" : "Read")
+            : root.deliveryStatus === "played" ? (root.groupChat ? "Played by everyone" : "Played")
+            : root.deliveryStatus === "pending" ? "Waiting to go out from your phone"
+            : "Your phone could not send it"
+        }
+      }
+    }
     }
 
     Rectangle {

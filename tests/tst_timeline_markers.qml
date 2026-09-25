@@ -130,6 +130,8 @@ TestCase {
   function test_the_conversation_has_a_scroll_bar_and_page_keys() {
     var app = createTemporaryObject(appComponent, testCase)
     app.opened = true
+    // Grouped runs made the demo timeline short enough to fit; paging needs more.
+    longTimeline(app)
     var list = findChild(app, "messageList")
     tryVerify(function() { return list.count > 0 })
     verify(findChild(app, "messageScrollBar") !== null, "a draggable scroll bar, not only the wheel")

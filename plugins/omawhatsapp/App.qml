@@ -2854,7 +2854,8 @@ Item {
           anchors.right: parent.right
           anchors.margins: Style.space(14)
           clip: true
-          spacing: Style.space(8)
+          // Gaps come from each row: tight inside one person's run, wider between.
+          spacing: 0
           model: root.visibleMessages
           currentIndex: root.cursorIndex
           verticalLayoutDirection: ListView.BottomToTop
@@ -2905,13 +2906,27 @@ Item {
             z: renderedMessage.raised ? 3 : 0
             readonly property bool startsDay: TimeFormat.startsDay(root.visibleMessages, index)
             readonly property bool startsUnread: index === root.unreadDividerIndex
-            height: dayHeader.height + unreadDivider.height + renderedMessage.height
+            // Newest first: the message above on screen is the next index.
+            readonly property bool joinsAbove: !startsDay && !startsUnread
+              && AccountModel.sameRun(root.visibleMessages[index + 1], modelData)
+            readonly property bool joinsBelow: index > 0
+              && !TimeFormat.startsDay(root.visibleMessages, index - 1)
+              && index - 1 !== root.unreadDividerIndex
+              && AccountModel.sameRun(modelData, root.visibleMessages[index - 1])
+            height: groupGap.height + dayHeader.height + unreadDivider.height + renderedMessage.height
+
+            Item {
+              id: groupGap
+              width: parent.width
+              height: messageRow.joinsAbove ? Style.space(2) : Style.space(8)
+            }
 
             // Newest-first list drawn bottom-to-top: the header sits above the
             // oldest message of its day.
             Item {
               id: dayHeader
               objectName: "dayHeader"
+              anchors.top: groupGap.bottom
               visible: messageRow.startsDay
               width: parent.width
               height: visible ? Style.space(40) : 0
@@ -2980,6 +2995,8 @@ Item {
               dimmer: root.dimmer
               fontFamily: root.fontFamily
               groupChat: root.displayKind === "group"
+              joinsAbove: messageRow.joinsAbove
+              joinsBelow: messageRow.joinsBelow
               selected: root.keyboardContext === "messages"
                 && index === root.cursorIndex
               narrow: root.narrow

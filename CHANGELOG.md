@@ -2,6 +2,11 @@
 
 ## Unreleased (fork)
 
+- Restyle, phase 1 (bubbles and text): one person's messages form a run
+  with tight gaps and a tight corner on their side in place of a tail, and in
+  groups the name shows once per run in a color of its own, derived from the
+  theme accent. The time and ticks sit on the last line of text when there is
+  room. Quotes are an inset block with the author in their color.
 - Forwarding is quick and says where it went. With a wacli build that
   delegates `messages forward`, the sync is no longer paused for it (it took
   seconds and could lose what arrived meanwhile); a toast names the chat it

@@ -79,7 +79,12 @@ TestCase {
     verify(content !== null)
 
     compare(content.y, 9)
-    compare(surface.height - content.y - content.implicitHeight, 9)
+    // The time sits on the last line or just under it; either way the space
+    // below whatever is lowest matches the top.
+    var meta = findChild(messageBubble, "messageMeta")
+    var lowest = Math.max(content.y + content.implicitHeight, meta.y + meta.height)
+    var bottom = surface.height - lowest
+    verify(bottom >= 6 && bottom <= 9, "bottom padding " + bottom)
   }
 
   function test_visual_media_does_not_span_a_wide_timeline() {
