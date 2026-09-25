@@ -254,6 +254,36 @@ add latency before the unavoidable pause-write-restart fallback.
 - An account whose store lives outside wacli's state directory needs a systemd
   drop-in adding that path to `ReadWritePaths`. The template documents it
   rather than guessing.
-- The full window has no account switcher, by design: the rail is merged and
-  the open chat decides the account. If per-account filtering is ever wanted,
-  the rows already carry what a filter would need.
+- The rail stays merged and the open chat decides the account; the account
+  chips above it filter the rail to one account.
+
+## Day to day with several accounts (2026-09-25)
+
+A survey of what gets in the way once more than one phone is linked, ranked
+by how often it bites:
+
+1. **One account cannot be quieted.** Notifications were all or nothing.
+   Delivered: Settings → Accounts has a Notifications switch per account. A
+   muted account still advances its watermark, so turning it back on does not
+   replay what arrived meanwhile.
+2. **Sync was per account in the helper but not on screen.** Only the open
+   chat's account could be paused. Delivered: each account card has its own
+   Background sync switch.
+3. **No way to unlink.** Removing a linked device meant the terminal.
+   Delivered: Unlink on the card, which asks first and names the account; the
+   helper refuses unless the confirmation carries the name, logs the device
+   out, drops a named account from wacli's config and keeps the local
+   archive.
+4. **Which account is this chat?** Only a text prefix told. Delivered: each
+   account has a color, in configured order (the first is the theme accent),
+   shown as a bar on the row's edge in the list and the dropdown, on the
+   account chips and on the account name in the header. It is not a dot on
+   the photo, where it would read as "online".
+5. **Forwarding stays inside one account.** The forward dialog only offers
+   chats of the message's own account (`App.qml`, `toggleForwardTarget`).
+   Next candidate: forwarding to another account's chat means downloading the
+   media and sending it again from that account, since WhatsApp forwards only
+   within a session.
+6. **New chat uses the account the helper serves.** The dialog names it but
+   does not let you choose. Candidate after forwarding: an account choice in
+   the dialog when more than one is linked.

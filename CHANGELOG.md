@@ -2,6 +2,13 @@
 
 ## Unreleased (fork)
 
+- Settings → Accounts has one card per linked account: its state, its own
+  background sync and, with more than one account, its own notifications, so
+  one account can stay silent without replaying its messages later. Unlink
+  asks first and names the account: the phone loses that linked device and
+  the chats already here stay on disk. With several accounts, each chat's
+  photo carries its account's color, in the list, the header and the bar
+  dropdown.
 - First run: with nothing linked, the window welcomes you instead of an empty
   list: what OmaWhatsApp is, what stays on this computer, the three steps to
   link the phone and a Show QR code button that opens the code in a terminal;

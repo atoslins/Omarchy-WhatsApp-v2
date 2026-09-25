@@ -250,6 +250,11 @@ Item {
     && root.selectedStatusReady && root.service.offlineMode
   readonly property bool multiAccount: root.demoMode
     ? true : !!root.service && root.service.multiAccount === true
+  // The account color beside a chat, only while several are linked.
+  function accountMark(chat) {
+    if (!root.multiAccount || !chat) return -1
+    return AccountModel.accountIndex(root.accountEntries, String(chat.account || ""))
+  }
   readonly property var selectedChat: {
     var jid = root.demoMode ? root.demoSelectedJid
       : (root.service ? root.service.selectedChatJid : "")
@@ -1912,6 +1917,10 @@ Item {
     var ref = currentChatRef()
     Qt.callLater(function() { if (root.service) root.service.composerActivity(ref, composer.text) })
   }
+  function composerEmptied() {
+    if (demoMode || !service || typeof service.composerActivity !== "function") return
+    service.composerActivity(currentChatRef(), "")
+  }
 
   function previewKindGlyph(kind) {
     return AccountModel.previewKindGlyph(kind)
@@ -3026,6 +3035,19 @@ Item {
 
                 HoverHandler { id: chatRowHover }
 
+                // Which account the chat belongs to, when several are linked.
+                Rectangle {
+                  objectName: "chatAccountStripe"
+                  readonly property int mark: root.accountMark(chatRow.modelData)
+                  visible: mark >= 0
+                  x: Style.space(3)
+                  width: 3
+                  height: Math.round(parent.height * 0.52)
+                  radius: 1.5
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: Tint.accountColor(mark, root.accent)
+                }
+
                 ChatAvatar {
                   showPhoto: root.showAvatars
                   id: chatAvatar
@@ -3516,7 +3538,9 @@ Item {
                   : root.multiAccount && root.selectedChat
                   ? AccountModel.labelOf(root.selectedChat) : ""
                 visible: text !== ""
-                color: root.presenceLine.live ? root.accent : root.dim
+                color: root.presenceLine.live ? root.accent
+                  : root.presenceLine.text === "" && root.accountMark(root.selectedChat) >= 0
+                  ? Tint.accountColor(root.accountMark(root.selectedChat), root.accent) : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
@@ -4670,8 +4694,7 @@ Item {
                   root.updateMentionCompletion()
                   if (text === "") composerFlickable.contentY = 0
                   // An emptied box (sent or deleted) stops "typing…" at once.
-                  if (text === "" && root.service && !root.demoMode)
-                    root.service.composerActivity(root.currentChatRef(), "")
+                  if (text === "") root.composerEmptied()
                 }
                 onCursorPositionChanged: root.updateMentionCompletion()
                 onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)

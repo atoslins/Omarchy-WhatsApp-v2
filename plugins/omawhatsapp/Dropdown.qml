@@ -10,6 +10,7 @@ import "TimeFormat.js" as TimeFormat
 import "ComposerModel.js" as ComposerModel
 import "FormatModel.js" as FormatModel
 import "PresenceModel.js" as PresenceModel
+import "Tint.js" as Tint
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -103,6 +104,10 @@ Panel {
     ? [{ account: "work", label: "work" },
        { account: "personal", label: "personal" }]
     : (service && Array.isArray(service.accounts) ? service.accounts : [])
+  function accountMark(chat) {
+    if (!root.multiAccount || !chat) return -1
+    return AccountModel.accountIndex(root.accountEntries, String(chat.account || ""))
+  }
   // The count in the header toggles this: only chats with unread messages.
   property bool unreadOnly: false
   function badgeTapped(button) {
@@ -727,6 +732,10 @@ Panel {
     var ref = currentChatRef()
     Qt.callLater(function() { if (root.service) root.service.composerActivity(ref, composer.text) })
   }
+  function composerEmptied() {
+    if (demoMode || !service || typeof service.composerActivity !== "function") return
+    service.composerActivity(currentChatRef(), "")
+  }
 
   function timeLabel(value) {
     return TimeFormat.listStamp(value, new Date(),
@@ -1161,9 +1170,11 @@ Panel {
             muted: root.muted
             urgent: root.urgent
             fontFamily: root.fontFamily
-            linkBusy: !!root.service && root.service.accountOperations.linkBusy
-            avatarBusy: !!root.service && root.service.accountOperations.avatarBusy
-            statusMessage: root.service
+            linkBusy: !!root.service && !!root.service.accountOperations
+              && root.service.accountOperations.linkBusy
+            avatarBusy: !!root.service && !!root.service.accountOperations
+              && root.service.accountOperations.avatarBusy
+            statusMessage: root.service && root.service.accountOperations
               ? root.service.accountOperations.statusMessage : ""
             allowAccountLink: !root.demoMode && !!root.service
             onScopeSelected: function(scope) {
@@ -1224,6 +1235,17 @@ Panel {
                   anchors.bottomMargin: 1
                   radius: Style.cornerRadius + 2
                   color: chatRow.current || chatRow.hovered ? root.selected : "transparent"
+                }
+                Rectangle {
+                  objectName: "dropdownAccountStripe"
+                  readonly property int mark: root.accountMark(chatRow.modelData)
+                  visible: mark >= 0
+                  x: Style.space(2)
+                  width: 3
+                  height: Math.round(parent.height * 0.5)
+                  radius: 1.5
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: Tint.accountColor(mark, root.accent)
                 }
                 ChatAvatar {
                   showPhoto: root.showAvatars
@@ -2174,8 +2196,7 @@ Panel {
                     selectByMouse: true
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
-                    onTextChanged: if (text === "" && root.service && !root.demoMode)
-                      root.service.composerActivity(root.currentChatRef(), "")
+                    onTextChanged: if (text === "") root.composerEmptied()
                     readOnly: root.offline
                     onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
                     TapHandler {

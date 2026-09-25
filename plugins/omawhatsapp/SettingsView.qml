@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
+import "Tint.js" as Tint
 
 // Settings as a full window view, in the manner of Omarchy's own apps: a
 // section list on the left, one scrollable page on the right, every row a
@@ -26,6 +27,9 @@ Rectangle {
   signal closeRequested()
 
   property string current: "reading"
+  // The account whose Unlink waits for a second, explicit click.
+  property string unlinkConfirming: ""
+  onCurrentChanged: unlinkConfirming = ""
   // In the narrow layout the section list and a section page take turns.
   property bool narrowPage: false
   readonly property bool live: !demoMode && !!service
@@ -71,9 +75,16 @@ Rectangle {
   }
   onVisibleChanged: if (visible) {
     narrowPage = false
+    unlinkConfirming = ""
     refreshAbout()
   }
   // Demo captures show repository-owned figures, never this machine's.
+  readonly property var demoAccounts: [
+    { account: "work", label: "work", main: true, authenticated: true, online: true,
+      sync_active: true, notifications_muted: false },
+    { account: "personal", label: "personal", main: false, authenticated: true, online: true,
+      sync_active: true, notifications_muted: true }
+  ]
   readonly property var demoAbout: ({
     app_version: "0.14.0", install_mode: "standalone", wacli_version: "0.18.3",
     wacli_minimum_version: "0.17.1", wacli_tested_version: "0.18.3",
@@ -203,14 +214,12 @@ Rectangle {
       return rows
     }
     if (section === "accounts") {
-      var accounts = value("accounts", [])
+      var accounts = demoMode ? demoAccounts : value("accounts", [])
       var list = []
-      for (var a = 0; a < accounts.length; a++) {
-        var item = accounts[a]
-        var state = !item.authenticated ? "not linked"
-          : (item.online === false ? "offline" : (item.sync_active ? "syncing" : "linked"))
-        list.push({ kind: "info", title: item.label || item.account || "primary", value: state })
-      }
+      for (var a = 0; a < accounts.length; a++)
+        list.push({ kind: "account", key: "account-" + String(accounts[a].account || ""),
+          entry: accounts[a], index: a, multi: accounts.length > 1,
+          busy: controlBusy || busy })
       if (list.length === 0) list.push({ kind: "note", text: "No linked account yet." })
       list.push({ kind: "link", key: "link", title: "Link another account",
         subtitle: "Scan the QR code in the terminal that opens.",
@@ -249,10 +258,10 @@ Rectangle {
   }
 
   // The signature of the account whose chat is open (each account has one).
-  readonly property var signature: demoMode && app ? app.demoSignature
+  readonly property var signature: (demoMode && app ? app.demoSignature
     : (live && typeof service.signatureFor === "function"
-      ? service.signatureFor(String(service.selectedChatAccount || ""))
-      : ({ enabled: false, name: "", position: "top" }))
+      ? service.signatureFor(String(service.selectedChatAccount || "")) : null))
+    || ({ enabled: false, name: "", position: "top" })
   function saveSignature(change) {
     var next = Object.assign({}, change)
     if (demoMode && app) {
@@ -261,6 +270,33 @@ Rectangle {
     }
     if (!live) return false
     return service.setPreference("signature", next)
+  }
+
+  function accountState(entry) {
+    if (!entry || entry.authenticated !== true) return "Not linked"
+    if (entry.online === false) return "Paused · nothing is sent or received"
+    return entry.sync_active ? "Syncing" : "Linked · sync is starting"
+  }
+  function accountSync(entry, next) {
+    return live && service.setOnline(next === true, String(entry.account || ""))
+  }
+  function accountNotifications(entry, next) {
+    return live && service.setPreference("account_notifications", next === true, String(entry.account || ""))
+  }
+  function accountLink(entry) {
+    if (!live || !service.accountOperations) return false
+    return entry.main === true
+      ? service.accountOperations.linkMainAccount(String(entry.label || entry.account || ""))
+      : service.accountOperations.linkAccount(String(entry.account || ""))
+  }
+  function accountUnlink(entry) {
+    var name = String(entry && entry.account || "")
+    if (unlinkConfirming !== name) {
+      unlinkConfirming = name
+      return false
+    }
+    unlinkConfirming = ""
+    return live && service.unlinkAccount(name, name)
   }
 
   function runRow(row, next) {
@@ -439,6 +475,7 @@ Rectangle {
             : modelData.kind === "link" ? linkRow
             : modelData.kind === "updates" ? updatesRow
             : modelData.kind === "signature" ? signatureRow
+            : modelData.kind === "account" ? accountRow
             : noteRow
         }
       }
@@ -663,6 +700,202 @@ Rectangle {
                 font.pixelSize: Style.font.bodySmall
                 font.weight: Font.Bold
               }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // One switch inside an account card.
+  component AccountSwitch: Item {
+    id: accountSwitch
+    property string key: ""
+    property string title: ""
+    property string subtitle: ""
+    property bool checked: false
+    property bool busy: false
+    signal toggled(bool next)
+    height: Math.max(accountSwitchToggle.height, accountSwitchText.implicitHeight)
+    Column {
+      id: accountSwitchText
+      anchors.left: parent.left
+      anchors.right: accountSwitchToggle.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: accountSwitch.title
+        color: settings.foreground
+        font.family: settings.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: accountSwitch.subtitle
+        color: settings.dim
+        font.family: settings.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+    ToggleSwitch {
+      id: accountSwitchToggle
+      objectName: accountSwitch.key
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      checked: accountSwitch.checked
+      enabled: settings.live
+      busy: accountSwitch.busy
+      foreground: settings.foreground
+      accent: settings.accent
+      onToggled: accountSwitch.toggled(!checked)
+    }
+  }
+
+  Component {
+    id: accountRow
+    Rectangle {
+      id: accountCard
+      readonly property var row: parent ? parent.row : ({})
+      readonly property var entry: row.entry || ({})
+      readonly property string name: String(entry.account || "")
+      readonly property string label: String(entry.label || entry.account || "primary")
+      readonly property bool linked: entry.authenticated === true
+      readonly property bool confirming: settings.unlinkConfirming !== "" && settings.unlinkConfirming === name
+      objectName: "accountCard-" + name
+      width: parent ? parent.width : 0
+      height: accountColumn.implicitHeight + Style.space(24)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(settings.foreground, settings.accent)
+      Column {
+        id: accountColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(14)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(12)
+        Item {
+          width: parent.width
+          height: Math.max(accountHeading.implicitHeight, accountAction.height)
+          Rectangle {
+            id: accountDot
+            objectName: "accountDot-" + accountCard.name
+            visible: accountCard.row.multi === true
+            width: visible ? Style.space(10) : 0
+            height: width
+            radius: width / 2
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            color: Tint.accountColor(accountCard.row.index, settings.accent)
+          }
+          Column {
+            id: accountHeading
+            anchors.left: accountDot.right
+            anchors.leftMargin: accountDot.visible ? Style.space(10) : 0
+            anchors.right: accountAction.left
+            anchors.rightMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: accountCard.label
+              color: settings.foreground
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            Text {
+              textFormat: Text.PlainText
+              objectName: "accountState-" + accountCard.name
+              width: parent.width
+              wrapMode: Text.Wrap
+              text: settings.accountState(accountCard.entry)
+                + (String(accountCard.entry.error || "") !== "" ? " · " + accountCard.entry.error : "")
+              color: settings.dim
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+          Button {
+            id: accountAction
+            objectName: (accountCard.linked ? "accountUnlink-" : "accountLink-") + accountCard.name
+            visible: !accountCard.confirming
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: accountCard.linked ? "Unlink…" : "Link"
+            enabled: settings.live && accountCard.row.busy !== true
+              && !(settings.value("accountOperations", null) || {}).linkBusy
+            foreground: settings.foreground
+            accent: settings.accent
+            fontFamily: settings.fontFamily
+            bordered: true
+            onClicked: accountCard.linked ? settings.accountUnlink(accountCard.entry)
+              : settings.accountLink(accountCard.entry)
+          }
+        }
+        AccountSwitch {
+          visible: accountCard.linked
+          width: parent.width
+          key: "accountSync-" + accountCard.name
+          title: "Background sync"
+          subtitle: "Receives this account's messages while the app is closed."
+          checked: accountCard.entry.online !== false
+          busy: accountCard.row.busy === true
+          onToggled: function(next) { settings.accountSync(accountCard.entry, next) }
+        }
+        AccountSwitch {
+          visible: accountCard.linked && accountCard.row.multi === true
+          width: parent.width
+          key: "accountNotify-" + accountCard.name
+          title: "Notifications"
+          subtitle: accountCard.entry.notifications_muted === true
+            ? "Silent. Its chats still count in the bar and the list."
+            : "Popups for this account's chats, as set under Notifications."
+          checked: accountCard.entry.notifications_muted !== true
+          busy: accountCard.row.busy === true
+          onToggled: function(next) { settings.accountNotifications(accountCard.entry, next) }
+        }
+        Column {
+          objectName: "accountConfirm-" + accountCard.name
+          visible: accountCard.confirming
+          width: parent.width
+          spacing: Style.space(8)
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Unlink " + accountCard.label + "? Your phone loses this linked device and "
+              + "this computer stops receiving its messages. The chats already here stay on disk; "
+              + "linking again means scanning a new QR code."
+            color: settings.foreground
+            font.family: settings.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Row {
+            spacing: Style.space(8)
+            Button {
+              objectName: "accountUnlinkConfirm-" + accountCard.name
+              text: "Unlink " + accountCard.label
+              enabled: settings.live && accountCard.row.busy !== true
+              foreground: settings.urgent
+              accent: settings.urgent
+              fontFamily: settings.fontFamily
+              bordered: true
+              onClicked: settings.accountUnlink(accountCard.entry)
+            }
+            Button {
+              objectName: "accountUnlinkCancel-" + accountCard.name
+              text: "Cancel"
+              foreground: settings.foreground
+              accent: settings.accent
+              fontFamily: settings.fontFamily
+              bordered: true
+              onClicked: settings.unlinkConfirming = ""
             }
           }
         }

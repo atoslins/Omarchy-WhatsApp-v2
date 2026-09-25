@@ -3545,6 +3545,74 @@ sys.exit(0)
             (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(stored["stores"]), sorted([str(self.work), str(self.home)]))
 
+    def test_one_account_can_be_muted_without_replaying_it_later(self) -> None:
+        # L236: popups per account; muted, what arrives is marked seen.
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True):
+            self.backend.set_notifications(True, True)
+            self.backend.notify()  # adopt both accounts' archives
+        self.backend.use_account("home")
+        self.assertFalse(self.backend.settings({"account_notifications": False})["account_notifications"])
+        reports = {report["account"]: report for report in self.backend.status()["accounts"]}
+        self.assertTrue(reports["home"]["notifications_muted"])
+        self.assertFalse(reports["work"]["notifications_muted"])
+        self.assertFalse(reports["home"]["main"], "a named account is removed on unlink")
+
+        def arrive(message_id: str, ts: int) -> None:
+            with closing(sqlite3.connect(self.home / "wacli.db")) as connection, connection:
+                connection.execute(
+                    "UPDATE chats SET last_message_ts = ?, unread_count = 3 WHERE jid = ?",
+                    [ts, "family@g.us"])
+                connection.execute(
+                    """INSERT INTO messages
+                    (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                     text, reaction_to_id, media_type, mime_type, local_path)
+                    VALUES ('family@g.us', '', ?, 'kin@s.whatsapp.net', 'Kin', ?, 0,
+                            'dinner?', '', '', '', '')""", [message_id, ts])
+        arrive("f-muted", 41)
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification", return_value=True) as deliver:
+            self.assertEqual(self.backend.notify()["sent"], 0, "muted account: no popup")
+        deliver.assert_not_called()
+        self.backend.settings({"account_notifications": True})
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification", return_value=True) as deliver:
+            self.assertEqual(self.backend.notify()["sent"], 0, "unmuting does not replay it")
+        arrive("f-after", 42)
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification", return_value=True) as deliver:
+            self.assertEqual(self.backend.notify()["sent"], 1, "new messages pop up again")
+
+    def test_unlinking_an_account_needs_its_name_and_keeps_the_archive(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        real_run = self.backend._run
+        mutations: list[list[str]] = []
+
+        def run(answer):
+            def fake(args, **kwargs):
+                if args[1:3] in (["auth", "logout"], ["accounts", "remove"]):
+                    mutations.append(args[1:3])
+                    return answer
+                return real_run(args, **kwargs)
+            return fake
+        with mock.patch.object(self.backend, "_run", side_effect=run(completed)), \
+                mock.patch.object(self.backend, "_systemctl_user", return_value=completed) as systemctl:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Confirm by naming"):
+                self.backend.unlink_account("home", "")
+            self.assertEqual(mutations, [], "nothing happens without the name")
+            result = self.backend.unlink_account("home", "home")
+        self.assertTrue(result["archive_kept"])
+        self.assertTrue(result["removed"])
+        self.assertEqual(systemctl.call_args_list[0].args[0], ["disable", "--now", "wacli-sync@home.service"])
+        self.assertEqual(mutations, [["auth", "logout"], ["accounts", "remove"]])
+        self.assertTrue((self.home / "wacli.db").is_file(), "the local archive stays")
+        mutations.clear()
+        refused = subprocess.CompletedProcess([], 1, "", "not connected")
+        with mock.patch.object(self.backend, "_run", side_effect=run(refused)), \
+                mock.patch.object(self.backend, "_systemctl_user", return_value=completed):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not connected|did not accept"):
+                self.backend.unlink_account("work", "work")
+        self.assertEqual(mutations, [["auth", "logout"]], "no removal after a refused logout")
+
     def test_version_2_off_default_migrates_to_reading_open_chats(self) -> None:
         state = self.root / "state"
         state.mkdir(mode=0o700)

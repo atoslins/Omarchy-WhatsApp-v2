@@ -64,6 +64,16 @@ function isMultiAccount(accounts) {
   return Array.isArray(accounts) && accounts.length > 1
 }
 
+// Where an account sits in the configured order; its color follows it.
+function accountIndex(accounts, name) {
+  var values = Array.isArray(accounts) ? accounts : []
+  var wanted = String(name || "")
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i] && values[i].account || "") === wanted) return i
+  }
+  return -1
+}
+
 function accountOptions(accounts) {
   var values = Array.isArray(accounts) ? accounts : []
   var options = []

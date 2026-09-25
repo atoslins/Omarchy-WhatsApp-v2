@@ -121,4 +121,18 @@ TestCase {
     verify(findChild(first, "dropdownMentionBadge").visible)
     verify(!findChild(rows(dropdown)[2], "dropdownMentionBadge").visible)
   }
+
+  // L236: the dropdown marks each chat's account the way the list does.
+  function test_each_account_marks_its_chats() {
+    var dropdown = openDropdown()
+    var list = rows(dropdown)
+    var colors = {}
+    for (var i = 0; i < list.length; i++) {
+      var stripe = findChild(list[i], "dropdownAccountStripe")
+      verify(stripe.visible, "demo mode links two accounts")
+      colors[String(list[i].modelData.account)] = stripe.color
+    }
+    verify(colors.work !== undefined && colors.personal !== undefined)
+    verify(!Qt.colorEqual(colors.work, colors.personal))
+  }
 }

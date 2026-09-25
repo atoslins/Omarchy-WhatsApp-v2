@@ -1328,6 +1328,8 @@ class Backend:
             "online": item.get("online") is not False,
             "send_read_receipts": item.get("send_read_receipts") is not False,
             "signature": cls._signature(item.get("signature")),
+            # Popups off for this account only; the badge still counts it.
+            "notifications_muted": item.get("notifications_muted") is True,
             "acknowledged_unread": cls._chat_snapshots(item.get("acknowledged_unread")),
             "notified": cls._chat_snapshots(item.get("notified")),
         }
@@ -1443,6 +1445,7 @@ class Backend:
             allowed = {
                 "send_read_receipts",
                 "signature",
+                "account_notifications",
                 "show_unread_count",
                 "dropdown_rows",
                 "check_updates_on_launch",
@@ -1455,6 +1458,8 @@ class Backend:
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
             if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
                 raise OmaWhatsAppError("Read receipts must be on or off.")
+            if "account_notifications" in update and not isinstance(update["account_notifications"], bool):
+                raise OmaWhatsAppError("This account's notifications must be on or off.")
             if "signature" in update:
                 wanted = update["signature"]
                 if not isinstance(wanted, dict) or any(
@@ -1494,13 +1499,15 @@ class Backend:
 
             def apply(value: dict[str, Any]) -> None:
                 for name, setting in update.items():
-                    if name in {"send_read_receipts", "signature"}:
+                    if name in {"send_read_receipts", "signature", "account_notifications"}:
                         state = value["stores"].get(key)
                         if state is None:
                             state = self._store_state({})
                             value["stores"][key] = state
                         if name == "signature":
                             state["signature"] = self._signature(dict(state["signature"], **setting))
+                        elif name == "account_notifications":
+                            state["notifications_muted"] = not bool(setting)
                         else:
                             state["send_read_receipts"] = bool(setting)
                     else:
@@ -1516,6 +1523,7 @@ class Backend:
             "account": self.active.name,
             "send_read_receipts": state.get("send_read_receipts") is True,
             "signature": self._signature(state.get("signature")),
+            "account_notifications": state.get("notifications_muted") is not True,
             "show_unread_count": value.get("show_unread_count") is not False,
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "start_at_login": value.get("start_at_login") is not False,
@@ -2246,6 +2254,7 @@ class Backend:
                 "store": account.key,
                 "unit": account.unit,
                 "default": account.default,
+                "main": account.selector in {"implicit", "store"},
                 "active": account.key == active.key,
                 "authenticated": authenticated,
                 "sync_active": self._sync_active(account),
@@ -2253,6 +2262,7 @@ class Backend:
                 "offline_mode": not online,
                 "send_read_receipts": state.get("send_read_receipts") is True,
                 "signature": self._signature(state.get("signature")),
+                "notifications_muted": state.get("notifications_muted") is True,
                 "fts_enabled": doctor.get("fts_enabled") is True,
                 "database_ready": self._database(doctor, account).is_file(),
                 "error": doctor_error or (
@@ -3069,6 +3079,12 @@ class Backend:
                     continue
                 watermark = self._notification_watermark(chats)
                 seen = self._account_state(preferences)["notified"]
+                if self._account_state(preferences).get("notifications_muted") is True:
+                    # Muted: what arrives is marked seen, so unmuting never
+                    # replays it as popups.
+                    self._update_account_state(
+                        lambda state, value=watermark: state.update({"notified": value}))
+                    continue
                 if not seen:
                     # A missing watermark means a fresh account, not an unread
                     # archive: adopt it instead of replaying it.
@@ -3245,6 +3261,30 @@ class Backend:
         if preferences.get("start_at_login") is not False or self._session_marker("launched").exists():
             return False
         return not any(report.get("sync_active") for report in reports if report.get("online"))
+
+    def unlink_account(self, name: Any, confirm: Any) -> dict[str, Any]:
+        """Log one account out of WhatsApp and drop it from OmaWhatsApp.
+
+        The phone loses this linked device. The local archive stays on disk;
+        only the session and, for a named account, its config entry go.
+        """
+        account = self.account(str(name or ""))
+        if str(confirm or "") != account.name:
+            raise OmaWhatsAppError(f"Confirm by naming the account: {account.name}.")
+        with self._state_lock(self._lifecycle_lock_name(account)):
+            if account.unit:
+                self._systemctl_user(["disable", "--now", account.unit], require_success=False)
+            result = self._run(["--json", "auth", "logout"], timeout=60, account=account)
+            if result.returncode != 0:
+                raise OmaWhatsAppError(clean_error(result.stderr or result.stdout,
+                    "WhatsApp did not accept the logout; the account stays linked."))
+            removed = False
+            if account.selector not in {"implicit", "store"}:
+                removal = self._run(["--json", "accounts", "remove", account.name], timeout=30, account=None)
+                removed = removal.returncode == 0
+        self._refresh_account_registry()
+        return {"ok": True, "kind": "unlink", "account": account.name,
+                "removed": removed, "archive_kept": True}
 
     def quit_app(self) -> dict[str, Any]:
         """Stop every account's sync until OmaWhatsApp opens again."""
@@ -6328,6 +6368,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("notify-open")
     commands.add_parser("sync-mode")
     commands.add_parser("quit")
+    commands.add_parser("unlink-account")
     commands.add_parser("launch")
     commands.add_parser("settings")
     commands.add_parser("avatars")
@@ -6551,6 +6592,8 @@ def main() -> int:
             return emit(backend.about())
         if args.command == "media-mode":
             return emit(backend.media_mode(payload.get("auto_download_media")))
+        if args.command == "unlink-account":
+            return emit(backend.unlink_account(payload.get("name"), payload.get("confirm")))
         if args.command == "quit":
             return emit(backend.quit_app())
         if args.command == "launch":

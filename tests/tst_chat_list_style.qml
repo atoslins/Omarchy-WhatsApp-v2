@@ -152,4 +152,45 @@ TestCase {
     verify(findChild(list[1], "chatMentionBadge").visible, "unread and mentioned")
     verify(!findChild(list[0], "chatMentionBadge").visible, "read chats show no sign")
   }
+
+  // L236: with several accounts, each chat carries its account's color on the
+  // row's edge (not on the photo, where a dot reads as "online").
+  function test_each_account_marks_its_chats_with_its_color() {
+    var app = openApp()
+    app.demoChats = chats.concat([{ jid: "demo-home", name: "Synthetic Home", kind: "dm",
+      account: "personal", account_label: "personal", avatar_path: "", preview: "hi",
+      timestamp: 1787530000, unread: 0, pinned: false }])
+    var found = []
+    function walk(item) {
+      if (item.objectName === "chatRow") found.push(item)
+      for (var i = 0; i < item.children.length; i++) walk(item.children[i])
+    }
+    tryVerify(function() { found = []; walk(app); return found.length === 4 }, 3000)
+    var byName = {}
+    for (var i = 0; i < found.length; i++)
+      byName[findChild(found[i], "chatName").text] = findChild(found[i], "chatAccountStripe")
+    verify(byName["Synthetic Pinned"].visible)
+    verify(byName["Synthetic Home"].visible)
+    verify(Qt.colorEqual(byName["Synthetic Pinned"].color, Tint.accountColor(0, app.accent)))
+    verify(Qt.colorEqual(byName["Synthetic Home"].color, Tint.accountColor(1, app.accent)))
+    verify(!Qt.colorEqual(byName["Synthetic Pinned"].color, byName["Synthetic Home"].color))
+    var dots = []
+    function walkDots(item) {
+      if (item.objectName === "accountChipDot" && item.visible) dots.push(item)
+      for (var j = 0; j < item.children.length; j++) walkDots(item.children[j])
+    }
+    tryVerify(function() { dots = []; walkDots(app); return dots.length === 2 }, 2000,
+      "the account chips are the legend; All has no color")
+    var subtitle = findChild(app, "conversationSubtitle")
+    compare(subtitle.text, "work", "the open chat names its account")
+    verify(Qt.colorEqual(subtitle.color, Tint.accountColor(0, app.accent)), "in the account's color")
+  }
+
+  function test_account_order_sets_the_color() {
+    compare(AccountModel.accountIndex([{ account: "work" }, { account: "home" }], "home"), 1)
+    compare(AccountModel.accountIndex([{ account: "work" }], "home"), -1)
+    var accent = Qt.hsla(0.4, 0.6, 0.6, 1)
+    verify(Qt.colorEqual(Tint.accountColor(0, accent), accent), "the first account is the accent")
+    verify(!Qt.colorEqual(Tint.accountColor(1, accent), Tint.accountColor(2, accent)))
+  }
 }

@@ -46,14 +46,18 @@ TestCase {
         property string linked: ""
         function refreshAvatars() { refreshes += 1; return true }
         function linkAccount(name) { linked = name; return true }
+        function linkMainAccount(name) { linked = "main:" + name; return true }
       }
       property var calls: []
       function record(name, args) { calls = calls.concat([{ name: name, args: args }]) }
-      function setPreference(key, value) { record("setPreference", [key, value]); return true }
+      function setPreference(key, value, account) {
+        record("setPreference", account === undefined ? [key, value] : [key, value, account]); return true }
       function setNotifications(enabled, preview, sound) {
         record("setNotifications", [enabled, preview, sound === undefined ? null : sound]); return true }
       function setAutoDownloadMedia(enabled) { record("setAutoDownloadMedia", [enabled]); return true }
-      function setOnline(online) { record("setOnline", [online]); return true }
+      function setOnline(online, account) {
+        record("setOnline", account === undefined ? [online] : [online, account]); return true }
+      function unlinkAccount(name, confirm) { record("unlinkAccount", [name, confirm]); return true }
       property bool startAtLogin: true
       function quitApp() { record("quitApp", []); return true }
       property int aboutRequests: 0
@@ -210,5 +214,88 @@ TestCase {
     wait(0)
     verify(h.view.runRow({ key: "quit" }, true))
     compare(h.app.quits, 1, "the app closes its window and quits")
+  }
+
+  readonly property var twoAccounts: [
+    { account: "work", label: "work", main: true, authenticated: true, online: true,
+      sync_active: true, notifications_muted: false },
+    { account: "home", label: "home", main: false, authenticated: true, online: true,
+      sync_active: true, notifications_muted: false }
+  ]
+
+  function test_each_account_has_its_own_card_and_switches() {
+    var h = create()
+    h.service.accounts = twoAccounts
+    h.view.openSection("accounts")
+    wait(0)
+    verify(findChild(h.view, "accountCard-work") !== null)
+    verify(findChild(h.view, "accountCard-home") !== null)
+    var workDot = findChild(h.view, "accountDot-work")
+    var homeDot = findChild(h.view, "accountDot-home")
+    verify(workDot.visible && homeDot.visible, "several accounts show their color")
+    verify(!Qt.colorEqual(workDot.color, homeDot.color), "each account keeps its own color")
+    findChild(h.view, "accountSync-home").toggled()
+    compare(last(h.service).name, "setOnline")
+    compare(last(h.service).args, [false, "home"], "only that account pauses")
+    findChild(h.view, "accountNotify-home").toggled()
+    compare(last(h.service).name, "setPreference")
+    compare(last(h.service).args, ["account_notifications", false, "home"])
+  }
+
+  function test_one_account_has_no_color_or_notification_switch() {
+    var h = create()
+    h.view.openSection("accounts")
+    wait(0)
+    verify(!findChild(h.view, "accountDot-").visible)
+    verify(!findChild(h.view, "accountNotify-").visible, "the Notifications section already covers it")
+    verify(findChild(h.view, "accountSync-").visible)
+  }
+
+  function test_unlink_asks_first_and_names_the_account() {
+    var h = create()
+    h.service.accounts = twoAccounts
+    h.view.openSection("accounts")
+    wait(0)
+    var calls = h.service.calls.length
+    findChild(h.view, "accountUnlink-home").clicked()
+    compare(h.service.calls.length, calls, "the first click only asks")
+    verify(findChild(h.view, "accountConfirm-home").visible)
+    verify(!findChild(h.view, "accountConfirm-work").visible, "only that account asks")
+    compare(findChild(h.view, "accountUnlinkConfirm-home").text, "Unlink home")
+    findChild(h.view, "accountUnlinkCancel-home").clicked()
+    verify(!findChild(h.view, "accountConfirm-home").visible)
+    compare(h.service.calls.length, calls)
+    findChild(h.view, "accountUnlink-home").clicked()
+    findChild(h.view, "accountUnlinkConfirm-home").clicked()
+    compare(last(h.service).name, "unlinkAccount")
+    compare(last(h.service).args, ["home", "home"])
+    verify(!findChild(h.view, "accountConfirm-home").visible)
+  }
+
+  function test_leaving_the_section_drops_a_pending_unlink() {
+    var h = create()
+    h.service.accounts = twoAccounts
+    h.view.openSection("accounts")
+    wait(0)
+    findChild(h.view, "accountUnlink-home").clicked()
+    compare(h.view.unlinkConfirming, "home")
+    h.view.openSection("sync")
+    compare(h.view.unlinkConfirming, "", "no confirmation waits out of sight")
+  }
+
+  function test_an_account_that_is_not_linked_offers_to_link_it() {
+    var h = create()
+    h.service.accounts = [
+      { account: "primary", label: "primary", main: true, authenticated: false, online: true },
+      { account: "home", label: "home", main: false, authenticated: false, online: true }
+    ]
+    h.view.openSection("accounts")
+    wait(0)
+    compare(findChild(h.view, "accountState-home").text, "Not linked")
+    verify(!findChild(h.view, "accountSync-home").visible)
+    findChild(h.view, "accountLink-primary").clicked()
+    compare(h.service.accountOperations.linked, "main:primary", "the main account links with wacli auth")
+    findChild(h.view, "accountLink-home").clicked()
+    compare(h.service.accountOperations.linked, "home")
   }
 }

@@ -1588,6 +1588,12 @@ Item {
     if (controlProcess.running || writing) return false
     return runControl("quit", ({}))
   }
+  // The phone loses this linked device; the local archive stays. The helper
+  // refuses unless the confirmation names the account.
+  function unlinkAccount(name, confirm) {
+    if (controlProcess.running || writing) return false
+    return runControl("unlink-account", { name: String(name || ""), confirm: String(confirm || "") })
+  }
   // Opening a closed OmaWhatsApp starts its sync again.
   function launchApp() {
     if (controlProcess.running) return false
@@ -1603,11 +1609,13 @@ Item {
     controlProcess.running = true
     return true
   }
-  function setOnline(online) {
+  // Each account has its own sync; without one named, the open chat's.
+  function setOnline(online, account) {
     if (controlProcess.running || writing) return false
     controlWriting = true
     controlProcess.kind = "sync-mode"
-    controlProcess.account = root.selectedChatAccount
+    controlProcess.account = account === undefined || account === null
+      ? root.selectedChatAccount : String(account)
     controlProcess.payload = JSON.stringify({
       account: controlProcess.account, online: online === true
     })
@@ -1678,12 +1686,13 @@ Item {
     }
   }
 
-  function setPreference(key, value) {
+  function setPreference(key, value, account) {
     if (settingsProcess.running) return false
     var settings = ({})
     settings[String(key || "")] = value
     settingsWriting = true
-    settingsProcess.account = root.selectedChatAccount
+    settingsProcess.account = account === undefined || account === null
+      ? root.selectedChatAccount : String(account)
     settingsProcess.payload = JSON.stringify({
       account: settingsProcess.account, settings: settings
     })
@@ -2041,6 +2050,15 @@ Item {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
       }
+      if (finishedKind === "sync-mode") {
+        var syncedAccount = String(payload.account || account || "")
+        root.accounts = root.accounts.map(function(item) {
+          return item && String(item.account || "") === syncedAccount
+            ? Object.assign({}, item, { online: payload.online === true,
+                offline_mode: payload.online !== true, sync_active: payload.online === true })
+            : item
+        })
+      }
       if (finishedKind === "quit" || finishedKind === "launch") {
         root.closed = payload.closed === true
         root.syncActive = finishedKind === "launch" && !root.offlineMode
@@ -2285,6 +2303,7 @@ Item {
 
   Process {
     id: settingsProcess
+    objectName: "settingsProcess"
     property string account: ""
     property string payload: ""
     command: [root.helper, "settings"]
@@ -2307,14 +2326,17 @@ Item {
       // density are one global UI preference shared by every account.
       if (account === String(root.selectedChatAccount || ""))
         root.sendReadReceipts = payload.send_read_receipts === true
-      // The composer shows the new signature at once, before the next status.
-      if (payload.signature && typeof payload.signature === "object") {
-        var signedAccount = String(payload.account || account || "")
-        root.accounts = root.accounts.map(function(item) {
-          return item && String(item.account || "") === signedAccount
-            ? Object.assign({}, item, { signature: payload.signature }) : item
-        })
-      }
+      // The composer shows the new signature, and Settings the account's
+      // notifications, at once, before the next status.
+      var savedAccount = String(payload.account || account || "")
+      root.accounts = root.accounts.map(function(item) {
+        if (!item || String(item.account || "") !== savedAccount) return item
+        var next = Object.assign({}, item)
+        if (payload.signature && typeof payload.signature === "object") next.signature = payload.signature
+        if (payload.account_notifications !== undefined)
+          next.notifications_muted = payload.account_notifications === false
+        return next
+      })
       root.showUnreadCount = payload.show_unread_count !== false
       root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
       root.startAtLogin = payload.start_at_login !== false
