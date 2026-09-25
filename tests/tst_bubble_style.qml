@@ -77,4 +77,56 @@ TestCase {
       "different people usually get different colors")
     compare(String(one.senderColor("")), String(one.accent))
   }
+
+  // Phase 2: attachments.
+  readonly property string photo: Qt.resolvedUrl("../plugins/omawhatsapp/assets/demo-photo.png").toString().replace("file://", "")
+
+  function test_a_photo_without_caption_carries_its_time_on_the_picture() {
+    var bare = bubble({ media_type: "image", mime_type: "image/png", local_path: photo, text: "" })
+    verify(bare.visualMedia)
+    verify(bare.metaOverMedia)
+    verify(findChild(bare, "mediaTimePill").visible)
+    var captioned = bubble({ media_type: "image", mime_type: "image/png", local_path: photo, text: "caption" })
+    verify(!captioned.metaOverMedia, "a caption keeps the time beside its text")
+    verify(!findChild(captioned, "mediaTimePill").visible)
+  }
+
+  function test_a_portrait_photo_gets_a_narrower_bubble() {
+    var tall = bubble({ media_type: "image", mime_type: "image/png", local_path: photo })
+    findChild(tall, "mediaBubble").adoptDecodedSize(900, 1600)
+    verify(tall.fittedMediaWidth < tall.mediaWidth, "no cropped strip of a portrait photo")
+    var wide = bubble({ media_type: "image", mime_type: "image/png", local_path: photo })
+    findChild(wide, "mediaBubble").adoptDecodedSize(1600, 900)
+    compare(wide.fittedMediaWidth, wide.mediaWidth)
+  }
+
+  function test_voice_notes_and_audio_files_differ() {
+    var voice = bubble({ media_type: "audio", mime_type: "audio/ogg; codecs=opus", local_path: "/nonexistent/v.ogg", text: "" })
+    verify(findChild(voice, "mediaBubble").voiceNote)
+    verify(voice.metaInAudio, "the time shares the voice note's bottom row")
+    verify(findChild(voice, "audioWaveform") !== null)
+    verify(!findChild(voice, "audioFileName").visible)
+    var file = bubble({ media_type: "audio", mime_type: "audio/mp4", local_path: "/nonexistent/a.m4a", filename: "meeting.m4a" })
+    verify(!findChild(file, "mediaBubble").voiceNote)
+    verify(findChild(file, "audioFileName").visible)
+    var again = findChild(bubble({ media_type: "audio", local_path: "/nonexistent/v.ogg" }), "mediaBubble")
+    compare(JSON.stringify(again.waveform), JSON.stringify(again.waveform), "the waveform is stable")
+  }
+
+  function test_a_document_shows_its_type() {
+    var pdf = bubble({ media_type: "document", mime_type: "application/pdf", local_path: "/nonexistent/o.pdf", filename: "Budget.pdf" })
+    compare(findChild(pdf, "mediaBubble").extension, "PDF")
+    verify(findChild(pdf, "documentBadge") !== null)
+  }
+
+  function test_contact_initials_and_a_deleted_outline() {
+    var card = bubble({ text: "Contact: Carlos Mendes (+55 16 90000-0000)",
+      contacts: [{ name: "Carlos Mendes", phone: "+55 16 90000-0000", digits: "5516900000000" }] })
+    tryVerify(function() { return findChild(card, "contactInitials") !== null })
+    compare(findChild(card, "contactInitials").children[0].text, "CM")
+    var gone = bubble({ revoked: true, text: "" })
+    var surface = findChild(gone, "messageBubbleSurface")
+    compare(surface.color.a, 0, "a deleted message keeps only its outline")
+    compare(surface.border.width, 1)
+  }
 }

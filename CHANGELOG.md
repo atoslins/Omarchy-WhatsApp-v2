@@ -2,6 +2,14 @@
 
 ## Unreleased (fork)
 
+- Restyle, phase 2 (attachments): photos, GIFs, videos and albums fill a
+  thin frame with rounded corners and a portrait photo gets a narrower
+  bubble; with no caption the time sits on the picture. Voice notes get a
+  waveform that fills as they play, with speed and time on one row; named
+  audio files keep their name. Documents show their type as a colored badge,
+  files not downloaded yet a round download button, locations a drawn map
+  (nothing is fetched), shared contacts their initials, and a deleted
+  message only an outline.
 - Clicking a message notification opens the small reply view by the bar on
   that chat, with the composer ready, instead of the full app. Omarchy's
   notifications show no reply field or extra buttons, so this is the direct

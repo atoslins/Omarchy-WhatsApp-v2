@@ -185,6 +185,23 @@ Item {
     return textEndsBubble && layout.length > 0
       ? messageText.positionToRectangle(messageText.length).x : 0
   }
+  // A photo, GIF, video or album fills the bubble with a thin frame.
+  readonly property bool visualMedia: hasMedia && !sticker
+    && (MediaModel.isVisual(message) || String(message.media_type || "") === "album")
+    && mediaBubble.mediaKind !== "missing"
+  // With no caption the time goes over the picture, as on the phone.
+  readonly property bool metaOverMedia: visualMedia && bodyText.length === 0
+  readonly property color metaColor: metaOverMedia ? Qt.rgba(1, 1, 1, 0.92) : dimmer
+  // A voice note's own bottom row leaves its right end to the time.
+  readonly property bool metaInAudio: hasMedia && bodyText.length === 0
+    && (mediaBubble.mediaKind === "audio")
+  // A portrait photo gets a narrower bubble instead of a cropped strip.
+  readonly property real fittedMediaWidth: {
+    var w = mediaBubble.decodedMediaWidth
+    var h = mediaBubble.decodedMediaHeight
+    if (!visualMedia || mediaBubble.album || !(w > 0 && h > 0)) return mediaWidth
+    return Math.max(Style.space(200), Math.min(mediaWidth, 315 * w / h + Style.space(8)))
+  }
   readonly property bool metaInline: !sticker && textEndsBubble
     && lastLineEnd + Style.space(10) + messageMeta.width <= messageText.width
   readonly property bool hasMedia: String(message.media_type || "") !== ""
@@ -196,7 +213,7 @@ Item {
   readonly property real desiredWidth: sticker ? Style.space(176) : message.media_type
       || String(message.quoted_id || "") !== ""
       || buttonItems.length > 0 || poll !== null || revoked || contactCards.length > 0
-    ? (hasMedia ? mediaWidth : maximumWidth)
+    ? (hasMedia ? fittedMediaWidth : maximumWidth)
     : Math.max(Style.space(88), Math.min(maximumWidth,
         naturalTextWidth + Style.space(22)))
   readonly property var reactionPills: {
@@ -269,8 +286,10 @@ Item {
     width: root.desiredWidth
     // Time and ticks share the last line of text when it has room, as on
     // the phone, instead of taking a line of their own.
-    height: bubbleColumn.implicitHeight + Style.space(9) + (root.sticker
+    height: (root.visualMedia ? Style.space(4) : Style.space(9)) + bubbleColumn.implicitHeight + (root.sticker
       ? messageMeta.height + Style.space(4)
+      : root.metaOverMedia ? Style.space(4)
+      : root.metaInAudio ? Style.space(9)
       : root.metaInline ? Style.space(9) : messageMeta.height + Style.space(11))
     // Rounded, with a tight corner on the sender's side where messages of
     // one person join and at the bottom of the last one, in place of a tail.
@@ -281,11 +300,13 @@ Item {
     bottomLeftRadius: root.message.from_me ? roundCorner : tightCorner
     topRightRadius: root.message.from_me && root.joinsAbove ? tightCorner : roundCorner
     bottomRightRadius: root.message.from_me ? tightCorner : roundCorner
-    color: root.sticker ? "transparent" : root.message.from_me
+    // A deleted message keeps only an outline where it was.
+    color: root.sticker || root.revoked ? "transparent" : root.message.from_me
       ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
       : Style.normalFillFor(root.foreground, root.accent)
-    border.width: root.selected ? 1 : 0
-    border.color: root.accent
+    border.width: root.selected || root.revoked ? 1 : 0
+    border.color: root.selected ? root.accent
+      : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
 
 
     Column {
@@ -294,7 +315,8 @@ Item {
       anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.margins: Style.space(9)
+      // A photo or video gets a thin frame; text keeps its padding.
+      anchors.margins: root.visualMedia ? Style.space(4) : Style.space(9)
       spacing: Style.space(6)
 
       Text {
@@ -360,9 +382,12 @@ Item {
       }
 
       MediaBubble {
+        id: mediaBubble
+        objectName: "mediaBubble"
         visible: !!root.message.media_type
         width: parent.width
         message: root.message
+        cornerColor: root.sticker ? root.background : Qt.tint(root.background, bubble.color)
         foreground: root.foreground
         background: root.background
         accent: root.accent
@@ -388,6 +413,8 @@ Item {
         width: parent.width
         height: contentHeight
         text: root.richBody ? root.bodyHtml : root.bodyText
+        leftPadding: root.visualMedia ? Style.space(6) : 0
+        rightPadding: root.visualMedia ? Style.space(6) : 0
         color: root.foreground
         wrapMode: Text.Wrap
         textFormat: root.richBody ? TextEdit.RichText : TextEdit.PlainText
@@ -469,9 +496,9 @@ Item {
           required property var modelData
           objectName: "contactCard"
           width: bubbleColumn.width
-          height: contactColumn.implicitHeight + Style.space(16)
-          radius: Style.cornerRadius
-          color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
+          height: contactColumn.implicitHeight + Style.space(20)
+          radius: Style.space(9)
+          color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.38)
           Column {
             id: contactColumn
             anchors.left: parent.left
@@ -481,18 +508,23 @@ Item {
             spacing: Style.space(8)
             Row {
               spacing: Style.space(10)
+              // Initials in the person's own color, as in the chat list.
               Rectangle {
-                width: Style.space(36)
+                objectName: "contactInitials"
+                width: Style.space(40)
                 height: width
                 radius: width / 2
-                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                color: root.senderColor(contactCard.modelData.phone || contactCard.modelData.name)
                 Text {
                   textFormat: Text.PlainText
                   anchors.centerIn: parent
-                  text: "󰀄"
-                  color: root.accent
+                  text: String(contactCard.modelData.name || "?").split(/\s+/).filter(function(part) {
+                    return part !== "" }).slice(0, 2).map(function(part) {
+                    return part.charAt(0).toUpperCase() }).join("")
+                  color: root.background
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.icon
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Bold
                 }
               }
               Column {
@@ -521,24 +553,26 @@ Item {
               }
             }
             Row {
+              id: contactActions
+              width: contactColumn.width
               spacing: Style.space(6)
               visible: String(contactCard.modelData.digits || "") !== ""
               Repeater {
-                model: [{ id: "message", label: "󰍦  Message" }, { id: "copy", label: "󰆏  Copy number" }]
+                model: [{ id: "message", label: "Message" }, { id: "copy", label: "Copy number" }]
                 delegate: Rectangle {
                   required property var modelData
                   objectName: "contactAction-" + modelData.id
-                  width: actionLabel.implicitWidth + Style.space(18)
-                  height: Style.space(28)
-                  radius: height / 2
+                  width: (contactActions.width - contactActions.spacing) / 2
+                  height: Style.space(32)
+                  radius: Style.space(8)
                   color: actionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
-                    : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
+                    : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.07)
                   Text {
                     textFormat: Text.PlainText
                     id: actionLabel
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: root.accent
+                    color: modelData.id === "message" ? root.accent : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                   }
@@ -561,10 +595,10 @@ Item {
         visible: root.revoked
         width: parent.width
         text: "󰜺  " + (root.message.from_me ? "You deleted this message" : "This message was deleted")
-        color: root.dim
+        color: root.dimmer
         wrapMode: Text.Wrap
         font.family: root.fontFamily
-        font.pixelSize: Style.font.body
+        font.pixelSize: Style.font.bodySmall
         font.italic: true
       }
 
@@ -601,7 +635,7 @@ Item {
             readonly property var voterNames: root.listOf(modelData.voters)
             width: parent.width
             height: optionColumn.implicitHeight + Style.space(12)
-            radius: Style.cornerRadius
+            radius: Style.space(8)
             color: pollHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
               : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
             Column {
@@ -729,11 +763,13 @@ Item {
       id: messageMeta
       objectName: "messageMeta"
       anchors.right: parent.right
-      anchors.rightMargin: root.sticker ? 0 : Style.space(10)
+      anchors.rightMargin: root.sticker ? 0 : root.metaOverMedia ? Style.space(10) : Style.space(10)
       anchors.bottom: parent.bottom
-      anchors.bottomMargin: root.sticker ? 0 : Style.space(6)
-      width: metaRow.implicitWidth + (root.sticker ? Style.space(14) : 0)
-      height: metaRow.implicitHeight + (root.sticker ? Style.space(6) : 0)
+      anchors.bottomMargin: root.sticker ? 0 : root.metaOverMedia ? Style.space(10)
+        : root.metaInAudio ? Style.space(14) : Style.space(6)
+      readonly property bool pill: root.sticker || root.metaOverMedia
+      width: metaRow.implicitWidth + (pill ? Style.space(14) : 0)
+      height: metaRow.implicitHeight + (pill ? Style.space(6) : 0)
       Rectangle {
         objectName: "stickerTimePill"
         visible: root.sticker
@@ -741,6 +777,14 @@ Item {
         radius: height / 2
         color: Qt.tint(root.background, Qt.rgba(root.foreground.r, root.foreground.g,
           root.foreground.b, 0.12))
+      }
+      // Over a photo the time sits on a dark pill, readable on any picture.
+      Rectangle {
+        objectName: "mediaTimePill"
+        visible: root.metaOverMedia
+        anchors.fill: parent
+        radius: height / 2
+        color: Qt.rgba(0, 0, 0, 0.5)
       }
     Row {
       id: metaRow
@@ -750,7 +794,7 @@ Item {
         textFormat: Text.PlainText
         visible: root.message.edited === true
         text: "edited"
-        color: root.dimmer
+        color: root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         font.italic: true
@@ -759,7 +803,7 @@ Item {
         textFormat: Text.PlainText
         visible: root.message.starred === true
         text: "󰓎"
-        color: root.dimmer
+        color: root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
@@ -770,7 +814,7 @@ Item {
         objectName: "messagePending"
         visible: root.pending
         text: root.sendFailed ? "󰀦" : "󰅐"
-        color: root.sendFailed ? Color.urgent : root.dimmer
+        color: root.sendFailed ? Color.urgent : root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         HoverHandler { id: pendingHover }
@@ -786,7 +830,7 @@ Item {
         textFormat: Text.PlainText
         objectName: "messageTimestamp"
         text: root.timestampText
-        color: root.dimmer
+        color: root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         HoverHandler { id: timestampHover }
@@ -802,7 +846,7 @@ Item {
           : root.deliveryStatus === "pending" ? "󰅐"
           : root.deliveryStatus === "error" ? "󰀦" : "󰄭"
         color: root.deliveryStatus === "read" || root.deliveryStatus === "played" ? root.accent
-          : root.deliveryStatus === "error" ? Color.urgent : root.dimmer
+          : root.deliveryStatus === "error" ? Color.urgent : root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         HoverHandler { id: ticksHover }

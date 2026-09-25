@@ -204,7 +204,7 @@ TestCase {
       { message: video("") })
     verify(bubble !== null)
     compare(bubble.mediaKind, "missing")
-    tryCompare(bubble, "implicitHeight", 68)
+    tryCompare(bubble, "implicitHeight", 62)
     verify(findChild(bubble, "missingMediaSurface") !== null)
     compare(findChild(bubble, "missingMediaAction").text,
       "Download to preview · 1.2 KB")
