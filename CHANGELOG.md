@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- Formatting moves from a composer button to where the text is: a small bar
+  (bold, italic, strikethrough, monospace, code, lists, quote) appears over
+  any selection, and right-clicking the composer opens cut, copy, paste,
+  select all, and the same formats with their shortcuts.
 - Show who is online, when they were last seen, and who is typing or
   recording, under the chat name, in the dropdown, and as "typing…" in the
   chat list. The account shows itself online while the window (or the

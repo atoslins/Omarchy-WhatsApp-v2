@@ -930,6 +930,23 @@ Item {
   // WhatsApp's formatting on the composer: markers around the selection, or
   // list and quote prefixes on its lines. Edits go through remove/insert so
   // Ctrl+Z still undoes them.
+  // Right-click in the composer: editing actions, then WhatsApp formatting.
+  function openComposerMenu(x, y) {
+    var point = composer.mapToItem(formatMenu.parent, x, y)
+    formatMenu.x = Math.max(0, Math.min(formatMenu.parent.width - formatMenu.width, point.x))
+    formatMenu.y = Math.max(-formatMenu.height - Style.space(6), point.y - formatMenu.height)
+    formatMenu.open()
+  }
+  function composerMenuAction(kind) {
+    if (kind === "cut") composer.cut()
+    else if (kind === "copy") composer.copy()
+    else if (kind === "paste") root.pasteDraft()
+    else if (kind === "select-all") composer.selectAll()
+    else return root.applyFormat(kind)
+    composer.forceActiveFocus()
+    return true
+  }
+
   function applyFormat(kind) {
     var edit = FormatModel.apply(composer.text, composer.selectionStart, composer.selectionEnd, kind)
     if (!edit) return false
@@ -3572,40 +3589,11 @@ Item {
             }
           }
 
-          PanelActionButton {
-            id: formatButton
-            objectName: "composerFormatButton"
-            visible: !root.voiceForCurrentChat
-            anchors.left: emojiButton.right
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: composerBar.edge
-            size: composerBar.controlSize
-            iconText: "󰛖"
-            tooltipText: formatMenu.opened ? "" : "Formatting"
-            foreground: formatMenu.opened ? root.accent : root.dim
-            hoverColor: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.icon
-            onClicked: formatMenu.opened ? formatMenu.close() : formatMenu.open()
-
-            FormatMenu {
-              id: formatMenu
-              x: 0
-              y: -height - Style.space(8)
-              foreground: root.foreground
-              surface: root.background
-              accent: root.accent
-              muted: root.dim
-              fontFamily: root.fontFamily
-              onChosen: function(kind) { root.applyFormat(kind) }
-            }
-          }
-
           Rectangle {
             id: composerSurface
             objectName: "composerSurface"
             visible: !root.voiceForCurrentChat
-            anchors.left: formatButton.right
+            anchors.left: emojiButton.right
             anchors.leftMargin: Style.space(6)
             anchors.right: sendButton.left
             anchors.rightMargin: Style.space(8)
@@ -3629,6 +3617,32 @@ Item {
             MouseArea {
               anchors.fill: parent
               onClicked: composer.forceActiveFocus()
+            }
+
+            // Formatting: a bar over any selection, and the right-click menu.
+            FormatBar {
+              id: formatBar
+              editor: composer
+              anchorItem: composerSurface
+              enabledHere: !root.voiceForCurrentChat
+              foreground: root.foreground
+              surface: root.background
+              accent: root.accent
+              muted: root.dim
+              fontFamily: root.fontFamily
+              onChosen: function(kind) { root.applyFormat(kind) }
+            }
+
+            FormatMenu {
+              id: formatMenu
+              editActions: true
+              hasSelection: composer.selectedText !== ""
+              foreground: root.foreground
+              surface: root.background
+              accent: root.accent
+              muted: root.dim
+              fontFamily: root.fontFamily
+              onChosen: function(kind) { root.composerMenuAction(kind) }
             }
 
             Flickable {
@@ -3688,6 +3702,12 @@ Item {
                 }
                 onCursorPositionChanged: root.updateMentionCompletion()
                 onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
+                TapHandler {
+                  acceptedButtons: Qt.RightButton
+                  onTapped: function(eventPoint) {
+                    root.openComposerMenu(eventPoint.position.x, eventPoint.position.y)
+                  }
+                }
                 Keys.priority: Keys.BeforeItem
                 // Ctrl+B bolds a selection here; without one it still hides the chat list.
                 Keys.onShortcutOverride: function(event) {

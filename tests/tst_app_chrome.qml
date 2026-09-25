@@ -578,7 +578,8 @@ TestCase {
     // The owner asked for WhatsApp's formatting options in the composer.
     var h = createHarness()
     var composer = findChild(h.app, "composerInput")
-    verify(findChild(h.app, "composerFormatButton") !== null)
+    compare(findChild(h.app, "composerFormatButton"), null,
+      "no button: formatting comes with a selection or a right-click (owner's request)")
     composer.text = "see you soon"
     composer.select(4, 7)
     verify(h.app.applyFormat("bold"))
@@ -594,6 +595,34 @@ TestCase {
     composer.undo()
     composer.undo()
     compare(composer.text, "milk\neggs", "Ctrl+Z undoes a format")
+  }
+
+  function test_selecting_text_shows_the_format_bar_and_right_click_the_menu() {
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    var bar = findChild(h.app, "formatBar")
+    verify(bar !== null)
+    composer.forceActiveFocus()
+    composer.text = "see you soon"
+    verify(!bar.opened, "no selection, no bar")
+    composer.select(4, 7)
+    tryVerify(function() { return bar.opened }, 1000, "the bar appears over the selection")
+    bar.chosen("italic")
+    compare(composer.text, "see _you_ soon")
+    compare(composer.selectedText, "you", "the selection stays for another format")
+    composer.deselect()
+    tryVerify(function() { return !bar.opened }, 1000, "and goes with the selection")
+    var menu = findChild(h.app, "formatMenu")
+    h.app.openComposerMenu(5, 5)
+    verify(menu.opened)
+    verify(menu.editActions)
+    verify(findChild(menu.contentItem, "formatEdit-paste") !== null)
+    verify(findChild(menu.contentItem, "formatOption-bold") !== null)
+    h.app.composerMenuAction("select-all")
+    compare(composer.selectedText, "see _you_ soon")
+    verify(h.app.composerMenuAction("strike"))
+    compare(composer.text, "~see _you_ soon~")
+    menu.close()
   }
 
   function test_ctrl_b_bolds_a_selection_and_otherwise_hides_the_list() {

@@ -4,7 +4,8 @@ import qs.Commons
 
 // WhatsApp's formatting options for the composer. Each row applies to the
 // selection (or the cursor, or the current line) and shows how the phone
-// writes it, so the markers are never a mystery.
+// writes it, so the markers are never a mystery. As the composer's right-click
+// menu it also carries the editing actions above them.
 Popup {
   id: root
   objectName: "formatMenu"
@@ -14,7 +15,17 @@ Popup {
   property color accent: Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
+  // Cut, copy, paste and select all above the formats (the right-click menu).
+  property bool editActions: false
+  property bool hasSelection: false
   signal chosen(string kind)
+
+  readonly property var editOptions: [
+    { kind: "cut", label: "Cut", keys: "Ctrl+X", needsSelection: true },
+    { kind: "copy", label: "Copy", keys: "Ctrl+C", needsSelection: true },
+    { kind: "paste", label: "Paste", keys: "Ctrl+V", needsSelection: false },
+    { kind: "select-all", label: "Select all", keys: "Ctrl+A", needsSelection: false }
+  ]
 
   readonly property var options: [
     { kind: "bold", label: "Bold", hint: "*text*", keys: "Ctrl+B" },
@@ -45,6 +56,53 @@ Popup {
 
   contentItem: Column {
     spacing: Style.space(2)
+    Repeater {
+      model: root.editActions ? root.editOptions : []
+      delegate: Rectangle {
+        required property var modelData
+        readonly property bool usable: !modelData.needsSelection || root.hasSelection
+        objectName: "formatEdit-" + modelData.kind
+        width: root.availableWidth
+        height: Style.space(32)
+        radius: Style.cornerRadius
+        color: editHover.hovered && usable ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+        opacity: usable ? 1 : 0.45
+        Text {
+          textFormat: Text.PlainText
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: modelData.label
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Text {
+          textFormat: Text.PlainText
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: modelData.keys
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        HoverHandler { id: editHover; cursorShape: parent.usable ? Qt.PointingHandCursor : Qt.ArrowCursor }
+        TapHandler { enabled: parent.usable; onTapped: root.choose(modelData.kind) }
+      }
+    }
+    Rectangle {
+      visible: root.editActions
+      width: root.availableWidth
+      height: Style.space(9)
+      color: "transparent"
+      Rectangle {
+        anchors.verticalCenter: parent.verticalCenter
+        width: parent.width
+        height: 1
+        color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+      }
+    }
     Repeater {
       model: root.options
       delegate: Rectangle {

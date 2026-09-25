@@ -193,12 +193,16 @@ TestCase {
       { demoMode: false, service: service })
     dropdown.open()
     dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
-    verify(findChild(dropdown, "composerFormatButton") !== null)
+    compare(findChild(dropdown, "composerFormatButton"), null)
+    verify(findChild(dropdown, "formatBar") !== null, "a bar over selections instead")
+    verify(findChild(dropdown, "formatMenu") !== null, "and the right-click menu")
     var composer = findChild(dropdown, "composerInput")
     composer.text = "quick note"
     composer.select(0, 5)
     verify(dropdown.applyFormat("strike"))
     compare(composer.text, "~quick~ note")
+    dropdown.composerMenuAction("select-all")
+    compare(composer.selectedText, "~quick~ note")
     var spy = createTemporaryObject(spyComponent, testCase,
       { target: dropdown, signalName: "fullAppRequested" })
     verify(dropdown.openContactChat({ name: "Nobody", digits: "15550009999", jid: "" }))

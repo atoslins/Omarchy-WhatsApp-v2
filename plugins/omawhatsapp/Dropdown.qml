@@ -452,6 +452,23 @@ Panel {
     composer.cursorPosition = composer.length
   }
 
+  // Right-click in the composer: editing actions, then WhatsApp formatting.
+  function openComposerMenu(x, y) {
+    var point = composer.mapToItem(dropdownFormatMenu.parent, x, y)
+    dropdownFormatMenu.x = Math.max(0, Math.min(dropdownFormatMenu.parent.width - dropdownFormatMenu.width, point.x))
+    dropdownFormatMenu.y = Math.max(-dropdownFormatMenu.height - Style.space(6), point.y - dropdownFormatMenu.height)
+    dropdownFormatMenu.open()
+  }
+  function composerMenuAction(kind) {
+    if (kind === "cut") composer.cut()
+    else if (kind === "copy") composer.copy()
+    else if (kind === "paste") root.pasteClipboard()
+    else if (kind === "select-all") composer.selectAll()
+    else return root.applyFormat(kind)
+    composer.forceActiveFocus()
+    return true
+  }
+
   function applyFormat(kind) {
     var edit = FormatModel.apply(composer.text, composer.selectionStart, composer.selectionEnd, kind)
     if (!edit) return false
@@ -1687,32 +1704,6 @@ Panel {
                     }
                   }
                 }
-                PanelActionButton {
-                  id: dropdownFormatButton
-                  objectName: "composerFormatButton"
-                  anchors.left: emojiButton.right
-                  anchors.bottom: parent.bottom
-                  size: composerRowItem.controlSize
-                  iconText: "󰛖"
-                  tooltipText: dropdownFormatMenu.opened ? "" : "Formatting"
-                  foreground: dropdownFormatMenu.opened ? root.accent : root.muted
-                  hoverColor: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: Style.font.body
-                  onClicked: dropdownFormatMenu.opened ? dropdownFormatMenu.close() : dropdownFormatMenu.open()
-
-                  FormatMenu {
-                    id: dropdownFormatMenu
-                    x: 0
-                    y: -height - Style.space(8)
-                    foreground: root.foreground
-                    surface: root.background
-                    accent: root.accent
-                    muted: root.muted
-                    fontFamily: root.fontFamily
-                    onChosen: function(kind) { root.applyFormat(kind) }
-                  }
-                }
                 Rectangle {
                   id: sendButton
                   objectName: "composerSendButton"
@@ -1755,7 +1746,7 @@ Panel {
                 Rectangle {
                   id: composerFieldSurface
                   objectName: "composerFieldSurface"
-                  anchors.left: dropdownFormatButton.right
+                  anchors.left: emojiButton.right
                   anchors.leftMargin: Style.space(6)
                   anchors.right: sendButton.left
                   anchors.rightMargin: Style.space(8)
@@ -1772,6 +1763,30 @@ Panel {
                     delay: 900
                     visible: composerFieldHover.hovered && !composer.activeFocus
                     text: root.composerHint
+                  }
+                  // Formatting: a bar over any selection, and the right-click menu.
+                  FormatBar {
+                    id: dropdownFormatBar
+                    editor: composer
+                    anchorItem: composerFieldSurface
+                    enabledHere: !root.offline
+                    foreground: root.foreground
+                    surface: root.background
+                    accent: root.accent
+                    muted: root.muted
+                    fontFamily: root.fontFamily
+                    onChosen: function(kind) { root.applyFormat(kind) }
+                  }
+                  FormatMenu {
+                    id: dropdownFormatMenu
+                    editActions: true
+                    hasSelection: composer.selectedText !== ""
+                    foreground: root.foreground
+                    surface: root.background
+                    accent: root.accent
+                    muted: root.muted
+                    fontFamily: root.fontFamily
+                    onChosen: function(kind) { root.composerMenuAction(kind) }
                   }
                 }
                 Flickable {
@@ -1830,6 +1845,13 @@ Panel {
                     font.pixelSize: Style.font.body
                     readOnly: root.offline
                     onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
+                    TapHandler {
+                      acceptedButtons: Qt.RightButton
+                      enabled: !root.offline
+                      onTapped: function(eventPoint) {
+                        root.openComposerMenu(eventPoint.position.x, eventPoint.position.y)
+                      }
+                    }
                     Text {
                       textFormat: Text.PlainText
                       visible: !composer.text && !composer.inputMethodComposing
