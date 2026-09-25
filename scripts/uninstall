@@ -14,12 +14,14 @@ user_home=${HOME:?HOME is required}
 }
 xdg_config_home=${XDG_CONFIG_HOME:-$user_home/.config}
 xdg_state_home=${XDG_STATE_HOME:-$user_home/.local/state}
+xdg_cache_home=${XDG_CACHE_HOME:-$user_home/.cache}
 # The XDG specification requires absolute base directories. An invalid
 # relative override is ignored instead of turning the working directory into
 # an install, backup, or purge target.
 [[ $xdg_config_home == /* ]] || xdg_config_home="$user_home/.config"
 [[ $xdg_state_home == /* ]] || xdg_state_home="$user_home/.local/state"
-[[ $xdg_config_home != / && $xdg_state_home != / ]] || {
+[[ $xdg_cache_home == /* ]] || xdg_cache_home="$user_home/.cache"
+[[ $xdg_config_home != / && $xdg_state_home != / && $xdg_cache_home != / ]] || {
   echo "XDG base directories must not be the filesystem root." >&2
   exit 1
 }
@@ -31,7 +33,8 @@ user_service_root="$xdg_config_home/systemd/user"
 helper_target="$user_home/.local/bin/omawhatsapp"
 assets_helper_target="$user_home/.local/bin/omawhatsapp_assets.py"
 core_helper_target="$user_home/.local/bin/omawhatsapp_core.py"
-bytecode_cache="${XDG_CACHE_HOME:-$user_home/.cache}/omawhatsapp/pycache"
+# The helper's compiled bytecode; disposable, and present only once it ran.
+bytecode_cache="$xdg_cache_home/omawhatsapp/pycache"
 mcp_target="$user_home/.local/bin/omawhatsapp-mcp"
 runtime="$xdg_state_home/omawhatsapp"
 transaction_parent="$xdg_state_home/omawhatsapp-installer"
@@ -176,7 +179,7 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
   --arg legacy_bar "$plugin_root/omawhatsapp-bar" \
   --arg skill "$skill_root/omawhatsapp" --arg helper "$helper_target" \
   --arg assets_helper "$assets_helper_target" --arg mcp "$mcp_target" \
-  --arg core_helper "$core_helper_target" --arg bytecode "$bytecode_cache" \
+  --arg core_helper "$core_helper_target" \
   --arg service "$user_service_root/wacli-sync.service" \
   --arg template "$user_service_root/wacli-sync@.service" \
   --arg shell "$shell_config" --arg staged_shell "$temporary" \
@@ -190,12 +193,15 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
     {operation:"remove", target:$helper},
     {operation:"remove", target:$assets_helper},
     {operation:"remove", target:$core_helper},
-    {operation:"remove", target:$bytecode},
     {operation:"remove", target:$service},
     {operation:"remove", target:$template},
     {operation:"replace", staged:$staged_shell, target:$shell,
       expected_sha256:$shell_digest}
   ]')
+if [[ -d $bytecode_cache && ! -L $bytecode_cache ]]; then
+  targets=$(jq -c --arg bytecode "$bytecode_cache" '. + [{operation:"remove", target:$bytecode}]' \
+    <<<"$targets")
+fi
 # Settings → Media may have written drop-ins that empty the media flag; they
 # exist only if that option was ever turned off.
 for unit in wacli-sync.service wacli-sync@.service; do

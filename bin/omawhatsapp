@@ -9,9 +9,12 @@ lines first: every send, refresh, and status poll starts about 0.2 s sooner.
 import os
 import sys
 
-_cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+# Compiled files stay out of ~/.local/bin; uninstall removes this folder. A
+# relative XDG_CACHE_HOME is invalid and ignored, as the install scripts do.
+_cache_home = os.environ.get("XDG_CACHE_HOME", "")
+if not os.path.isabs(_cache_home):
+    _cache_home = os.path.join(os.path.expanduser("~"), ".cache")
 if os.path.isabs(_cache_home):
-    # Keeps compiled files out of ~/.local/bin; uninstall removes this folder.
     sys.pycache_prefix = os.path.join(_cache_home, "omawhatsapp", "pycache")
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 

@@ -556,7 +556,8 @@ class UninstallEnvironmentTests(unittest.TestCase):
             command.chmod(0o755)
         return fake_bin, fake_state
 
-    def populate_install(self, home: Path, service_root: Path, runtime: Path) -> None:
+    def populate_install(self, home: Path, service_root: Path, runtime: Path,
+                         with_bytecode: bool = True) -> None:
         plugin = home / ".config" / "omarchy" / "plugins" / PLUGIN_ID
         plugin.mkdir(parents=True)
         (plugin / "manifest.json").write_text("{}\n", encoding="utf-8")
@@ -566,8 +567,12 @@ class UninstallEnvironmentTests(unittest.TestCase):
         helper = home / ".local" / "bin" / "omawhatsapp"
         helper.parent.mkdir(parents=True)
         helper.write_text("synthetic\n", encoding="utf-8")
-        for name in ("omawhatsapp_assets.py", "omawhatsapp-mcp"):
+        for name in ("omawhatsapp_assets.py", "omawhatsapp_core.py", "omawhatsapp-mcp"):
             (helper.parent / name).write_text("synthetic\n", encoding="utf-8")
+        if with_bytecode:
+            compiled = home / ".cache" / "omawhatsapp" / "pycache" / "omawhatsapp_core.pyc"
+            compiled.parent.mkdir(parents=True)
+            compiled.write_bytes(b"synthetic")
         service_root.mkdir(parents=True, exist_ok=True)
         for name in ("wacli-sync.service", "wacli-sync@.service"):
             (service_root / name).write_text("synthetic\n", encoding="utf-8")
@@ -598,12 +603,15 @@ class UninstallEnvironmentTests(unittest.TestCase):
         xdg_config: str,
         xdg_state: str,
         extra_environment: dict[str, str] | None = None,
+        with_bytecode: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         fake_bin, fake_state = self.make_fake_commands(root)
-        self.populate_install(home, service_root, runtime)
+        self.populate_install(home, service_root, runtime, with_bytecode)
         work = root / "work"
         work.mkdir()
         environment = os.environ.copy()
+        # Never let a test reach the real user cache.
+        environment.pop("XDG_CACHE_HOME", None)
         environment.update(
             {
                 "HOME": str(home),
@@ -646,7 +654,24 @@ class UninstallEnvironmentTests(unittest.TestCase):
             self.assertFalse((service_root / "wacli-sync.service").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp_assets.py").exists())
+            self.assertFalse((home / ".local" / "bin" / "omawhatsapp_core.py").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp-mcp").exists())
+            self.assertFalse((home / ".cache" / "omawhatsapp" / "pycache").exists())
+
+    def test_uninstall_works_before_the_helper_ever_ran(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            service_root = home / ".config" / "systemd" / "user"
+            runtime = home / ".local" / "state" / "omawhatsapp"
+            result = self.run_uninstall(
+                root, home, service_root, runtime,
+                xdg_config=str(home / ".config"), xdg_state=str(home / ".local" / "state"),
+                with_bytecode=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((home / ".local" / "bin" / "omawhatsapp").exists())
+            self.assertFalse((home / ".cache").exists(), "no cache folder is created")
 
     def test_unit_discovery_accepts_a_machine_without_sync_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
