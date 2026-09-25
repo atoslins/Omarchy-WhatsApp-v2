@@ -2,6 +2,9 @@
 
 ## Unreleased (fork)
 
+- In a group, the photo (or initials, in the color of their name) of whoever
+  wrote sits beside the last message of each of their runs, in a column that
+  keeps the run aligned. The bar dropdown keeps its narrow bubbles without it.
 - Signature (Settings → Chats → Sign my messages): each account can sign its
   texts and captions with a name in bold, on its own first line or at the
   end. It is off by default, never touches reactions, stickers or audio, and

@@ -156,7 +156,14 @@ Item {
   readonly property string timestampText: Qt.formatDateTime(
     new Date(Number(message.timestamp || 0) * 1000),
     TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
-  readonly property real maximumWidth: width * (narrow ? 0.92 : 0.76)
+  // In a group, others' messages keep a column for who wrote them: their photo
+  // or initials, next to the last message of each run.
+  property bool senderAvatars: false
+  property string senderAvatarPath: ""
+  readonly property bool senderGutter: senderAvatars && groupChat && message
+    && message.from_me !== true
+  readonly property real gutterWidth: senderGutter ? Style.space(40) : 0
+  readonly property real maximumWidth: (width - gutterWidth) * (narrow ? 0.92 : 0.76)
   // Delivery state of a sent message, from wacli builds that keep receipts;
   // empty when wacli recorded none (official wacli, or older messages).
   readonly property string deliveryStatus: message && message.from_me === true
@@ -279,6 +286,7 @@ Item {
     opacity: root.pending ? 0.72 : 1
     anchors.right: root.message.from_me ? parent.right : undefined
     anchors.left: root.message.from_me ? undefined : parent.left
+    anchors.leftMargin: root.gutterWidth
     width: root.desiredWidth
     // Time and ticks share the last line of text when it has room, as on
     // the phone, instead of taking a line of their own.
@@ -1026,6 +1034,23 @@ Item {
         }
       }
     }
+  }
+
+  ChatAvatar {
+    objectName: "messageSenderAvatar"
+    visible: root.senderGutter && !root.joinsBelow
+    x: 0
+    anchors.bottom: bubble.bottom
+    width: Style.space(30)
+    height: width
+    showPhoto: root.senderAvatarPath !== ""
+    chat: ({ name: String(root.message.sender || ""), kind: "dm",
+      jid: String(root.message.sender_jid || root.message.sender || ""),
+      avatar_path: root.senderAvatarPath })
+    foreground: root.foreground
+    background: root.background
+    accent: root.accent
+    fontFamily: root.fontFamily
   }
 
   Row {

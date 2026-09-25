@@ -1765,6 +1765,23 @@ Item {
     return chat.pinned !== true && previous && previous.pinned === true ? "Recent" : ""
   }
 
+  // A group member's cached photo, from their own chat in this account.
+  readonly property var avatarsByJid: {
+    var map = ({})
+    var chats = root.sourceChats || []
+    for (var i = 0; i < chats.length; i++) {
+      var chat = chats[i]
+      if (chat && String(chat.avatar_path || "") !== "" && chat.kind !== "group")
+        map[String(chat.account || "") + "\n" + String(chat.jid || "")] = String(chat.avatar_path)
+    }
+    return map
+  }
+  function senderAvatarPath(message) {
+    if (!message || message.from_me === true) return ""
+    return root.avatarsByJid[String(root.selectedAccount || "") + "\n"
+      + String(message.sender_jid || "")] || ""
+  }
+
   function previewKindGlyph(kind) {
     return AccountModel.previewKindGlyph(kind)
   }
@@ -3600,6 +3617,8 @@ Item {
               dimmer: root.dimmer
               fontFamily: root.fontFamily
               groupChat: root.displayKind === "group"
+              senderAvatars: true
+              senderAvatarPath: root.showAvatars ? root.senderAvatarPath(modelData) : ""
               joinsAbove: messageRow.joinsAbove
               joinsBelow: messageRow.joinsBelow
               selected: root.keyboardContext === "messages"

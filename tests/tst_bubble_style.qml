@@ -129,4 +129,32 @@ TestCase {
     compare(surface.color.a, 0, "a deleted message keeps only its outline")
     compare(surface.border.width, 1)
   }
+
+  function test_group_messages_show_who_wrote_them_once_per_run() {
+    // L227: the photo or initials of the sender beside the last message of
+    // each run, in a column that keeps the run's bubbles aligned.
+    var last = bubble({ sender: "Rafael Lima", sender_jid: "rafael@s.whatsapp.net" },
+      { groupChat: true, senderAvatars: true, joinsAbove: true, joinsBelow: false })
+    var avatar = findChild(last, "messageSenderAvatar")
+    verify(avatar.visible, "the last message of the run carries the avatar")
+    compare(findChild(avatar, "chatAvatarFallback").text, "RL")
+    var surface = findChild(last, "messageBubbleSurface")
+    compare(surface.x, last.gutterWidth, "the bubble starts after the column")
+    verify(last.gutterWidth > avatar.width)
+    compare(String(findChild(avatar, "chatAvatarBackdrop").color),
+      String(last.senderColor("rafael@s.whatsapp.net")), "the same color as the name")
+
+    var earlier = bubble({ sender: "Rafael Lima", sender_jid: "rafael@s.whatsapp.net" },
+      { groupChat: true, senderAvatars: true, joinsBelow: true })
+    verify(!findChild(earlier, "messageSenderAvatar").visible, "one avatar per run")
+    compare(findChild(earlier, "messageBubbleSurface").x, earlier.gutterWidth, "still aligned")
+
+    var mine = bubble({ from_me: true, sender: "You" }, { groupChat: true, senderAvatars: true })
+    verify(!findChild(mine, "messageSenderAvatar").visible)
+    compare(mine.gutterWidth, 0)
+    var direct = bubble({}, { groupChat: false, senderAvatars: true })
+    compare(direct.gutterWidth, 0, "a one-to-one chat needs no column")
+    var compact = bubble({}, { groupChat: true, senderAvatars: false })
+    compare(compact.gutterWidth, 0, "the dropdown keeps its narrow bubbles")
+  }
 }
