@@ -257,4 +257,3 @@ function hasStoredMessages(messages) {
     if (items[i] && items[i].pending !== true) return true
   return false
 }
-
