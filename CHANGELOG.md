@@ -2,6 +2,12 @@
 
 ## Unreleased (fork)
 
+- First run: with nothing linked, the window welcomes you instead of an empty
+  list: what OmaWhatsApp is, what stays on this computer, the three steps to
+  link the phone and a Show QR code button that opens the code in a terminal;
+  it says what to install when wacli is missing. The list then says "Syncing
+  your chats…" until the first sync fills it, and the bar dropdown offers
+  Set up.
 - The person you are writing to now sees "typing…" while you type in the app
   or the dropdown, and "recording audio…" during a voice note, as from the
   phone. It follows "Show me online" and only goes through the running sync.

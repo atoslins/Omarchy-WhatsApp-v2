@@ -1579,6 +1579,11 @@ Item {
   // login session); nothing arrives, no popup, not shown online.
   property bool closed: false
   property bool startAtLogin: true
+  // First run: nothing linked yet (or no wacli at all) shows the welcome.
+  property bool wacliInstalled: true
+  property bool anyAuthenticated: true
+  property string defaultAccountName: "primary"
+  readonly property bool needsOnboarding: !wacliInstalled || (statusReady && !anyAuthenticated)
   function quitApp() {
     if (controlProcess.running || writing) return false
     return runControl("quit", ({}))
@@ -1880,6 +1885,8 @@ Item {
       var selectedAccount = String(root.selectedChatAccount || "")
       var applies = selectedAccount === "" || responseAccount === selectedAccount
       if (!payload || payload.ok !== true) {
+        // wacli missing: onboarding says how to install it.
+        root.wacliInstalled = !(payload && payload.installed === false)
         if (applies) {
           root.statusReady = false
           root.ready = false
@@ -1894,6 +1901,11 @@ Item {
         root.authenticated = readiness.authenticated
         root.railReady = readiness.railReady
         root.syncActive = payload.sync_active === true
+        root.wacliInstalled = true
+        root.anyAuthenticated = payload.any_authenticated === true
+        root.defaultAccountName = String((Array.isArray(payload.accounts)
+          ? (payload.accounts.filter(function(item) { return item && item["default"] === true })[0] || {})
+          : {}).account || "primary")
         root.closed = payload.closed === true
         root.startAtLogin = payload.start_at_login !== false
         root.offlineMode = payload.offline_mode === true

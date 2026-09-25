@@ -1432,10 +1432,14 @@ Panel {
               visible: root.filteredChats.length === 0
               anchors.centerIn: parent
               spacing: Style.space(7)
+              readonly property bool firstRun: !root.demoMode && !!root.service
+                && root.service.needsOnboarding === true
               Text {
                 textFormat: Text.PlainText
+                objectName: "dropdownEmptyTitle"
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: root.ready ? "No matching chats" : "OmaWhatsApp is reconnecting"
+                text: parent.firstRun ? "Link your WhatsApp to start"
+                  : root.ready ? "No matching chats" : "OmaWhatsApp is reconnecting"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -1444,10 +1448,32 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: root.ready ? "Try a different search" : "Your local archive will appear here"
+                text: parent.firstRun ? "The full app shows a QR code for your phone"
+                  : root.ready ? "Try a different search" : "Your local archive will appear here"
                 color: root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
+              }
+              Rectangle {
+                objectName: "dropdownSetUp"
+                visible: parent.firstRun
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: dropdownSetUpLabel.implicitWidth + Style.space(28)
+                height: Style.space(34)
+                radius: Style.cornerRadius + 2
+                color: root.accent
+                Text {
+                  textFormat: Text.PlainText
+                  id: dropdownSetUpLabel
+                  anchors.centerIn: parent
+                  text: "Set up"
+                  color: root.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.weight: Font.Bold
+                }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.openFullApp() }
               }
             }
           }

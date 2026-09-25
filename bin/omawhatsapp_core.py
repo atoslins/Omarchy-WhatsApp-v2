@@ -929,7 +929,11 @@ class Backend:
             return result
         if account.unit and self.online(account):
             try:
-                self._systemctl_user(["enable", "--now", account.unit])
+                # It starts now; at login only if OmaWhatsApp starts with the system.
+                if self._preferences().get("start_at_login") is not False:
+                    self._systemctl_user(["enable", "--now", account.unit])
+                else:
+                    self._systemctl_user(["start", account.unit])
             except OmaWhatsAppError as exc:
                 raise OmaWhatsAppPartialError(
                     "The account linked, but its background sync could not start.",

@@ -32,6 +32,25 @@ Item {
       helper, "link-account", String(name || ""), "--authorize", "interactive"]
   }
 
+  // The main account links with wacli's own auth: a terminal shows the QR
+  // code, and the sync starts once the phone has scanned it.
+  function mainLinkCommand() {
+    return ["/usr/bin/xdg-terminal-exec", "--title=OmaWhatsApp · Link WhatsApp", "--hold", "--",
+      helper, "wacli", "--interactive", "--authorize", "interactive", "--", "auth"]
+  }
+
+  function linkMainAccount(name) {
+    if (busy) return false
+    linkPhase = "running"
+    linkTarget = String(name || "primary")
+    linkPolls = 0
+    statusMessage = "Scan the QR code in the terminal with your phone"
+    linkProcess.command = mainLinkCommand()
+    linkProcess.running = true
+    linkPoll.restart()
+    return true
+  }
+
   function linkAccount(name) {
     var value = String(name || "").trim()
     if (busy || value === "") return false

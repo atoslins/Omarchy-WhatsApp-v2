@@ -190,6 +190,10 @@ Item {
     && typeof root.service.syncPauseReason === "string" ? root.service.syncPauseReason : ""
   // Demo captures pick the density with {"demo":true,"density":"compact"}.
   property string demoRailDensity: ""
+  // {"demo":true,"onboarding":true} shows the first-run welcome.
+  property bool demoOnboarding: false
+  readonly property bool onboarding: root.demoMode ? root.demoOnboarding
+    : !!root.service && root.service.needsOnboarding === true
   readonly property bool compactRail: root.demoMode ? root.demoRailDensity === "compact"
     : !!root.service && root.service.railDensity === "compact"
   // The list's stamps change with the day, so "now" ticks while the app is open.
@@ -377,6 +381,7 @@ Item {
     // Opening a closed OmaWhatsApp starts it again.
     if (!demoMode && service && service.closed === true) service.launchApp()
     demoRailDensity = demoMode && payload.density === "compact" ? "compact" : ""
+    demoOnboarding = demoMode && payload.onboarding === true
     clockNow = new Date()
     opened = true
     demoVoiceState = demoMode && payload.voice === true ? "review" : "idle"
@@ -2916,6 +2921,37 @@ Item {
             model: root.visibleChats
             currentIndex: root.chatCursorIndex
             boundsBehavior: Flickable.StopAtBounds
+
+            // Linked, and the first sync still filling the mirror.
+            Column {
+              objectName: "railFirstSync"
+              visible: !root.demoMode && chatList.count === 0 && root.chatView === "all"
+                && String(chatSearchField.text || "").trim() === "" && !root.onboarding
+                && !!root.service && root.service.anyAuthenticated === true
+              width: chatList.width
+              y: Style.space(28)
+              spacing: Style.space(6)
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: "Syncing your chats…"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width - Style.space(24)
+                x: Style.space(12)
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                text: "The first sync can take a few minutes. Chats appear here as they arrive; keep the phone online."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
 
             Text {
               textFormat: Text.PlainText
@@ -5914,6 +5950,22 @@ Item {
             TapHandler { enabled: contactDraftSend.ready; onTapped: root.sendContactDraft() }
           }
         }
+      }
+
+      // First run: nothing linked yet (or no wacli), over the whole window.
+      OnboardingView {
+        id: onboardingView
+        objectName: "onboardingView"
+        visible: root.onboarding && !root.settingsOpen
+        anchors.fill: parent
+        z: 80
+        service: root.demoMode ? null : root.service
+        demoMode: root.demoMode
+        foreground: root.foreground
+        background: root.background
+        accent: root.accent
+        dim: root.dim
+        fontFamily: root.fontFamily
       }
 
       ChatDetailsPanel {
