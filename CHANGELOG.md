@@ -119,6 +119,21 @@
 - Ctrl+V no longer waits behind a running send or read mark; it has its own
   process, and plain text still pastes when the helper cannot read the
   clipboard.
+- Format messages as on WhatsApp: *bold*, _italic_, ~strikethrough~,
+  ```monospace```, `code`, bulleted and numbered lists, and quotes. The
+  composer's formatting button lists every option with its syntax;
+  Ctrl+B and Ctrl+I (on a selection), Ctrl+Shift+X and Ctrl+Shift+M apply
+  them, in the full app and the bar dropdown. Messages show the formatting,
+  rendered from escaped text with a fixed set of tags, and chat previews drop
+  the markers.
+- A shared contact shows as a card with the name, the number, "Message" (its
+  chat, or a new chat with the number typed in) and "Copy number", instead of
+  the text "Contact: Name (+…)". Chat previews show "👤 Name".
+- The MCP server gains `list_statuses` and `delete_status`, so a posted status
+  can be taken back; `fetch_older_history` first asks the user to open WhatsApp
+  on the phone and pauses nothing until they confirm; group actions reach
+  communities and their groups through the gateway; `read_chat` reports shared
+  contacts.
 - Reactions show under their message again. Lists inside a message reach the
   bubble as Qt sequences through the list model, so the reaction and button
   rows had been empty.

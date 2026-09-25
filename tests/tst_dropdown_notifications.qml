@@ -182,4 +182,25 @@ TestCase {
     compare(service.pastes, 1, "Ctrl+V runs beside the read mark")
     dropdown.close()
   }
+
+  function test_the_dropdown_formats_and_hands_a_contact_to_the_full_app() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+    verify(findChild(dropdown, "composerFormatButton") !== null)
+    var composer = findChild(dropdown, "composerInput")
+    composer.text = "quick note"
+    composer.select(0, 5)
+    verify(dropdown.applyFormat("strike"))
+    compare(composer.text, "~quick~ note")
+    var spy = createTemporaryObject(spyComponent, testCase,
+      { target: dropdown, signalName: "fullAppRequested" })
+    verify(dropdown.openContactChat({ name: "Nobody", digits: "15550009999", jid: "" }))
+    compare(spy.count, 1)
+    compare(spy.signalArguments[0][0].newChat, true)
+    compare(spy.signalArguments[0][0].newChatQuery, "15550009999")
+  }
 }

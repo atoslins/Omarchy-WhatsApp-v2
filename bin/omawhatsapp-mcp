@@ -190,6 +190,12 @@ def shape_message(row: dict[str, Any]) -> dict[str, Any]:
         "starred": True if row.get("starred") else None,
         "deleted_for_everyone": True if row.get("revoked") else None,
     }
+    cards = row.get("contacts")
+    if isinstance(cards, list) and cards:
+        shaped["shared_contacts"] = [compact({"name": card.get("name"), "phone": card.get("phone"),
+                                              "jid": card.get("jid"),
+                                              "has_chat": True if card.get("has_chat") else None})
+                                     for card in cards if isinstance(card, dict)]
     poll = row.get("poll")
     if isinstance(poll, dict):
         shaped["poll"] = compact({
@@ -963,6 +969,55 @@ def create_group(name: str, participants: list[str] | None = None, description: 
     return compact(result)
 
 
+# A community and the groups inside it are not in the chat rail, so the
+# helper's group-action cannot reach them; the same actions then go through
+# the guarded wacli gateway with the class each one needs.
+OUTSIDE_RAIL = "not available in the local WhatsApp index"
+
+
+def gateway_group_action(jid: str, action: str, value: Any, account: str) -> dict[str, Any]:
+    target = ["--jid", jid]
+    users = value if isinstance(value, list) else [value]
+    flags: list[str] = []
+    for user in users:
+        if user:
+            flags += ["--user", str(user)]
+    table: dict[str, tuple[list[str], str]] = {
+        "rename": (["groups", "rename", *target, "--name", str(value or "")], "whatsapp-write"),
+        "description": (["groups", "description", *target, "--text", str(value or "")],
+                        "whatsapp-write"),
+        "announce": (["groups", "announce-only", *target, "--on" if value else "--off"],
+                     "whatsapp-write"),
+        "locked": (["groups", "locked", *target, "--on" if value else "--off"], "whatsapp-write"),
+        "add": (["groups", "participants", "add", *target, *flags], "whatsapp-write"),
+        "promote": (["groups", "participants", "promote", *target, *flags], "whatsapp-write"),
+        "demote": (["groups", "participants", "demote", *target, *flags], "destructive"),
+        "remove": (["groups", "participants", "remove", *target, *flags], "destructive"),
+        "invite-get": (["groups", "invite", "link", "get", *target], "remote-read"),
+        "invite-revoke": (["groups", "invite", "link", "revoke", *target], "destructive"),
+        "requests": (["groups", "requests", "list", *target], "remote-read"),
+        "approve": (["groups", "requests", "approve", *target, *flags], "whatsapp-write"),
+        "reject": (["groups", "requests", "reject", *target, *flags], "destructive"),
+        "leave": (["groups", "leave", *target], "destructive"),
+    }
+    arguments, token = table[action]
+    data = gateway(arguments, token, account, timeout=120)
+    return dict(data if isinstance(data, dict) else {"result": data}, outside_rail=True)
+
+
+def run_group_action(request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        answer = helper("group-action", request, timeout=120)
+    except ToolError as exc:
+        if OUTSIDE_RAIL not in str(exc):
+            raise
+        answer = gateway_group_action(request["jid"], request["action"], request.get("value"),
+                                      str(request.get("account") or ""))
+    answer.pop("ok", None)
+    answer.pop("kind", None)
+    return compact(dict(answer, done=True))
+
+
 GROUP_ACTIONS = ["rename", "description", "announce_only", "locked", "add", "promote",
                  "approve_request", "invite_link", "pending_requests"]
 
@@ -992,10 +1047,7 @@ def manage_group(jid: str, action: str, value: Any = None, account: str = "") ->
         request["value"] = exact_jid(value, "value")
     if action in ("invite_link", "pending_requests"):
         request["authorization"] = "remote-read"
-    answer = helper("group-action", request, timeout=120)
-    answer.pop("ok", None)
-    answer.pop("kind", None)
-    return compact(dict(answer, done=True))
+    return run_group_action(request)
 
 
 @tool("remove_or_leave_group", "Remove people or leave a group",
@@ -1012,34 +1064,60 @@ def remove_or_leave_group(jid: str, action: str, user: str = "",
                                "action": names.get(action, action)}
     if action in ("remove", "demote", "reject_request"):
         request["value"] = exact_jid(user, "user")
-    answer = helper("group-action", request, timeout=120)
-    answer.pop("ok", None)
-    answer.pop("kind", None)
-    return compact(dict(answer, done=True))
+    return run_group_action(request)
 
 
 # ------------------------------------------------------------------ v2
 
 @tool("fetch_older_history", "Fetch older history",
-      "Ask the phone for older messages of one chat that are not in the local archive yet, "
-      "then search or read again. The phone must be online with WhatsApp reachable; it may "
-      "not answer, and each batch pauses background sync for up to about a minute. Do not "
-      "retry on your own.",
+      "Ask the phone for older messages of one chat that are not in the local archive yet. "
+      "It is a routine in two calls: the first returns what to ask the user (open WhatsApp "
+      "on the phone, on that chat) and changes nothing; call again with phone_ready: true "
+      "only after the user confirms. Each batch pauses background sync for up to about a "
+      "minute. If the phone does not answer, tell the user; do not retry on your own.",
       {"chat": CHAT,
+       "phone_ready": {"type": "boolean",
+                       "description": "true only after the user said WhatsApp is open on the phone."},
        "batches": {"type": "integer", "description": "History batches to request, default 1, at most 10."},
        "per_batch": {"type": "integer", "description": "Messages per batch, default 50, at most 200."}},
       ("chat",), kind="write")
-def fetch_older_history(chat: str, batches: int = 1, per_batch: int = 50,
-                        account: str = "") -> dict[str, Any]:
+def fetch_older_history(chat: str, phone_ready: bool = False, batches: int = 1,
+                        per_batch: int = 50, account: str = "") -> dict[str, Any]:
     target = resolve_chat(chat, account)
+    scope = str(target.get("account") or account)
+    details = helper("chat-details", chat_payload(target, account))
+    before = details.get("counts") or {}
+    name = str((details.get("chat") or {}).get("name") or target.get("name") or "this chat")
+    oldest = local_time(details.get("since"))
+    if not phone_ready:
+        # Nothing is paused yet: the phone answers history requests only
+        # while WhatsApp runs there, so the user opens it first.
+        return compact({
+            "done": False,
+            "ask_user": (f"Open WhatsApp on your phone, open the chat with {name}, and keep "
+                         "the screen on. Tell me when it is ready."),
+            "local_archive_starts": oldest,
+            "messages_here": before.get("total"),
+            "next": "After the user confirms, call fetch_older_history again with phone_ready: true.",
+        })
     requests = bounded(batches, 1, 1, 10)
-    before = helper("chat-details", chat_payload(target, account)).get("counts") or {}
-    gateway(["history", "backfill", "--chat", target["jid"], "--requests", str(requests),
-             "--count", str(bounded(per_batch, 50, 1, 200))], "sync",
-            str(target.get("account") or account), timeout=90 * requests + 30)
+    try:
+        gateway(["history", "backfill", "--chat", target["jid"], "--requests", str(requests),
+                 "--count", str(bounded(per_batch, 50, 1, 200))], "sync", scope,
+                timeout=90 * requests + 30)
+    except ToolError as exc:
+        raise ToolError(f"{exc} The phone did not send older messages. Ask the user to keep "
+                        "WhatsApp open on the phone, on this chat, with the screen on; then it "
+                        "may be tried once more.") from exc
     after = helper("chat-details", chat_payload(target, account)).get("counts") or {}
-    return {"done": True, "messages_before": before.get("total"),
-            "messages_now": after.get("total")}
+    fetched = int(after.get("total") or 0) - int(before.get("total") or 0)
+    result: dict[str, Any] = {"done": True, "fetched": max(0, fetched),
+                              "messages_before": before.get("total"),
+                              "messages_now": after.get("total")}
+    if fetched <= 0:
+        result["note"] = ("The phone sent nothing new: this chat may have no older messages, "
+                          "or the phone did not have them loaded.")
+    return result
 
 
 @tool("list_calls", "Call history",
@@ -1237,8 +1315,17 @@ def update_profile(name: str = "", about: str = "", photo_path: str = "",
                 account, timeout=60)
         changed.append("name")
     if about:
-        gateway(["profile", "set-about", text_argument(about, "about")[:139]], "whatsapp-write",
-                account, timeout=60)
+        try:
+            gateway(["profile", "set-about", text_argument(about, "about")[:139]],
+                    "whatsapp-write", account, timeout=60)
+        except ToolError as exc:
+            if "graphql" not in str(exc).lower():
+                raise
+            # Seen on a WhatsApp Business number: its about lives in the
+            # business profile, and WhatsApp refuses this change.
+            raise ToolError("WhatsApp refused the about change. WhatsApp Business accounts keep "
+                            "it in the business profile, which is edited on the phone."
+                            + (f" Already changed: {', '.join(changed)}." if changed else "")) from exc
         changed.append("about")
     if photo_path:
         photo = Path(photo_path).expanduser()
@@ -1272,7 +1359,33 @@ def post_status(text: str = "", file_path: str = "", background_color: str = "",
         if not re.fullmatch(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})", background_color):
             raise ToolError("background_color must look like #RRGGBB.")
         arguments += ["--background-color", background_color]
-    gateway(arguments, "whatsapp-write", account, timeout=180)
+    data = gateway(arguments, "whatsapp-write", account, timeout=180) or {}
+    return compact({"done": True, "status_id": data.get("id") if isinstance(data, dict) else None,
+                    "note": "delete_status with this status_id removes it for everyone."})
+
+
+@tool("list_statuses", "Status updates",
+      "Status updates of the last 24 hours kept on this computer: your contacts' and yours, "
+      "newest first, with who posted them. Media in a status is named, not downloaded.",
+      {"mine_only": BOOL})
+def list_statuses(mine_only: bool = False, account: str = "") -> dict[str, Any]:
+    rows = helper("statuses", {"account": account, "mine_only": mine_only}).get("statuses") or []
+    return {"statuses": [compact({
+        "id": row.get("id"), "time": local_time(row.get("timestamp")),
+        "from_me": bool(row.get("from_me")), "sender": row.get("sender"),
+        "sender_jid": row.get("sender_jid"), "text": row.get("text"),
+        "media_type": row.get("media_type"), "caption": row.get("caption"),
+        "filename": row.get("filename"),
+    }) for row in rows]}
+
+
+@tool("delete_status", "Delete a status",
+      "Delete one of your own status updates for everyone, by the id from post_status or "
+      "list_statuses. Pauses background sync briefly.",
+      {"id": {"type": "string", "description": "Your status id."}}, ("id",),
+      kind="write", destructive=True)
+def delete_status(id: str, account: str = "") -> dict[str, Any]:
+    helper("delete-status", {"account": account, "id": str(id)}, timeout=120)
     return {"done": True}
 
 

@@ -149,17 +149,19 @@ attachments did Bruno send this month", "reply to Carlos that I am on my way",
 "create a group with Ana, Bruno and Carlos called Obra", "tag these five as
 suppliers and tell each of them we are closed tomorrow".
 
-The 44 tools cover reading (status, chats and views, unread messages with
+The 46 tools cover reading (status, chats and views, unread messages with
 context, chats awaiting your reply, reading a chat by period, full-text search
 with filters, message context, starred messages, attachments across chats,
 opening an attachment, contacts and tags, chat and group details, call
-history, polls and their votes, a contact's about and business profile,
-followed channels) and acting (sending, replying, reacting, forwarding,
-editing, deleting, files, first messages to a number, polls and votes,
-locations, chat states, group creation and administration, contact aliases
-and tags, one private message to each of several people, profile and status,
-channels, invite links, exports, older history from the phone, and missing
-attachments).
+history, polls and their votes, status updates from your contacts, a contact's
+about and business profile, followed channels) and acting (sending, replying,
+reacting, forwarding, editing, deleting, files, first messages to a number,
+polls and votes, locations, chat states, group creation and administration,
+contact aliases and tags, one private message to each of several people,
+profile, posting and deleting your status, channels, invite links, exports,
+older history from the phone, and missing attachments). Older history is a
+two-step routine: the agent first asks you to open WhatsApp on the phone, and
+only then asks the phone.
 
 Every tool that changes WhatsApp is annotated as such, so Claude Code asks
 before each call and shows the recipient and the text. The server never opens
@@ -169,7 +171,9 @@ tags and aliases, profile and status changes, channel lookups, and older
 history pause background sync for a few seconds (older history for up to about
 a minute); a message arriving then reaches the local archive once wacli
 catches up, and the phone has it throughout. wacli does not keep channel
-posts, so channels can be listed, joined, and left but not read.
+posts, so channels can be listed, joined, and left but not read. A WhatsApp
+Business number refuses changes to its about text, and on the account tested
+WhatsApp refused to create communities through wacli.
 
 ## One app at every size
 

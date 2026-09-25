@@ -37,9 +37,9 @@ WRITE_TOOLS = {
     "delete_message", "send_poll", "set_chat_state", "create_group", "manage_group",
     "remove_or_leave_group", "fetch_older_history", "tag_contacts", "set_contact_alias",
     "send_individually", "vote_poll", "send_location", "update_profile", "post_status",
-    "join_channel", "leave_channel", "export_chat", "join_group",
+    "join_channel", "leave_channel", "export_chat", "join_group", "delete_status",
 }
-DESTRUCTIVE_TOOLS = {"delete_message", "remove_or_leave_group", "leave_channel"}
+DESTRUCTIVE_TOOLS = {"delete_message", "remove_or_leave_group", "leave_channel", "delete_status"}
 
 
 def chat(jid: str, name: str, kind: str = "dm", **fields: object) -> dict[str, object]:
@@ -146,7 +146,7 @@ class ProtocolTests(ToolCase):
 
     def test_every_tool_declares_a_schema_and_honest_annotations(self) -> None:
         tools = {tool["name"]: tool for tool in mcp.listed_tools()}
-        self.assertEqual(len(tools), 44)
+        self.assertEqual(len(tools), 46)
         for name, tool in tools.items():
             self.assertRegex(name, r"^[a-z][a-z_]+$")
             self.assertTrue(tool["description"] and tool["title"], name)
@@ -304,6 +304,16 @@ class ReadToolTests(ToolCase):
                          {"text": "Mon", "votes": 2, "voters": ["You", "Sam"], "mine": True})
         self.assertEqual(rows["p1"]["poll"]["choices_allowed"], 1)
         self.assertTrue(rows["gone"]["deleted_for_everyone"])
+
+    def test_read_chat_gives_shared_contacts_with_their_numbers(self) -> None:
+        page = [message("c1", 30, text="Contact: Ana (+55 16 99999-0000)", contacts=[
+            {"name": "Ana", "phone": "+55 16 99999-0000", "digits": "5516999990000",
+             "jid": "5516999990000@s.whatsapp.net", "has_chat": True}])]
+        self.chats(messages={"messages": page, "has_more": False})
+        row = self.run_tool("read_chat", chat="sam@s.whatsapp.net")["messages"][0]
+        self.assertEqual(row["shared_contacts"], [{"name": "Ana", "phone": "+55 16 99999-0000",
+                                                   "jid": "5516999990000@s.whatsapp.net",
+                                                   "has_chat": True}])
 
     def test_global_search_goes_to_wacli_with_every_filter(self) -> None:
         rows = [{"ChatJID": "sam@s.whatsapp.net", "ChatName": "Sam", "MsgID": "x1",
@@ -526,16 +536,85 @@ class WriteToolTests(ToolCase):
                                                    action="demote"))
 
 
+class CommunityTests(ToolCase):
+    OUTSIDE = mcp.ToolError("That chat is not available in the local WhatsApp index.")
+
+    def test_a_group_inside_a_community_is_managed_through_the_gateway(self) -> None:
+        recorder = self.use(**{"group-action": self.OUTSIDE,
+                               "wacli groups invite": {"data": {"link": "https://chat.whatsapp.com/X"}}})
+        self.run_tool("remove_or_leave_group", jid="sub@g.us", action="remove",
+                      user="a@s.whatsapp.net")
+        self.assertEqual(recorder.wacli()[-1], ["groups", "participants", "remove", "--jid",
+                                                "sub@g.us", "--user", "a@s.whatsapp.net"])
+        self.assertEqual(recorder.token(), "destructive")
+        link = self.run_tool("manage_group", jid="sub@g.us", action="invite_link")
+        self.assertEqual(recorder.token(), "remote-read")
+        self.assertEqual(link["link"], "https://chat.whatsapp.com/X")
+        self.assertTrue(link["outside_rail"])
+        self.run_tool("manage_group", jid="sub@g.us", action="rename", value="Obra 2")
+        self.assertEqual(recorder.wacli()[-1][:2], ["groups", "rename"])
+        self.assertEqual(recorder.token(), "whatsapp-write")
+        self.run_tool("remove_or_leave_group", jid="community@g.us", action="leave")
+        self.assertEqual(recorder.wacli()[-1], ["groups", "leave", "--jid", "community@g.us"])
+        self.assertEqual(recorder.token(), "destructive")
+
+    def test_other_helper_errors_are_not_retried_through_the_gateway(self) -> None:
+        recorder = self.use(**{"group-action": mcp.ToolError("Offline mode is on.")})
+        self.assertIn("Offline", self.tool_error("remove_or_leave_group", jid="g@g.us",
+                                                 action="leave"))
+        self.assertEqual(recorder.wacli(), [])
+
+    def test_a_community_needs_no_participants_and_a_subgroup_names_its_parent(self) -> None:
+        recorder = self.use(**{"wacli groups create": {"data": {"JID": "parent@g.us"}}})
+        self.run_tool("create_group", name="Company", community=True)
+        self.assertIn("--community", recorder.wacli()[-1])
+        self.run_tool("create_group", name="Site", participants=["a@s.whatsapp.net"],
+                      community_jid="parent@g.us")
+        arguments = recorder.wacli()[-1]
+        self.assertEqual(arguments[arguments.index("--linked-parent") + 1], "parent@g.us")
+
+
 class SecondWaveTests(ToolCase):
-    def test_older_history_asks_the_phone_with_the_sync_token(self) -> None:
+    def test_older_history_first_asks_the_user_to_open_the_phone(self) -> None:
+        # The owner's idea: the phone answers only while WhatsApp runs there,
+        # so the first call only says what to ask and pauses nothing.
+        recorder = self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana")]},
+                            **{"chat-details": {"counts": {"total": 10}, "since": 1780000000,
+                                                "chat": {"name": "Ana", "kind": "dm"}}})
+        answer = self.run_tool("fetch_older_history", chat="Ana")
+        self.assertFalse(answer["done"])
+        self.assertIn("Open WhatsApp on your phone", answer["ask_user"])
+        self.assertIn("Ana", answer["ask_user"])
+        self.assertIn("phone_ready: true", answer["next"])
+        self.assertEqual(answer["messages_here"], 10)
+        self.assertTrue(answer["local_archive_starts"])
+        self.assertEqual(recorder.wacli(), [], "nothing is asked of the phone yet")
+
+    def test_older_history_asks_the_phone_once_the_user_is_ready(self) -> None:
         counts = iter([{"counts": {"total": 10}}, {"counts": {"total": 60}}])
         recorder = self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana")]},
                             **{"chat-details": lambda payload, args: next(counts)})
-        answer = self.run_tool("fetch_older_history", chat="Ana", batches=2)
-        self.assertEqual(answer, {"done": True, "messages_before": 10, "messages_now": 60})
+        answer = self.run_tool("fetch_older_history", chat="Ana", batches=2, phone_ready=True)
+        self.assertEqual(answer, {"done": True, "fetched": 50, "messages_before": 10,
+                                  "messages_now": 60})
         self.assertEqual(recorder.wacli()[0][:3], ["history", "backfill", "--chat"])
         self.assertIn("2", recorder.wacli()[0])
         self.assertEqual(recorder.token(), "sync")
+
+    def test_a_silent_phone_is_explained_not_retried(self) -> None:
+        recorder = self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana")]},
+                            **{"chat-details": {"counts": {"total": 10}},
+                               "wacli history backfill": mcp.ToolError("WhatsApp took too long to respond.")})
+        text = self.tool_error("fetch_older_history", chat="Ana", phone_ready=True)
+        self.assertIn("keep WhatsApp open on the phone", text)
+        self.assertEqual(len(recorder.wacli()), 1, "one attempt, never an automatic retry")
+
+    def test_nothing_new_from_the_phone_says_so(self) -> None:
+        self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana")]},
+                 **{"chat-details": {"counts": {"total": 10}}})
+        answer = self.run_tool("fetch_older_history", chat="Ana", phone_ready=True)
+        self.assertEqual(answer["fetched"], 0)
+        self.assertIn("nothing new", answer["note"])
 
     def test_tags_and_aliases_are_local_writes(self) -> None:
         recorder = self.use()
@@ -608,6 +687,30 @@ class SecondWaveTests(ToolCase):
         self.run_tool("post_status", text="Hello", background_color="#112233")
         self.assertEqual(recorder.wacli()[-1][:2], ["send", "status"])
         self.assertIn("#RRGGBB", self.tool_error("post_status", text="x", background_color="red"))
+
+    def test_a_posted_status_can_be_listed_and_deleted(self) -> None:
+        recorder = self.use(**{"wacli send status": {"data": {"sent": True, "id": "ST1"}},
+                               "statuses": {"statuses": [
+                                   {"id": "ST1", "timestamp": 1790280000, "from_me": True,
+                                    "sender": "You", "text": "On holiday"},
+                                   {"id": "X", "timestamp": 1790279000, "from_me": False,
+                                    "sender": "Sam", "sender_jid": "sam@s.whatsapp.net",
+                                    "text": "New tools"}]}})
+        posted = self.run_tool("post_status", text="On holiday")
+        self.assertEqual(posted["status_id"], "ST1")
+        statuses = self.run_tool("list_statuses")["statuses"]
+        self.assertEqual([item["id"] for item in statuses], ["ST1", "X"])
+        self.assertEqual(statuses[1]["sender"], "Sam")
+        self.assertFalse(recorder.of("statuses")[0]["mine_only"])
+        self.run_tool("delete_status", id="ST1")
+        self.assertEqual(recorder.of("delete-status")[0]["id"], "ST1")
+
+    def test_a_business_number_refusing_the_about_is_explained(self) -> None:
+        self.use(**{"wacli profile set-about": mcp.ToolError(
+            '{"success":false,"error":"set profile about: graphql error: 400 Bad Request (CRITICAL)"}')})
+        text = self.tool_error("update_profile", name="Atos", about="Busy")
+        self.assertIn("WhatsApp Business accounts keep it in the business profile", text)
+        self.assertIn("Already changed: name", text)
 
     def test_contact_profile_survives_a_person_without_a_business(self) -> None:
         recorder = self.use(**{"wacli profile get-about": {"data": {"about": "Busy"}},
@@ -793,7 +896,7 @@ class EndToEndTests(unittest.TestCase):
             ("tag_contacts", {"jids": ["member@s.whatsapp.net"], "tag": "suppliers"}),
             ("export_chat", {"chat": "alex@s.whatsapp.net", "path": str(export)}),
             ("list_channels", {}),
-            ("fetch_older_history", {"chat": "alex@s.whatsapp.net"}),
+            ("fetch_older_history", {"chat": "alex@s.whatsapp.net", "phone_ready": True}),
             ("search_messages", {"query": "movie"}),
         )
         for result in results:

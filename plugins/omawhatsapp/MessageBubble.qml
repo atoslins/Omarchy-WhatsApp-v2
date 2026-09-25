@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui as Ui
+import "FormatModel.js" as FormatModel
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
 import "LinkModel.js" as LinkModel
@@ -55,6 +56,16 @@ Item {
     return items
   }
   readonly property var buttonItems: listOf(message ? message.buttons : null)
+  // A shared contact, as wacli stores it, becomes a card like the phone's.
+  readonly property var contactCards: listOf(message ? message.contacts : null)
+  signal contactChatRequested(var card)
+  // WhatsApp's *bold*, _italic_, ~strike~, code and lists. FormatModel
+  // escapes the whole text first and emits only its own fixed tags.
+  readonly property bool richBody: bodyText !== "" && FormatModel.hasFormatting(bodyText)
+  readonly property string bodyHtml: richBody ? FormatModel.toHtml(bodyText, {
+    dim: String(dim),
+    code: String(Qt.rgba(foreground.r, foreground.g, foreground.b, 0.14))
+  }) : ""
   readonly property var poll: message && message.poll ? message.poll : null
   readonly property var pollOptions: poll ? listOf(poll.options) : []
   readonly property int pollMostVotes: pollOptions.reduce(function(most, option) {
@@ -139,7 +150,7 @@ Item {
     MediaModel.isVisual(message) ? 560 : 520)
   readonly property real desiredWidth: sticker ? Style.space(176) : message.media_type
       || String(message.quoted_id || "") !== ""
-      || buttonItems.length > 0 || poll !== null || revoked
+      || buttonItems.length > 0 || poll !== null || revoked || contactCards.length > 0
     ? (hasMedia ? mediaWidth : maximumWidth)
     : Math.max(Style.space(88), Math.min(maximumWidth,
         naturalTextWidth + Style.space(22)))
@@ -318,13 +329,14 @@ Item {
 
       TextEdit {
         id: messageText
-        visible: root.bodyText.length > 0
+        objectName: "messageText"
+        visible: root.bodyText.length > 0 && root.contactCards.length === 0
         width: parent.width
         height: contentHeight
-        text: root.bodyText
+        text: root.richBody ? root.bodyHtml : root.bodyText
         color: root.foreground
         wrapMode: Text.Wrap
-        textFormat: Text.PlainText
+        textFormat: root.richBody ? TextEdit.RichText : TextEdit.PlainText
         readOnly: true
         selectByMouse: true
         persistentSelection: true
@@ -341,7 +353,8 @@ Item {
           interval: 140
           repeat: false
           onTriggered: {
-            var value = String(messageText.selectedText || "")
+            // Rich text selects with Unicode line separators.
+            var value = String(messageText.selectedText || "").replace(/[\u2028\u2029]/g, "\n")
             if (value !== "") root.copyRequested(value)
           }
         }
@@ -391,6 +404,99 @@ Item {
             HoverHandler { id: linkHover; cursorShape: Qt.PointingHandCursor }
             Ui.PanelToolTip { visible: linkHover.hovered; text: "Open " + modelData.url }
             TapHandler { onTapped: Qt.openUrlExternally(modelData.url) }
+          }
+        }
+      }
+
+      Repeater {
+        model: root.contactCards
+        delegate: Rectangle {
+          id: contactCard
+          required property var modelData
+          objectName: "contactCard"
+          width: bubbleColumn.width
+          height: contactColumn.implicitHeight + Style.space(16)
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
+          Column {
+            id: contactColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: Style.space(10)
+            spacing: Style.space(8)
+            Row {
+              spacing: Style.space(10)
+              Rectangle {
+                width: Style.space(36)
+                height: width
+                radius: width / 2
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: "󰀄"
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.icon
+                }
+              }
+              Column {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+                Text {
+                  textFormat: Text.PlainText
+                  objectName: "contactName"
+                  width: contactColumn.width - Style.space(46)
+                  text: String(contactCard.modelData.name || "Contact")
+                  color: root.foreground
+                  elide: Text.ElideRight
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  objectName: "contactPhone"
+                  visible: text !== ""
+                  text: String(contactCard.modelData.phone || "")
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+            Row {
+              spacing: Style.space(6)
+              visible: String(contactCard.modelData.digits || "") !== ""
+              Repeater {
+                model: [{ id: "message", label: "󰍦  Message" }, { id: "copy", label: "󰆏  Copy number" }]
+                delegate: Rectangle {
+                  required property var modelData
+                  objectName: "contactAction-" + modelData.id
+                  width: actionLabel.implicitWidth + Style.space(18)
+                  height: Style.space(28)
+                  radius: height / 2
+                  color: actionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+                    : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
+                  Text {
+                    textFormat: Text.PlainText
+                    id: actionLabel
+                    anchors.centerIn: parent
+                    text: modelData.label
+                    color: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                  HoverHandler { id: actionHover; cursorShape: Qt.PointingHandCursor }
+                  TapHandler {
+                    onTapped: modelData.id === "message"
+                      ? root.contactChatRequested(contactCard.modelData)
+                      : root.copyRequested(String(contactCard.modelData.phone || ""))
+                  }
+                }
+              }
+            }
           }
         }
       }

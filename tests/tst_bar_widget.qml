@@ -20,6 +20,7 @@ TestCase {
       property bool showUnreadCount: true
       property bool notificationsMuted: false
       property int dropdownRows: 7
+      property string statusMessage: ""
       property string barTooltipWithMute: notificationsMuted ? "muted tooltip" : "tooltip"
       property int toggles: 0
       property int dismissals: 0

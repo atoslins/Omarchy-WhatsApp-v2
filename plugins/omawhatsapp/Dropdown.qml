@@ -8,6 +8,7 @@ import "DropdownModel.js" as DropdownModel
 import "AccountModel.js" as AccountModel
 import "TimeFormat.js" as TimeFormat
 import "ComposerModel.js" as ComposerModel
+import "FormatModel.js" as FormatModel
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -420,6 +421,32 @@ Panel {
     if (viewMode !== "conversation") return
     composer.forceActiveFocus()
     composer.cursorPosition = composer.length
+  }
+
+  function applyFormat(kind) {
+    var edit = FormatModel.apply(composer.text, composer.selectionStart, composer.selectionEnd, kind)
+    if (!edit) return false
+    composer.remove(edit.head, edit.end)
+    composer.insert(edit.head, edit.insert)
+    composer.select(edit.start, edit.selectEnd)
+    composer.forceActiveFocus()
+    return true
+  }
+
+  // "Message" on a shared contact: its chat here when it has one, otherwise
+  // the full app's new chat dialog with the number typed in.
+  function openContactChat(card) {
+    if (!card || demoMode) return false
+    var jid = String(card.jid || "")
+    var chats = service && Array.isArray(service.chats) ? service.chats : []
+    var known = jid === "" ? null : chats.find(function(chat) { return String(chat.jid || "") === jid })
+    if (known) {
+      openConversation(known)
+      return true
+    }
+    fullAppRequested({ newChat: true, newChatQuery: String(card.digits || "") })
+    close()
+    return true
   }
 
   function pasteClipboard() {
@@ -1057,7 +1084,7 @@ Panel {
                     textFormat: Text.PlainText
                     width: parent.width
                     text: AccountModel.previewPrefix(chatRow.modelData, root.multiAccount)
-                      + String(chatRow.modelData.preview || "No local messages yet")
+                      + (FormatModel.plain(String(chatRow.modelData.preview || "")) || "No local messages yet")
                     elide: Text.ElideRight
                     maximumLineCount: 1
                     color: root.muted
@@ -1385,6 +1412,7 @@ Panel {
                   if (!root.demoMode && root.service)
                     root.service.votePoll(root.currentChatRef(), modelData, options, "dropdown")
                 }
+                onContactChatRequested: function(card) { root.openContactChat(card) }
                 onOptionRequested: function(optionIndex) {
                   if (!root.demoMode && root.service)
                     root.service.selectOption(
@@ -1622,6 +1650,32 @@ Panel {
                     }
                   }
                 }
+                PanelActionButton {
+                  id: dropdownFormatButton
+                  objectName: "composerFormatButton"
+                  anchors.left: emojiButton.right
+                  anchors.bottom: parent.bottom
+                  size: composerRowItem.controlSize
+                  iconText: "󰛖"
+                  tooltipText: dropdownFormatMenu.opened ? "" : "Formatting"
+                  foreground: dropdownFormatMenu.opened ? root.accent : root.muted
+                  hoverColor: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.body
+                  onClicked: dropdownFormatMenu.opened ? dropdownFormatMenu.close() : dropdownFormatMenu.open()
+
+                  FormatMenu {
+                    id: dropdownFormatMenu
+                    x: 0
+                    y: -height - Style.space(8)
+                    foreground: root.foreground
+                    surface: root.background
+                    accent: root.accent
+                    muted: root.muted
+                    fontFamily: root.fontFamily
+                    onChosen: function(kind) { root.applyFormat(kind) }
+                  }
+                }
                 Rectangle {
                   id: sendButton
                   objectName: "composerSendButton"
@@ -1662,7 +1716,7 @@ Panel {
                 Rectangle {
                   id: composerFieldSurface
                   objectName: "composerFieldSurface"
-                  anchors.left: emojiButton.right
+                  anchors.left: dropdownFormatButton.right
                   anchors.leftMargin: Style.space(6)
                   anchors.right: sendButton.left
                   anchors.rightMargin: Style.space(8)
@@ -1755,6 +1809,16 @@ Panel {
                         event.accepted = true
                       } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
                         root.pasteClipboard()
+                        event.accepted = true
+                      } else if ((event.modifiers & Qt.ControlModifier)
+                                 && !(event.modifiers & Qt.ShiftModifier)
+                                 && (event.key === Qt.Key_B || event.key === Qt.Key_I)) {
+                        root.applyFormat(event.key === Qt.Key_B ? "bold" : "italic")
+                        event.accepted = true
+                      } else if ((event.modifiers & Qt.ControlModifier)
+                                 && (event.modifiers & Qt.ShiftModifier)
+                                 && (event.key === Qt.Key_X || event.key === Qt.Key_M)) {
+                        root.applyFormat(event.key === Qt.Key_X ? "strike" : "mono")
                         event.accepted = true
                       } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_O) {
                         root.openFilePicker()

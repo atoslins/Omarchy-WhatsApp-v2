@@ -548,6 +548,59 @@ TestCase {
     compare(h.service.pollVotes[0].owner, "app")
   }
 
+  function test_the_composer_formats_like_whatsapp() {
+    // The owner asked for WhatsApp's formatting options in the composer.
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    verify(findChild(h.app, "composerFormatButton") !== null)
+    composer.text = "see you soon"
+    composer.select(4, 7)
+    verify(h.app.applyFormat("bold"))
+    compare(composer.text, "see *you* soon")
+    compare(composer.selectedText, "you")
+    verify(h.app.applyFormat("bold"), "the same kind again removes it")
+    compare(composer.text, "see you soon")
+    composer.text = "milk\neggs"
+    composer.select(0, composer.text.length)
+    verify(h.app.applyFormat("bullet"))
+    compare(composer.text, "- milk\n- eggs")
+    // TextEdit records the remove and the insert as two undo steps.
+    composer.undo()
+    composer.undo()
+    compare(composer.text, "milk\neggs", "Ctrl+Z undoes a format")
+  }
+
+  function test_ctrl_b_bolds_a_selection_and_otherwise_hides_the_list() {
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    h.app.focusComposer()
+    tryVerify(function() { return composer.activeFocus })
+    composer.text = "bold me"
+    composer.select(0, 4)
+    keyClick(Qt.Key_B, Qt.ControlModifier)
+    compare(composer.text, "*bold* me")
+    verify(!h.app.sidebarCollapsed, "with a selection Ctrl+B only formats")
+    composer.deselect()
+    keyClick(Qt.Key_B, Qt.ControlModifier)
+    verify(h.app.sidebarCollapsed, "without one it still hides the chat list")
+    h.app.focusComposer()
+    tryVerify(function() { return composer.activeFocus })
+    composer.select(0, 6)
+    keyClick(Qt.Key_I, Qt.ControlModifier)
+    compare(composer.text, "_*bold*_ me")
+  }
+
+  function test_message_on_a_shared_contact_opens_its_chat_or_a_new_one() {
+    var h = createHarness()
+    verify(h.app.openContactChat({ name: "Synthetic other", digits: "15550001111",
+                                   jid: "other@example", has_chat: true }))
+    compare(h.service.selectedChatJid, "other@example")
+    verify(h.app.openContactChat({ name: "Nobody", digits: "15550009999", jid: "", has_chat: false }))
+    var dialog = findChild(h.app, "newChatDialog")
+    tryCompare(dialog, "opened", true)
+    tryCompare(dialog, "query", "15550009999")
+  }
+
   function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {
     var h = createHarness()
     h.app.focusComposer()

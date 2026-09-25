@@ -206,6 +206,8 @@ Rectangle {
       { kind: "info", title: "Ctrl+B", value: "Hide or show the chat list" },
       { kind: "info", title: "Ctrl+N", value: "Start a new chat" },
       { kind: "info", title: "Ctrl+K", value: "Go to a chat by name" },
+      { kind: "info", title: "Ctrl+B · Ctrl+I", value: "Bold or italic for the selected text (Ctrl+B without a selection hides the chat list)" },
+      { kind: "info", title: "Ctrl+Shift+X · Ctrl+Shift+M", value: "Strikethrough or monospace; the formatting button has lists, quotes and code" },
       { kind: "info", title: "/", value: "Search chats" },
       { kind: "info", title: "J · K", value: "Move through messages or chats" },
       { kind: "info", title: "R", value: "Reply to the selected message" },

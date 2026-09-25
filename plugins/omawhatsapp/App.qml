@@ -9,6 +9,7 @@ import "SettingsPolicy.js" as SettingsPolicy
 import "AccountModel.js" as AccountModel
 import "ComposerModel.js" as ComposerModel
 import "TimeFormat.js" as TimeFormat
+import "FormatModel.js" as FormatModel
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -334,7 +335,10 @@ Item {
     chatDetailsOpen = demoMode && payload.details === true
     // {"newChat":true} opens the new chat dialog; demo captures may prefill it.
     if (payload.newChat === true) {
-      var newChatQuery = demoMode && typeof payload.newChatQuery === "string" ? payload.newChatQuery : ""
+      // A real open may prefill digits (a shared contact's number); demo
+      // captures may prefill anything.
+      var newChatQuery = typeof payload.newChatQuery === "string"
+        && (demoMode || /^[0-9]{6,15}$/.test(payload.newChatQuery)) ? payload.newChatQuery : ""
       Qt.callLater(function() { root.openNewChat(newChatQuery) })
     }
     if (demoMode && payload.attachments === true) {
@@ -877,6 +881,36 @@ Item {
       return value.indexOf("@" + String(member.name || "")) >= 0
     }).map(function(member) { return String(member.jid || "") })
       .filter(function(jid) { return jid !== "" })
+  }
+
+  // WhatsApp's formatting on the composer: markers around the selection, or
+  // list and quote prefixes on its lines. Edits go through remove/insert so
+  // Ctrl+Z still undoes them.
+  function applyFormat(kind) {
+    var edit = FormatModel.apply(composer.text, composer.selectionStart, composer.selectionEnd, kind)
+    if (!edit) return false
+    composer.remove(edit.head, edit.end)
+    composer.insert(edit.head, edit.insert)
+    composer.select(edit.start, edit.selectEnd)
+    composer.forceActiveFocus()
+    return true
+  }
+
+  // "Message" on a shared contact: its chat when there is one, otherwise the
+  // new chat dialog with the number already typed.
+  function openContactChat(card) {
+    if (!card || demoMode) return false
+    var jid = String(card.jid || "")
+    var chats = service && Array.isArray(service.chats) ? service.chats : []
+    var known = jid === "" ? null : chats.find(function(chat) {
+      return String(chat.jid || "") === jid
+        && String(chat.account || "") === String(root.selectedAccount || chat.account || "")
+    })
+    if (known) {
+      selectChat(known)
+      return true
+    }
+    return openNewChat(String(card.digits || ""))
   }
 
   function pasteDraft() {
@@ -2252,7 +2286,7 @@ Item {
                   text: draft !== "" ? "Draft: " + draft
                     : AccountModel.previewPrefix(modelData, root.multiAccount)
                       + (modelData.last_from_me ? "You · " : "")
-                      + String(modelData.preview || "No local messages yet")
+                      + (FormatModel.plain(String(modelData.preview || "")) || "No local messages yet")
                   color: draft !== "" ? root.accent : root.dim
                   elide: Text.ElideRight
                   font.family: root.fontFamily
@@ -2826,6 +2860,7 @@ Item {
                 if (!root.demoMode && root.service)
                   root.service.votePoll(root.currentChatRef(), modelData, options, "app")
               }
+              onContactChatRequested: function(card) { root.openContactChat(card) }
               onOptionRequested: function(optionIndex) {
                 if (!root.demoMode && root.service)
                   root.service.selectOption(
@@ -3411,11 +3446,40 @@ Item {
             }
           }
 
+          PanelActionButton {
+            id: formatButton
+            objectName: "composerFormatButton"
+            visible: !root.voiceForCurrentChat
+            anchors.left: emojiButton.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: composerBar.edge
+            size: composerBar.controlSize
+            iconText: "󰛖"
+            tooltipText: formatMenu.opened ? "" : "Formatting"
+            foreground: formatMenu.opened ? root.accent : root.dim
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.icon
+            onClicked: formatMenu.opened ? formatMenu.close() : formatMenu.open()
+
+            FormatMenu {
+              id: formatMenu
+              x: 0
+              y: -height - Style.space(8)
+              foreground: root.foreground
+              surface: root.background
+              accent: root.accent
+              muted: root.dim
+              fontFamily: root.fontFamily
+              onChosen: function(kind) { root.applyFormat(kind) }
+            }
+          }
+
           Rectangle {
             id: composerSurface
             objectName: "composerSurface"
             visible: !root.voiceForCurrentChat
-            anchors.left: emojiButton.right
+            anchors.left: formatButton.right
             anchors.leftMargin: Style.space(6)
             anchors.right: sendButton.left
             anchors.rightMargin: Style.space(8)
@@ -3499,6 +3563,12 @@ Item {
                 onCursorPositionChanged: root.updateMentionCompletion()
                 onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
                 Keys.priority: Keys.BeforeItem
+                // Ctrl+B bolds a selection here; without one it still hides the chat list.
+                Keys.onShortcutOverride: function(event) {
+                  if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_B
+                      && !(event.modifiers & Qt.ShiftModifier) && composer.selectedText !== "")
+                    event.accepted = true
+                }
                 Keys.onPressed: function(event) {
                   // Page Up/Down scroll the conversation even while typing.
                   if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
@@ -3527,6 +3597,23 @@ Item {
                     event.accepted = true
                   } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
                     root.pasteDraft()
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier)
+                             && !(event.modifiers & Qt.ShiftModifier)
+                             && event.key === Qt.Key_B && composer.selectedText !== "") {
+                    root.applyFormat("bold")
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier)
+                             && !(event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_I) {
+                    root.applyFormat("italic")
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier)
+                             && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_X) {
+                    root.applyFormat("strike")
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier)
+                             && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_M) {
+                    root.applyFormat("mono")
                     event.accepted = true
                   } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                              && (root.enterSends

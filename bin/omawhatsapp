@@ -181,6 +181,40 @@ MAX_CLIPBOARD_SENT_BYTES = 256 * 1024 * 1024
 # payloads it could not decode (protocol and placeholder messages) and the
 # "[Album: N images]" header that precedes an album's real media messages.
 # They are never shown as bubbles or used as a chat preview.
+CONTACT_LINE = re.compile(r"^Contact: (.+?)(?: \((\+?[0-9][0-9 ()\-.]{4,30})\))?$")
+
+
+def contact_cards(text: str) -> list[dict[str, str]]:
+    """The people in a shared contact, from wacli's text for it.
+
+    wacli stores one card as "Contact: Name (+55 16 99999-9999)" and several
+    as "Contacts:" followed by one such line each. Anything else is text.
+    """
+    lines = [line.strip() for line in str(text or "").strip().split("\n")]
+    several = bool(lines) and lines[0] == "Contacts:"
+    if several:
+        lines = lines[1:]
+    cards: list[dict[str, str]] = []
+    for line in lines:
+        match = CONTACT_LINE.match(line)
+        if not match or not line:
+            return []
+        cards.append({"name": match.group(1).strip()[:128],
+                      "phone": (match.group(2) or "").strip()[:40]})
+    # A lone card always carries its number; words someone typed after
+    # "Contact:" do not.
+    if not several and (len(cards) != 1 or not cards[0]["phone"]):
+        return []
+    return cards[:20]
+
+
+def contact_preview(text: str) -> str:
+    cards = contact_cards(text)
+    if not cards:
+        return text
+    return "👤 " + (cards[0]["name"] if len(cards) == 1 else f"{len(cards)} contacts")
+
+
 def revoked_sql(table: str) -> str:
     """A message deleted for everyone: the phone keeps a placeholder for it."""
     return f"(COALESCE({table}.revoked, 0) = 1 AND COALESCE({table}.deleted_for_me, 0) = 0)"
@@ -2476,7 +2510,7 @@ class Backend:
                 "timestamp": timestamp,
                 "last_message_id": str(row["last_message_id"] or "")[:256],
                 "last_media_type": str(row["last_media_type"] or "")[:32],
-                "preview": " ".join(str(row["preview"] or "").split())[:512],
+                "preview": " ".join(contact_preview(str(row["preview"] or "")).split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
                 "last_sender": " ".join(str(row["last_sender"] or "").split())[:MAX_NOTIFY_SENDER],
                 "archived": archived, "pinned": bool(row["pinned"]),
@@ -2517,7 +2551,7 @@ class Backend:
                         "timestamp": int(row["ts"] or 0),
                         "last_message_id": str(row["msg_id"] or "")[:256],
                         "last_media_type": str(row["media"] or "")[:32],
-                        "preview": " ".join(str(row["preview"] or "").split())[:512],
+                        "preview": " ".join(contact_preview(str(row["preview"] or "")).split())[:512],
                         "last_from_me": bool(row["from_me"]),
                         "last_sender": " ".join(str(row["sender_name"] or "").split())[:MAX_NOTIFY_SENDER],
                     })
@@ -3258,12 +3292,31 @@ class Backend:
                 "location_address": str(row["location_address"] or ""),
                 "location_live": bool(row["location_live"]),
             })
+            if not media_type:
+                cards = contact_cards(text)
+                if cards:
+                    values[-1]["contacts"] = self._with_known_people(cards)
             if message_id in polls:
                 values[-1]["poll"] = polls[message_id]
                 # "Poll: question" is wacli's text for the poll; the card shows it.
                 values[-1]["text"] = ""
         return {"ok": True, "chat": chat, "query": cleaned, "messages": values,
                 "has_more": has_more}
+
+    def _with_known_people(self, cards: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """Each shared contact with the person's JID and chat when this account knows them."""
+        output = []
+        for card in cards:
+            digits = re.sub(r"\D", "", card["phone"])
+            item: dict[str, Any] = {"name": card["name"], "phone": card["phone"],
+                                    "digits": digits, "jid": "", "has_chat": False}
+            if 8 <= len(digits) <= 15:
+                known = self._known_person(f"{digits}@s.whatsapp.net")
+                if known is not None:
+                    item["jid"] = f"{digits}@s.whatsapp.net"
+                    item["has_chat"] = bool(known.get("has_chat"))
+            output.append(item)
+        return output
 
     def _polls(self, connection: sqlite3.Connection, chat_jids: list[str],
                message_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -4307,6 +4360,57 @@ class Backend:
             "--post-send-wait", "0"]
         self._envelope(self._write(command, timeout=90))
         return {"ok": True, "kind": "forward", "target": target["name"]}
+
+    STATUS_LIFETIME = 24 * 3600
+
+    def statuses(self, mine_only: bool = False) -> dict[str, Any]:
+        """Local only: the status updates of the last 24 hours, yours and your contacts'."""
+        since = int(time.time()) - self.STATUS_LIFETIME
+        try:
+            with closing(self._connect()) as connection:
+                if not self._has_table(connection, "status_messages"):
+                    return {"ok": True, "kind": "statuses", "statuses": []}
+                rows = connection.execute(
+                    """SELECT status.msg_id, status.ts, status.from_me, status.sender_jid,
+                      COALESCE(NULLIF(contacts.full_name, ''), NULLIF(contacts.push_name, ''),
+                        NULLIF(status.sender_name, ''), '') AS sender_name,
+                      status.text, status.media_type, status.media_caption, status.filename
+                    FROM status_messages AS status
+                    LEFT JOIN contacts ON contacts.jid = status.sender_jid
+                    WHERE status.ts > ? AND (? = 0 OR status.from_me = 1)
+                    ORDER BY status.ts DESC LIMIT 200""",
+                    [since, 1 if mine_only else 0]).fetchall()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        return {"ok": True, "kind": "statuses", "statuses": [{
+            "id": str(row["msg_id"]), "timestamp": int(row["ts"]),
+            "from_me": bool(row["from_me"]),
+            "sender": "You" if bool(row["from_me"]) else str(row["sender_name"] or ""),
+            "sender_jid": "" if bool(row["from_me"]) else str(row["sender_jid"] or ""),
+            "text": str(row["text"] or "")[:MAX_MESSAGE],
+            "media_type": str(row["media_type"] or ""),
+            "caption": str(row["media_caption"] or "")[:1024],
+            "filename": str(row["filename"] or ""),
+        } for row in rows]}
+
+    def delete_status(self, status_id: str) -> dict[str, Any]:
+        """Delete one of your own status updates for everyone."""
+        target = str(status_id or "").strip()
+        if not target or len(target) > 256:
+            raise OmaWhatsAppError("Choose one of your status updates.")
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT from_me FROM status_messages WHERE msg_id = ?", [target]
+                ).fetchone() if self._has_table(connection, "status_messages") else None
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if row is None or not bool(row["from_me"]):
+            raise OmaWhatsAppError("Only your own status updates can be deleted.")
+        # wacli revokes by id when the status is not a stored chat message.
+        self._envelope(self._write(["--json", "messages", "revoke", "--chat", "status@broadcast",
+                                    "--id", target, "--post-send-wait", "0"], timeout=60))
+        return {"ok": True, "kind": "delete-status", "id": target}
 
     def vote_poll(self, jid: str, message_id: str, options: Any) -> dict[str, Any]:
         """Vote in one stored poll with option texts exactly as written."""
@@ -5639,6 +5743,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("forward")
     commands.add_parser("select")
     commands.add_parser("poll-vote")
+    commands.add_parser("statuses")
+    commands.add_parser("delete-status")
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
     commands.add_parser("notify")
@@ -5809,6 +5915,10 @@ def main() -> int:
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),
                                                 str(payload.get("to_jid") or "")))
+        if args.command == "statuses":
+            return emit(backend.statuses(payload.get("mine_only") is True))
+        if args.command == "delete-status":
+            return emit(backend.delete_status(str(payload.get("id") or "")))
         if args.command == "poll-vote":
             return emit(backend.vote_poll(str(payload.get("jid") or ""),
                                           str(payload.get("id") or ""),

@@ -2552,6 +2552,75 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not a poll"):
             self.backend.vote_poll("team@g.us", "t1", ["Monday"])
 
+    def _add_status_table(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("""CREATE TABLE status_messages (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT, msg_id TEXT NOT NULL UNIQUE,
+                ts INTEGER NOT NULL, from_me INTEGER NOT NULL, sender_jid TEXT, sender_name TEXT,
+                text TEXT, media_type TEXT, media_caption TEXT, filename TEXT, mime_type TEXT,
+                direct_path TEXT, media_key BLOB, file_sha256 BLOB, file_enc_sha256 BLOB,
+                file_length INTEGER, background_color TEXT, font INTEGER)""")
+            now = int(time.time())
+            connection.executemany(
+                "INSERT INTO status_messages (msg_id, ts, from_me, sender_jid, sender_name, text) "
+                "VALUES (?, ?, ?, ?, ?, ?)", [
+                    ("mine", now - 60, 1, "", "", "On holiday until the 10th"),
+                    ("sam", now - 120, 0, "member@s.whatsapp.net", "sam push", "New tools"),
+                    ("old", now - 2 * 86400, 0, "member@s.whatsapp.net", "", "Expired")])
+
+    def test_statuses_of_the_last_day_with_saved_names(self) -> None:
+        self._add_status_table()
+        statuses = self.backend.statuses()["statuses"]
+        self.assertEqual([item["id"] for item in statuses], ["mine", "sam"],
+                         "newest first, and a status older than a day is gone")
+        self.assertEqual(statuses[1]["sender"], "Sam Rivera", "the name saved on the phone")
+        self.assertEqual(statuses[0]["sender"], "You")
+        self.assertEqual([item["id"] for item in self.backend.statuses(True)["statuses"]], ["mine"])
+
+    def test_only_your_own_status_can_be_deleted_and_by_id(self) -> None:
+        self._add_status_table()
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{"revoked":true}}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.assertEqual(self.backend.delete_status("mine")["id"], "mine")
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["messages", "revoke"])
+        self.assertEqual(command[command.index("--chat") + 1], "status@broadcast")
+        self.assertEqual(command[command.index("--id") + 1], "mine")
+        for other in ("sam", "unknown"):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your own"):
+                self.backend.delete_status(other)
+
+    def test_statuses_on_a_mirror_without_them(self) -> None:
+        self.assertEqual(self.backend.statuses()["statuses"], [])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your own"):
+            self.backend.delete_status("mine")
+
+    def test_a_shared_contact_becomes_a_card_with_the_known_person(self) -> None:
+        # The owner shared a contact and saw "Contact: Name (+55 ...)" as text.
+        self._insert("alex@s.whatsapp.net", "c1", 50, from_me=1,
+                     display="Contact: Sam Rivera (+1 555 123-4567)")
+        self._insert("alex@s.whatsapp.net", "c2", 51, from_me=0,
+                     display="Contacts:\nContact: Ana (+55 16 99999-0000)\nContact: Bo")
+        self._insert("alex@s.whatsapp.net", "t9", 52, from_me=0, text="Contact: me later, ok?")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE contacts SET phone = '15551234567' "
+                               "WHERE jid = 'member@s.whatsapp.net'")
+            connection.execute("INSERT INTO contacts (jid, phone) VALUES "
+                               "('15551234567@s.whatsapp.net', '15551234567')")
+        rows = {row["id"]: row for row in self.backend.messages("alex@s.whatsapp.net")["messages"]}
+        card = rows["c1"]["contacts"][0]
+        self.assertEqual((card["name"], card["phone"], card["digits"]),
+                         ("Sam Rivera", "+1 555 123-4567", "15551234567"))
+        self.assertEqual(card["jid"], "15551234567@s.whatsapp.net")
+        self.assertEqual([item["name"] for item in rows["c2"]["contacts"]], ["Ana", "Bo"])
+        self.assertEqual(rows["c2"]["contacts"][1]["phone"], "")
+        self.assertNotIn("contacts", rows["t9"], "ordinary words are not a card")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["alex@s.whatsapp.net"]["preview"], "Contact: me later, ok?")
+        self._insert("alex@s.whatsapp.net", "c3", 53, from_me=1, display="Contact: Sam (+1 555 1234567)")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["alex@s.whatsapp.net"]["preview"], "👤 Sam")
+
     def test_attachments_list_every_rail_chat_newest_first(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.executemany(

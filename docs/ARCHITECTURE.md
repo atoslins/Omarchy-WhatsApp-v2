@@ -167,6 +167,20 @@ Installer upgrades preserve that choice.
 - Search is debounced and scoped to the selected conversation.
 - Window opening performs no network request.
 
+## Message text
+
+Message bodies stay plain text unless they use WhatsApp's formatting. Then
+`FormatModel.js` renders them: it escapes the whole message first and emits
+only its own fixed tags (bold, italic, strikethrough, spans for code and
+monospace, list bullets and quotes), so a message can never produce a link,
+an image, a style, or any other markup. Every other `Text` surface is plain
+text, which a test enforces. Links open from chips under the body, never from
+the body itself.
+
+Shared contacts arrive from wacli as "Contact: Name (+number)" text. The helper
+turns that exact shape into cards with the number, and with the person's JID
+and chat when this account knows them; a lone line without a number stays text.
+
 ## Agent server
 
 `bin/omawhatsapp-mcp` is a Model Context Protocol server over stdio, written
