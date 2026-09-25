@@ -20,6 +20,9 @@ Item {
   property bool busy: false
   property bool surfaceActive: true
   property string activePlaybackId: ""
+  // The timeline's own audio player (TimelineAudio), when there is one: it
+  // outlives this bubble, which is rebuilt whenever a message arrives.
+  property var sharedAudio: null
   // 1×, 1.5× or 2×; the choice is shared by every voice note.
   property real audioRate: 1
   signal audioRateRequested(real rate)
@@ -457,6 +460,7 @@ Item {
       id: audioCard
       implicitHeight: audioRow.implicitHeight + Style.space(12)
       AudioOutput { id: audioSink; volume: 0.8 }
+      // With a shared player this one only reads the length; it never plays.
       MediaPlayer {
         id: audioPlayer
         objectName: "audioMediaPlayer"
@@ -464,9 +468,24 @@ Item {
         audioOutput: audioSink
         playbackRate: root.audioRate
       }
-      readonly property real progress: audioPlayer.duration > 0
-        ? Math.min(1, audioPlayer.position / audioPlayer.duration) : 0
+      readonly property bool shared: !!root.sharedAudio
+      readonly property bool owns: shared && String(root.sharedAudio.currentId) === root.messageId
+      readonly property var livePlayer: owns ? root.sharedAudio.player : audioPlayer
+      readonly property bool playing: (!shared || owns) && livePlayer.playing
+      readonly property real duration: owns && livePlayer.duration > 0 ? livePlayer.duration : audioPlayer.duration
+      readonly property real position: !shared || owns ? livePlayer.position : 0
+      readonly property real progress: duration > 0 ? Math.min(1, position / duration) : 0
+      function seek(fraction) {
+        var target = livePlayer
+        if ((!shared || owns) && target.duration > 0 && target.seekable)
+          target.position = Math.round(target.duration * Math.max(0, Math.min(1, fraction)))
+      }
       function toggle() {
+        if (shared) {
+          if (owns) root.sharedAudio.toggle(root.messageId)
+          else root.playbackRequested(root.messageId)
+          return
+        }
         if (audioPlayer.playing) {
           audioPlayer.pause()
         } else if (root.activePlaybackId === root.messageId) {
@@ -501,12 +520,12 @@ Item {
           width: Style.space(40)
           height: width
           radius: width / 2
-          color: audioPlayer.playing ? root.foreground : root.accent
+          color: audioCard.playing ? root.foreground : root.accent
           Text {
             textFormat: Text.PlainText
             anchors.centerIn: parent
-            anchors.horizontalCenterOffset: audioPlayer.playing ? 0 : 1
-            text: audioPlayer.playing ? "󰏤" : "󰐊"
+            anchors.horizontalCenterOffset: audioCard.playing ? 0 : 1
+            text: audioCard.playing ? "󰏤" : "󰐊"
             color: root.background
             font.family: root.fontFamily
             font.pixelSize: Style.font.icon
@@ -557,12 +576,10 @@ Item {
             }
             MouseArea {
               anchors.fill: parent
-              enabled: root.surfaceActive && audioPlayer.duration > 0 && audioPlayer.seekable
+              enabled: root.surfaceActive && (!audioCard.shared || audioCard.owns)
+                && audioCard.livePlayer.duration > 0 && audioCard.livePlayer.seekable
               cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: function(mouse) {
-                audioPlayer.position = Math.round(audioPlayer.duration
-                  * Math.max(0, Math.min(1, mouse.x / waveArea.width)))
-              }
+              onClicked: function(mouse) { audioCard.seek(mouse.x / waveArea.width) }
             }
           }
           // Time and speed on the left; the message time takes the right.
@@ -574,9 +591,9 @@ Item {
               textFormat: Text.PlainText
               objectName: "audioTime"
               anchors.verticalCenter: parent.verticalCenter
-              text: audioPlayer.duration > 0
-                ? (audioPlayer.position > 0 ? root.clockText(audioPlayer.position) + " / " : "")
-                  + root.clockText(audioPlayer.duration)
+              text: audioCard.duration > 0
+                ? (audioCard.position > 0 ? root.clockText(audioCard.position) + " / " : "")
+                  + root.clockText(audioCard.duration)
                 : (root.voiceNote ? "Voice message" : root.humanSize(root.message.file_size))
               color: root.dim
               font.family: root.fontFamily

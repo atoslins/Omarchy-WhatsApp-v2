@@ -93,4 +93,23 @@ TestCase {
     verify(hint.text.indexOf("Enter sends") === 0)
     verify(hint.text.indexOf("Esc goes back") > 0)
   }
+
+  function test_voice_notes_play_on_across_new_messages_and_in_sequence() {
+    var dropdown = openDropdown()
+    var voice = function(id, ts) {
+      return { id: id, text: "", sender: "Alex", timestamp: ts, from_me: false, media_type: "audio",
+        mime_type: "audio/ogg", local_path: "/nonexistent/omaw-" + id + ".ogg", reactions: [] }
+    }
+    dropdown.openDemo()
+    dropdown.openConversation(dropdown.demoChats[0])
+    verify(dropdown.opened)
+    dropdown.demoItems = [voice("v2", 20), voice("v1", 10)]
+    var audio = findChild(dropdown, "dropdownAudio")
+    verify(dropdown.requestPlayback("v1"))
+    compare(audio.currentId, "v1")
+    dropdown.demoItems = [voice("v3", 30)].concat(dropdown.demoItems)
+    compare(audio.currentId, "v1", "a new message does not stop it")
+    verify(audio.finishCurrent())
+    compare(audio.currentId, "v2", "the next voice note plays")
+  }
 }

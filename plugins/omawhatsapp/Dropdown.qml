@@ -43,6 +43,17 @@ Panel {
   readonly property string timeFormat: demoMode ? demoTimeFormat
     : (service ? service.timeFormat : "auto")
 
+  // Voice notes play here, outside the rows a new message rebuilds.
+  TimelineAudio {
+    id: dropdownAudio
+    objectName: "dropdownAudio"
+    messages: root.sourceMessages
+    activeId: root.activePlaybackId
+    rate: root.service ? root.service.audioRate : 1
+    active: root.opened && root.viewMode === "conversation"
+    onAdvanceRequested: function(messageId) { root.requestPlayback(messageId) }
+  }
+
   FontMetrics {
     id: composerMetrics
     font.family: root.fontFamily
@@ -173,11 +184,16 @@ Panel {
   }
 
   function requestPlayback(messageId) {
+    var granted = false
     if (demoMode || !playbackCoordinator) {
       demoPlaybackId = String(messageId || "")
-      return demoPlaybackId !== ""
+      granted = demoPlaybackId !== ""
+    } else {
+      granted = playbackCoordinator.acquire("dropdown", currentChatRef(), messageId)
     }
-    return playbackCoordinator.acquire("dropdown", currentChatRef(), messageId)
+    if (granted && dropdownAudio.playable(dropdownAudio.itemFor(messageId)))
+      dropdownAudio.play(messageId)
+    return granted
   }
 
   function reconcileCurrentChat() {
@@ -1650,6 +1666,7 @@ Panel {
                 narrow: true
                 surfaceActive: root.opened && root.viewMode === "conversation"
                 activePlaybackId: root.activePlaybackId
+                sharedAudio: dropdownAudio
                 audioRate: root.service ? root.service.audioRate : 1
                 onAudioRateRequested: function(rate) { if (root.service) root.service.audioRate = rate }
                 busyMedia: root.sending

@@ -318,6 +318,16 @@ Item {
 
   KeyboardNavigation { id: keyboardNavigation }
 
+  TimelineAudio {
+    id: timelineAudio
+    objectName: "timelineAudio"
+    messages: root.visibleMessages
+    activeId: root.activeTimelinePlaybackId
+    rate: root.service ? root.service.audioRate : 1
+    active: root.timelineMediaActive
+    onAdvanceRequested: function(messageId) { root.requestTimelinePlayback(messageId) }
+  }
+
   function groupMediaAlbums(items) {
     var albums = ({})
     items.forEach(function(item) {
@@ -1774,12 +1784,18 @@ Item {
   }
 
   function requestTimelinePlayback(messageId) {
+    var granted = false
     if (demoMode || !playbackCoordinator) {
       demoTimelinePlaybackId = String(messageId || "")
-      return demoTimelinePlaybackId !== ""
+      granted = demoTimelinePlaybackId !== ""
+    } else {
+      granted = playbackCoordinator.acquire("app-timeline", currentChatRef(), messageId)
     }
-    return playbackCoordinator.acquire(
-      "app-timeline", currentChatRef(), messageId)
+    // A voice note plays in the timeline's own player; video and GIFs keep
+    // theirs in the bubble.
+    if (granted && timelineAudio.playable(timelineAudio.itemFor(messageId)))
+      timelineAudio.play(messageId)
+    return granted
   }
 
   function openMediaExternal(path) {
@@ -3577,6 +3593,7 @@ Item {
               narrow: root.narrow
               surfaceActive: root.timelineMediaActive
               activePlaybackId: root.activeTimelinePlaybackId
+              sharedAudio: timelineAudio
               audioRate: root.service ? root.service.audioRate : 1
               onAudioRateRequested: function(rate) { if (root.service) root.service.audioRate = rate }
               busyMedia: root.writeForCurrentChat

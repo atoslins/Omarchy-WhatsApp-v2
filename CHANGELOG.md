@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- A voice note keeps playing when a message arrives, and when it ends the
+  next message plays if it is audio too, as on the phone. Each voice note had
+  its own player inside its row, and a new message rebuilds the rows; the
+  full app and the dropdown now each keep one player outside them.
 - Sending no longer waits behind a read mark. Marking a chat read (on
   opening it, or after a reply) can make wacli wait minutes for WhatsApp to
   repair the account's app state, and it held the only write process, so

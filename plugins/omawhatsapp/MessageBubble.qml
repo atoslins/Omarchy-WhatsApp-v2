@@ -27,6 +27,8 @@ Item {
   property bool busyMedia: false
   property bool surfaceActive: true
   property string activePlaybackId: ""
+  // The timeline's audio player, handed to voice notes (see TimelineAudio).
+  property var sharedAudio: null
   property real audioRate: 1
   signal audioRateRequested(real rate)
   property string timeFormat: "auto"
@@ -391,6 +393,7 @@ Item {
         busy: root.busyMedia
         surfaceActive: root.surfaceActive
         activePlaybackId: root.activePlaybackId
+        sharedAudio: root.sharedAudio
         audioRate: root.audioRate
         onAudioRateRequested: function(rate) { root.audioRateRequested(rate) }
         onPlaybackRequested: function(messageId) {
