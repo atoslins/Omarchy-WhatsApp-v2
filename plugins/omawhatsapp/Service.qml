@@ -774,6 +774,38 @@ Item {
     contactsProcess.running = true
     return true
   }
+  // Creating a group or joining one by link: a request of its own, since it
+  // has no chat to target yet. The dialog follows groupRequest.
+  property var groupRequest: ({ kind: "", loading: false, jid: "", error: "" })
+  function runGroupRequest(kind, fields) {
+    if (groupRequestProcess.running) return false
+    if (offlineMode) {
+      groupRequest = { kind: kind, loading: false, jid: "",
+        error: "Offline mode is on. Go online to change WhatsApp." }
+      return false
+    }
+    if (!statusReady || !ready) {
+      groupRequest = { kind: kind, loading: false, jid: "",
+        error: "That account is still loading. Try again in a moment." }
+      return false
+    }
+    groupRequest = { kind: kind, loading: true, jid: "", error: "" }
+    groupRequestProcess.kind = kind
+    groupRequestProcess.command = [helper, kind]
+    groupRequestProcess.payload = JSON.stringify(Object.assign({ account: statusAccount }, fields))
+    groupRequestProcess.stdinEnabled = true
+    groupRequestProcess.running = true
+    return true
+  }
+  function createGroup(name, participants) {
+    var people = []
+    for (var i = 0; i < Number(participants ? participants.length : 0); i++)
+      people.push(String(participants[i]))
+    return runGroupRequest("create-group", { name: String(name || ""), participants: people })
+  }
+  function joinGroup(invite) {
+    return runGroupRequest("join-group", { invite: String(invite || "") })
+  }
   function numberCheckFor(phone) {
     var digits = String(phone || "").replace(/[^0-9]/g, "")
     return String(numberCheck.phone || "") === digits
@@ -1611,6 +1643,30 @@ Item {
           || String(checkNumberError.text || "WhatsApp could not check that number.").trim()
       }
       root.numberCheck = result
+    }
+  }
+
+  Process {
+    id: groupRequestProcess
+    objectName: "groupRequestProcess"
+    property string kind: ""
+    property string payload: ""
+    command: [root.helper, "create-group"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: groupRequestOutput }
+    stderr: StdioCollector { id: groupRequestError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var result = root.parseJson(groupRequestOutput.text)
+      if (exitCode === 0 && result && result.ok === true) {
+        root.groupRequest = { kind: kind, loading: false, jid: String(result.jid || ""), error: "" }
+        root.lastChatsRaw = ""
+        root.refreshChats()
+      } else {
+        root.groupRequest = { kind: kind, loading: false, jid: "",
+          error: (result && result.error)
+            || String(groupRequestError.text || "WhatsApp could not do that.").trim() }
+      }
     }
   }
 

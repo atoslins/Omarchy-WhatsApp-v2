@@ -105,9 +105,9 @@ native, and visually at home in Omarchy.
   your locale by default; one saved preference covers chat previews, message
   bubbles, and the media viewer for every account.
 
-The graphical client remains deliberately focused on direct chats and
-standalone groups. Channels/newsletters, calls, Community parents, and
-Community-linked subgroups stay out of the visual rail until they receive
+The graphical client shows people and every group you chat in, groups inside
+a Community included, as the phone's chat list does. Channels/newsletters,
+calls, and the Community itself stay out of the visual rail until they receive
 deliberate top-level interfaces. The bundled agent skill can still inspect and
 operate those wacli capabilities when the current request explicitly asks.
 

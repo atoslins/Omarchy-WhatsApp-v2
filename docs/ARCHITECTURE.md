@@ -77,8 +77,8 @@ targets are accepted only if their exact JID already exists in the local
 boundary. All writes use wacli's public CLI.
 
 The graphical chat boundary is intentionally narrower than the mirror: only `dm` rows
-and standalone `group` rows are discoverable. Newsletter/channel rows,
-Community parents, Community-linked subgroups, broadcasts, and call-event data
+and `group` rows, groups inside a Community included, are discoverable.
+Newsletter/channel rows, Community parents, broadcasts, and call-event data
 stay out of this release's UI. Explicit agent requests can reach those
 capabilities through the versioned parity registry without widening the chat
 rail or its default write paths.

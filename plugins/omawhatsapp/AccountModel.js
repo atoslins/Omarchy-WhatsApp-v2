@@ -101,6 +101,9 @@ function matchesView(chat, view, searching) {
   if (archived && !(searching && name === "all")) return false
   if (name === "unread") return Number(chat.unread || 0) > 0
   if (name === "groups") return String(chat.kind || "") === "group"
+  // People whose message is the last one in the chat: replies you owe.
+  if (name === "reply") return String(chat.kind || "") === "dm"
+    && chat.last_from_me !== true && Number(chat.timestamp || 0) > 0
   return true
 }
 function viewCount(chats, scope, view) {

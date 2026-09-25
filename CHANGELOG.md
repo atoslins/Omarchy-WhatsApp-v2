@@ -119,6 +119,12 @@
 - Ctrl+V no longer waits behind a running send or read mark; it has its own
   process, and plain text still pastes when the helper cannot read the
   clipboard.
+- A "To reply" view in the chat list shows the people whose message is the
+  last one in the chat.
+- Groups inside a Community show in the chat list and open like any group,
+  as on the phone; the Community itself stays out.
+- New group and "Join a group with a link" at the top of the new chat dialog:
+  pick people you know, name the group and create it, or paste an invite link.
 - Format messages as on WhatsApp: *bold*, _italic_, ~strikethrough~,
   ```monospace```, `code`, bulleted and numbered lists, and quotes. The
   composer's formatting button lists every option with its syntax;

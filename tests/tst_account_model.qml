@@ -192,4 +192,16 @@ TestCase {
     compare(AccountModel.viewCount(chats, "", "unread"), 1)
     compare(AccountModel.viewCount(chats, "", "archived"), 1)
   }
+
+  function test_the_to_reply_view_keeps_people_whose_message_is_last() {
+    var chats = [
+      { account: "work", jid: "a", name: "Waiting", kind: "dm", timestamp: 10, last_from_me: false },
+      { account: "work", jid: "b", name: "Answered", kind: "dm", timestamp: 11, last_from_me: true },
+      { account: "work", jid: "c", name: "Group", kind: "group", timestamp: 12, last_from_me: false },
+      { account: "work", jid: "d", name: "Empty", kind: "dm", timestamp: 0, last_from_me: false },
+      { account: "work", jid: "e", name: "Old", kind: "dm", timestamp: 9, last_from_me: false, archived: true }
+    ]
+    compare(AccountModel.filterChats(chats, "", "", 0, "reply").map(function(c) { return c.jid }), ["a"])
+    compare(AccountModel.viewCount(chats, "", "reply"), 1)
+  }
 }

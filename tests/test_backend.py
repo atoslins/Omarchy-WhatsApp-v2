@@ -157,7 +157,8 @@ class BackendTests(unittest.TestCase):
 
     def test_chat_rail_contains_every_local_chat(self) -> None:
         result = self.backend.chats()
-        self.assertEqual({chat["name"] for chat in result["chats"]}, {"Design team", "Alex", "Archive"})
+        self.assertEqual({chat["name"] for chat in result["chats"]},
+                         {"Design team", "Alex", "Archive", "Community subgroup"})
         self.assertEqual(result["chats"][0]["name"], "Design team")  # pinned first
         self.assertEqual(result["chats"][0]["unread"], 3)
 
@@ -266,8 +267,9 @@ class BackendTests(unittest.TestCase):
                 mock.patch.object(
                     backend_module, "fetch_https_image", return_value=jpeg) as fetch:
             result = self.backend.refresh_avatars("remote-read")
-        self.assertEqual(result["refreshed"], 3)
-        self.assertEqual(fetch.call_count, 3)
+        # Every rail chat, the group inside a Community included.
+        self.assertEqual(result["refreshed"], 4)
+        self.assertEqual(fetch.call_count, 4)
         chats = self.backend.chats()["chats"]
         self.assertTrue(all(Path(chat["avatar_path"]).is_file() for chat in chats))
         self.assertTrue(all("http" not in chat["avatar_path"] for chat in chats))
@@ -857,11 +859,13 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(backend_module.muted_until_active(1_999_999_999_000, now))
         self.assertFalse(backend_module.muted_until_active(0, now))
 
-    def test_chat_surface_is_only_dms_and_standalone_groups(self) -> None:
+    def test_chat_surface_is_people_and_groups_including_community_groups(self) -> None:
         visible = {chat["jid"] for chat in self.backend.chats()["chats"]}
-        self.assertEqual(visible, {"team@g.us", "alex@s.whatsapp.net", "archive@g.us"})
-        for hidden in ("news@newsletter", "legacy@newsletter", "community@g.us",
-                       "subgroup@g.us"):
+        self.assertEqual(visible, {"team@g.us", "alex@s.whatsapp.net", "archive@g.us",
+                                   "subgroup@g.us"},
+                         "a group inside a Community is an ordinary chat, as on the phone")
+        self.assertEqual(self.backend._chat("subgroup@g.us")["kind"], "group")
+        for hidden in ("news@newsletter", "legacy@newsletter", "community@g.us"):
             with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not available"):
                 self.backend._chat(hidden)
 
@@ -2620,6 +2624,38 @@ class BackendTests(unittest.TestCase):
         self._insert("alex@s.whatsapp.net", "c3", 53, from_me=1, display="Contact: Sam (+1 555 1234567)")
         rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
         self.assertEqual(rail["alex@s.whatsapp.net"]["preview"], "👤 Sam")
+
+    def test_a_group_is_created_only_with_known_people(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO contacts (jid, phone) VALUES "
+                               "('15551234567@s.whatsapp.net', '15551234567')")
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"JID":"new@g.us"}}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            result = self.backend.create_group("  Obra   Sorriso ", ["15551234567@s.whatsapp.net"])
+        self.assertEqual(result["jid"], "new@g.us")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--name") + 1], "Obra Sorriso")
+        self.assertEqual(command[command.index("--user") + 1], "15551234567@s.whatsapp.net")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your WhatsApp contacts"):
+            self.backend.create_group("Obra", ["19990000000@s.whatsapp.net"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "1 to 256"):
+            self.backend.create_group("Obra", [])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "1 to 100"):
+            self.backend.create_group("   ", ["15551234567@s.whatsapp.net"])
+
+    def test_joining_a_group_takes_a_link_or_a_code(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"jid":"g@g.us","joined":true}}', "")
+        for invite in ("https://chat.whatsapp.com/AbCdEfGhIjKlMnOpQr12",
+                       "chat.whatsapp.com/invite/AbCdEfGhIjKlMnOpQr12/", "AbCdEfGhIjKlMnOpQr12"):
+            with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+                self.assertEqual(self.backend.join_group(invite)["jid"], "g@g.us")
+            command = write.call_args.args[0]
+            self.assertEqual(command[command.index("--code") + 1], "AbCdEfGhIjKlMnOpQr12")
+        for bad in ("hello", "https://evil.example/AbCdEfGhIjKlMnOpQr12", ""):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "invite link"):
+                self.backend.join_group(bad)
 
     def test_attachments_list_every_rail_chat_newest_first(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:

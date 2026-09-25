@@ -601,6 +601,14 @@ TestCase {
     tryCompare(dialog, "query", "15550009999")
   }
 
+  function test_new_chat_hands_new_group_to_its_dialog() {
+    var h = createHarness()
+    findChild(h.app, "newChatDialog").groupRequested("create")
+    var dialog = findChild(h.app, "groupDialog")
+    tryCompare(dialog, "opened", true)
+    compare(dialog.mode, "create")
+  }
+
   function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {
     var h = createHarness()
     h.app.focusComposer()

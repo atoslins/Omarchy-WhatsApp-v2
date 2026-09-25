@@ -306,10 +306,11 @@ def chat_kind_sql(table: str = "chats") -> str:
             f"THEN 'dm' ELSE {table}.kind END)")
 
 
+# People, and every group you chat in: a group inside a Community is an
+# ordinary chat on the phone. The Community itself is not a chat.
 SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
-  AND COALESCE(groups.linked_parent_jid, '') = ''
 ))"""
 
 # Oldest wacli whose CLI contract the helper relies on, and the newest release
@@ -4361,6 +4362,38 @@ class Backend:
         self._envelope(self._write(command, timeout=90))
         return {"ok": True, "kind": "forward", "target": target["name"]}
 
+    GROUP_INVITE = re.compile(r"^(?:https?://)?(?:chat\.whatsapp\.com/(?:invite/)?)?([A-Za-z0-9]{16,32})/?$")
+
+    def create_group(self, name: Any, participants: Any) -> dict[str, Any]:
+        """Create a group with people this account knows."""
+        title = " ".join(str(name or "").split())
+        if not 1 <= len(title) <= 100:
+            raise OmaWhatsAppError("A group name needs 1 to 100 characters.")
+        users = list(dict.fromkeys(str(item or "").strip()
+                                   for item in (participants if isinstance(participants, list) else [])))
+        if not 1 <= len(users) <= 256:
+            raise OmaWhatsAppError("Add 1 to 256 people to the group.")
+        for user in users:
+            if not NEW_CHAT_JID.fullmatch(user) or self._known_person(user) is None:
+                raise OmaWhatsAppError("Choose people from your WhatsApp contacts.")
+        command = ["--json", "groups", "create", "--name", title]
+        for user in users:
+            command.extend(["--user", user])
+        envelope = self._envelope(self._write(command, timeout=120))
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        jid = str(data.get("JID") or data.get("jid") or "")
+        return {"ok": True, "kind": "create-group", "jid": jid, "name": title}
+
+    def join_group(self, invite: Any) -> dict[str, Any]:
+        """Join a group from its invite link or code."""
+        match = self.GROUP_INVITE.match(str(invite or "").strip())
+        if not match:
+            raise OmaWhatsAppError("That is not a WhatsApp group invite link.")
+        envelope = self._envelope(self._write(
+            ["--json", "groups", "join", "--code", match.group(1)], timeout=90))
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        return {"ok": True, "kind": "join-group", "jid": str(data.get("jid") or "")}
+
     STATUS_LIFETIME = 24 * 3600
 
     def statuses(self, mine_only: bool = False) -> dict[str, Any]:
@@ -5744,6 +5777,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("select")
     commands.add_parser("poll-vote")
     commands.add_parser("statuses")
+    commands.add_parser("create-group")
+    commands.add_parser("join-group")
     commands.add_parser("delete-status")
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
@@ -5915,6 +5950,10 @@ def main() -> int:
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),
                                                 str(payload.get("to_jid") or "")))
+        if args.command == "create-group":
+            return emit(backend.create_group(payload.get("name"), payload.get("participants")))
+        if args.command == "join-group":
+            return emit(backend.join_group(payload.get("invite")))
         if args.command == "statuses":
             return emit(backend.statuses(payload.get("mine_only") is True))
         if args.command == "delete-status":

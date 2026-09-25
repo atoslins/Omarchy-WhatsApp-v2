@@ -108,13 +108,14 @@ Item {
   property string demoSelectedAccount: "work"
   property string demoVoiceState: "idle"
   property string accountScope: ""
-  // Rail view: all, unread, groups or archived (archived chats live apart).
+  // Rail view: all, unread, to reply, groups or archived (archived chats live apart).
   property string chatView: "all"
   readonly property var chatViews: {
     var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
     var views = [
       { id: "all", label: "All", count: 0 },
       { id: "unread", label: "Unread", count: AccountModel.viewCount(root.sourceChats, scope, "unread") },
+      { id: "reply", label: "To reply", count: AccountModel.viewCount(root.sourceChats, scope, "reply") },
       { id: "groups", label: "Groups", count: 0 }
     ]
     var archived = AccountModel.viewCount(root.sourceChats, scope, "archived")
@@ -4236,6 +4237,21 @@ Item {
         fontFamily: root.fontFamily
         onOpenChatRequested: function(jid) { root.openNewChatResult(jid) }
         onChatStarted: function(jid) { root.followStartedChat(jid) }
+        onGroupRequested: function(kind) { groupDialog.openFor(kind) }
+      }
+
+      GroupDialog {
+        id: groupDialog
+        service: root.demoMode ? null : root.service
+        demoMode: root.demoMode
+        demoPeople: root.demoPeople || []
+        showAvatars: root.showAvatars
+        foreground: root.foreground
+        surface: root.background
+        accent: root.accent
+        muted: root.dim
+        fontFamily: root.fontFamily
+        onGroupReady: function(jid) { if (jid !== "") root.followStartedChat(jid) }
       }
 
       MediaViewer {

@@ -183,4 +183,30 @@ TestCase {
   }
 
   Component { id: signalSpyComponent; SignalSpy {} }
+
+  Component { id: groupSpyComponent; SignalSpy {} }
+
+  function test_new_group_and_join_by_link_start_from_here() {
+    var h = createDialog()
+    h.dialog.open()
+    tryCompare(h.dialog, "opened", true)
+    var rows = findChild(h.dialog, "newChatGroupRows")
+    verify(rows.visible, "shown before anything is typed")
+    var spy = createTemporaryObject(groupSpyComponent, testCase,
+      { target: h.dialog, signalName: "groupRequested" })
+    var join = null
+    for (var i = 0; i < rows.children.length; i++)
+      if (rows.children[i].objectName === "newChatGroup-join") join = rows.children[i]
+    verify(join !== null)
+    tryVerify(function() { return rows.height >= join.height * 2 }, 1000,
+      "the rows take their own room above the contacts")
+    mouseClick(join)
+    compare(spy.count, 1)
+    compare(spy.signalArguments[0][0], "join")
+    tryCompare(h.dialog, "opened", false)
+    h.dialog.open()
+    tryCompare(h.dialog, "opened", true)
+    h.dialog.typeQuery("Ana")
+    verify(!findChild(h.dialog, "newChatGroupRows").visible, "a search hides them")
+  }
 }

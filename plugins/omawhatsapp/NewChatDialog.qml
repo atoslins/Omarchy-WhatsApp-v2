@@ -57,6 +57,8 @@ Popup {
     return "Check " + phone + " on WhatsApp"
   }
   signal openChatRequested(string jid)
+  // New group and joining one by link live in their own dialog.
+  signal groupRequested(string kind)
   signal chatStarted(string jid)
 
   parent: Overlay.overlay
@@ -354,10 +356,51 @@ Popup {
         }
       }
 
+      Column {
+        id: groupRows
+        objectName: "newChatGroupRows"
+        visible: !root.numberQuery && root.query === ""
+        anchors.top: searchField.bottom
+        anchors.topMargin: Style.space(8)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        spacing: Style.space(2)
+        Repeater {
+          model: [{ kind: "create", icon: "󰡉", label: "New group" },
+                  { kind: "join", icon: "󰌷", label: "Join a group with a link" }]
+          delegate: Rectangle {
+            required property var modelData
+            objectName: "newChatGroup-" + modelData.kind
+            width: groupRows.width
+            height: Style.space(40)
+            radius: Style.cornerRadius
+            color: groupHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            Text {
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              text: modelData.icon + "   " + modelData.label
+              color: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            HoverHandler { id: groupHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler {
+              onTapped: {
+                root.close()
+                root.groupRequested(modelData.kind)
+              }
+            }
+          }
+        }
+      }
+
       Text {
         textFormat: Text.PlainText
         id: peopleHeading
-        anchors.top: numberRow.visible ? numberRow.bottom : searchField.bottom
+        anchors.top: numberRow.visible ? numberRow.bottom
+          : (groupRows.visible ? groupRows.bottom : searchField.bottom)
         anchors.topMargin: Style.space(12)
         anchors.left: parent.left
         text: root.people.length > 0 ? "Contacts" : ""
