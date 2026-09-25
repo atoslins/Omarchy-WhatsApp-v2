@@ -8,7 +8,8 @@ import "EmojiModel.js" as EmojiModel
 
 // Emoji picker for both composers. It reads Omarchy's own emoji list and
 // inserts at the field's cursor, so the clipboard is never touched and the
-// choice lands in the exact draft it was opened from.
+// choice lands in the exact draft it was opened from. As on the phone, it
+// stays open for as many emoji as wanted and groups them by theme.
 Popup {
   id: root
   objectName: "emojiPicker"
@@ -27,9 +28,26 @@ Popup {
   readonly property string dataPath: String(Quickshell.env("OMARCHY_PATH") || "/usr/share/omarchy")
     + "/shell/plugins/emojis/emojis.json"
   readonly property var results: EmojiModel.filter(emojis, query, 400)
-  readonly property var shown: query === "" && recent.length > 0
-    ? recent.map(function(emoji) { return { e: emoji, k: "recent" } }).concat(results)
-    : results
+  // Browsing: every theme under its header, recent ones first. Searching:
+  // just the matches.
+  readonly property var laidOut: EmojiModel.layout(emojis, recent, 8)
+  readonly property var shown: query === "" ? laidOut.items : results
+  readonly property var firstEmoji: {
+    for (var i = 0; i < shown.length; i++)
+      if (shown[i].kind === undefined || shown[i].kind === "emoji") return shown[i].e
+    return ""
+  }
+  property string currentSection: laidOut.sections.length > 0 ? laidOut.sections[0].id : ""
+  function showSection(id) {
+    var sections = laidOut.sections
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].id !== id) continue
+      grid.positionViewAtIndex(sections[i].index, GridView.Beginning)
+      currentSection = id
+      return true
+    }
+    return false
+  }
   signal picked(string emoji)
   // Stickers tab: recent stickers of this account; picking one sends it.
   property bool stickersEnabled: false
@@ -72,8 +90,8 @@ Popup {
     }
     recent = EmojiModel.remember(recent, value, 16)
     picked(value)
-    close()
-    if (target && typeof target.forceActiveFocus === "function") target.forceActiveFocus()
+    // It stays open for the next one; Esc, a click outside, the emoji button
+    // or the close button put it away.
     return true
   }
 
@@ -177,21 +195,69 @@ Popup {
       visible: root.tab === "emoji"
       anchors.top: tabs.bottom
       anchors.left: parent.left
-      anchors.right: parent.right
+      anchors.right: closeButton.left
+      anchors.rightMargin: Style.space(4)
       placeholderText: "Search emoji"
       foreground: root.foreground
       accent: root.accent
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
       onTextChanged: root.query = text
-      Keys.onReturnPressed: if (root.shown.length > 0) root.choose(root.shown[0].e)
-      Keys.onEnterPressed: if (root.shown.length > 0) root.choose(root.shown[0].e)
+      Keys.onReturnPressed: if (root.firstEmoji !== "") root.choose(root.firstEmoji)
+      Keys.onEnterPressed: if (root.firstEmoji !== "") root.choose(root.firstEmoji)
+    }
+    PanelActionButton {
+      id: closeButton
+      objectName: "emojiPickerClose"
+      anchors.right: parent.right
+      anchors.top: tabs.bottom
+      size: searchField.visible ? searchField.height : Style.space(28)
+      iconText: "󰅖"
+      tooltipText: "Close · Esc"
+      foreground: root.muted
+      hoverColor: root.foreground
+      fontFamily: root.fontFamily
+      fontSize: Style.font.bodySmall
+      onClicked: root.close()
+    }
+    Row {
+      id: sectionTabs
+      objectName: "emojiSections"
+      visible: root.tab === "emoji" && root.query === ""
+      anchors.top: searchField.bottom
+      anchors.topMargin: Style.space(4)
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: visible ? Style.space(28) : 0
+      Repeater {
+        model: root.laidOut.sections
+        delegate: Rectangle {
+          required property var modelData
+          objectName: "emojiSection-" + modelData.id
+          readonly property bool active: root.currentSection === modelData.id
+          width: Math.floor(sectionTabs.width / Math.max(1, root.laidOut.sections.length))
+          height: Style.space(28)
+          radius: Style.cornerRadius
+          color: active ? Style.selectedFillFor(root.foreground, root.accent)
+            : (sectionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+          Text {
+            textFormat: Text.PlainText
+            anchors.centerIn: parent
+            text: modelData.icon
+            opacity: parent.active ? 1 : 0.6
+            font.pixelSize: Style.font.bodySmall
+          }
+          HoverHandler { id: sectionHover; cursorShape: Qt.PointingHandCursor }
+          PanelToolTip { visible: sectionHover.hovered; text: modelData.label }
+          TapHandler { onTapped: root.showSection(modelData.id) }
+        }
+      }
     }
     GridView {
       id: grid
       objectName: "emojiGrid"
       visible: root.tab === "emoji"
-      anchors.top: searchField.bottom
+      anchors.top: sectionTabs.bottom
       anchors.topMargin: Style.space(6)
       anchors.left: parent.left
       anchors.right: parent.right
@@ -201,20 +267,44 @@ Popup {
       cellHeight: cellWidth
       model: root.shown
       boundsBehavior: Flickable.StopAtBounds
-      delegate: Rectangle {
+      // The theme tab follows the scroll.
+      onContentYChanged: if (root.query === "") root.currentSection = EmojiModel.sectionAt(
+        root.laidOut.sections, indexAt(1, contentY + cellHeight / 2))
+      delegate: Item {
+        id: cell
         required property var modelData
+        readonly property string kind: String(modelData.kind || "emoji")
         width: grid.cellWidth
         height: grid.cellHeight
-        radius: Style.cornerRadius
-        color: emojiHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+        // A header is one cell wide but draws across its whole row.
         Text {
           textFormat: Text.PlainText
-          anchors.centerIn: parent
-          text: modelData.e
-          font.pixelSize: Style.font.icon
+          objectName: "emojiSectionHeader"
+          visible: cell.kind === "header"
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(4)
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: Style.space(4)
+          width: grid.width - Style.space(8)
+          text: String(cell.modelData.label || "")
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
-        HoverHandler { id: emojiHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: root.choose(modelData.e) }
+        Rectangle {
+          visible: cell.kind === "emoji"
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          color: emojiHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+          Text {
+            textFormat: Text.PlainText
+            anchors.centerIn: parent
+            text: String(cell.modelData.e || "")
+            font.pixelSize: Style.font.icon
+          }
+          HoverHandler { id: emojiHover; cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: root.choose(cell.modelData.e) }
+        }
       }
     }
     Text {

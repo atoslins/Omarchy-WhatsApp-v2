@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- The emoji picker stays open for as many emoji as wanted, closing with Esc,
+  a click outside, the emoji button, or its new close button. Emoji are
+  grouped by theme under headers, with a row of theme tabs that jump to each
+  and follow the scroll; recent emoji come first.
 - Formatting moves from a composer button to where the text is: a small bar
   (bold, italic, strikethrough, monospace, code, lists, quote) appears over
   any selection, and right-clicking the composer opens cut, copy, paste,

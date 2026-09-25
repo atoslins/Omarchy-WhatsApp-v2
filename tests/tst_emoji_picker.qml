@@ -33,8 +33,52 @@ TestCase {
     verify(picker.choose("🔥"))
     compare(edit.text, "hi🔥 there")
     compare(edit.cursorPosition, 2 + "🔥".length)
-    verify(!picker.opened)
-    compare(picker.recent[0], "🔥")
+    // The owner's request: pick as many as wanted, close by hand.
+    verify(picker.opened, "picking keeps the picker open")
+    verify(picker.choose("👍"))
+    compare(edit.text, "hi🔥👍 there")
+    compare(picker.recent[0], "👍")
+    compare(picker.recent[1], "🔥")
+    findChild(picker.contentItem, "emojiPickerClose").clicked()
+    tryCompare(picker, "opened", false)
+  }
+
+  function test_emoji_are_grouped_by_theme_as_on_the_phone() {
+    var data = []
+    var firsts = ["😀", "👋", "🐵", "🍇", "🌍", "🎃", "👓", "🏧", "🏁"]
+    for (var i = 0; i < firsts.length; i++) {
+      data.push({ e: firsts[i], k: "first " + i })
+      data.push({ e: "x" + i, k: "more " + i })
+    }
+    var groups = EmojiModel.groups(data)
+    compare(groups.map(function(group) { return group.id }),
+      ["smileys", "people", "animals", "food", "travel", "activities", "objects", "symbols", "flags"])
+    compare(groups[2].items.map(function(item) { return item.e }), ["🐵", "x2"])
+    compare(EmojiModel.groups(data.slice().reverse()).length, 1, "a list out of order stays whole")
+    var layout = EmojiModel.layout(data, ["🔥"], 8)
+    compare(layout.sections[0].id, "recent")
+    for (var s = 0; s < layout.sections.length; s++) {
+      compare(layout.sections[s].index % 8, 0, "every theme starts on its own row")
+      compare(layout.items[layout.sections[s].index].kind, "header")
+    }
+    compare(layout.items.length % 8, 0)
+    compare(EmojiModel.sectionAt(layout.sections, layout.sections[4].index + 9), layout.sections[4].id)
+  }
+
+  function test_the_theme_tabs_jump_to_their_theme() {
+    var picker = createTemporaryObject(pickerComponent, testCase)
+    picker.emojis = EmojiModel.parse(JSON.stringify([
+      { e: "😀", k: "a" }, { e: "👋", k: "b" }, { e: "🐵", k: "c" }, { e: "🍇", k: "d" },
+      { e: "🌍", k: "e" }, { e: "🎃", k: "f" }, { e: "👓", k: "g" }, { e: "🏧", k: "h" }, { e: "🏁", k: "i" }]))
+    picker.open()
+    tryCompare(picker, "opened", true)
+    compare(picker.laidOut.sections.length, 9)
+    verify(findChild(picker.contentItem, "emojiSections").visible)
+    verify(picker.showSection("food"))
+    compare(picker.currentSection, "food")
+    picker.query = "a"
+    verify(!findChild(picker.contentItem, "emojiSections").visible, "a search shows only its matches")
+    compare(picker.firstEmoji, "😀")
   }
 
   function test_app_composer_has_the_emoji_button() {
