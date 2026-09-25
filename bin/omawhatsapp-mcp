@@ -1091,11 +1091,20 @@ def fetch_older_history(chat: str, phone_ready: bool = False, batches: int = 1,
     oldest = local_time(details.get("since"))
     if not phone_ready:
         # Nothing is paused yet: the phone answers history requests only
-        # while WhatsApp runs there, so the user opens it first.
+        # while WhatsApp runs there, so the user opens it first. It must be
+        # the phone of the number linked here, not the contact's.
+        try:
+            linked = gateway(["auth", "status"], account=scope) or {}
+        except ToolError:
+            linked = {}
+        digits = digits_of(linked.get("phone") if isinstance(linked, dict) else "")
+        phone = f" with the number +{digits}" if digits else ""
+        since = f" This computer has its messages since {oldest[:10]}; if the chat began then, there is nothing older." if oldest else ""
         return compact({
             "done": False,
-            "ask_user": (f"Open WhatsApp on your phone, open the chat with {name}, and keep "
-                         "the screen on. Tell me when it is ready."),
+            "ask_user": (f"Open WhatsApp on the phone{phone} (the account linked here, not "
+                         f"{name}'s phone), open the chat with {name}, and keep the screen on. "
+                         "Tell me when it is ready." + since),
             "local_archive_starts": oldest,
             "messages_here": before.get("total"),
             "next": "After the user confirms, call fetch_older_history again with phone_ready: true.",
@@ -1106,9 +1115,13 @@ def fetch_older_history(chat: str, phone_ready: bool = False, batches: int = 1,
                  "--count", str(bounded(per_batch, 50, 1, 200))], "sync", scope,
                 timeout=90 * requests + 30)
     except ToolError as exc:
-        raise ToolError(f"{exc} The phone did not send older messages. Ask the user to keep "
-                        "WhatsApp open on the phone, on this chat, with the screen on; then it "
-                        "may be tried once more.") from exc
+        detail = str(exc)
+        silent = "no history response" in detail or "too long" in detail.lower()
+        raise ToolError(
+            ("The phone did not answer the history request. " if silent else detail + " ")
+            + "Either the chat has nothing older than what this computer has, or WhatsApp was "
+            "not open on the phone of the linked number. Ask the user which it is before "
+            "trying once more.") from exc
     after = helper("chat-details", chat_payload(target, account)).get("counts") or {}
     fetched = int(after.get("total") or 0) - int(before.get("total") or 0)
     result: dict[str, Any] = {"done": True, "fetched": max(0, fetched),

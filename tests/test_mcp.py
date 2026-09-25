@@ -580,15 +580,20 @@ class SecondWaveTests(ToolCase):
         # so the first call only says what to ask and pauses nothing.
         recorder = self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana")]},
                             **{"chat-details": {"counts": {"total": 10}, "since": 1780000000,
-                                                "chat": {"name": "Ana", "kind": "dm"}}})
+                                                "chat": {"name": "Ana", "kind": "dm"}},
+                               "wacli auth status": {"data": {"authenticated": True,
+                                                              "phone": "5516000000000"}}})
         answer = self.run_tool("fetch_older_history", chat="Ana")
         self.assertFalse(answer["done"])
-        self.assertIn("Open WhatsApp on your phone", answer["ask_user"])
-        self.assertIn("Ana", answer["ask_user"])
+        self.assertIn("Open WhatsApp on the phone with the number +5516000000000", answer["ask_user"])
+        self.assertIn("not Ana's phone", answer["ask_user"], "the linked phone, not the contact's")
+        self.assertIn("nothing older", answer["ask_user"])
         self.assertIn("phone_ready: true", answer["next"])
         self.assertEqual(answer["messages_here"], 10)
         self.assertTrue(answer["local_archive_starts"])
-        self.assertEqual(recorder.wacli(), [], "nothing is asked of the phone yet")
+        self.assertEqual([args[:2] for args in recorder.wacli()], [["auth", "status"]],
+                         "only a local read; nothing is asked of the phone yet")
+        self.assertEqual(recorder.token(), "")
 
     def test_older_history_asks_the_phone_once_the_user_is_ready(self) -> None:
         counts = iter([{"counts": {"total": 10}}, {"counts": {"total": 60}}])
@@ -606,7 +611,9 @@ class SecondWaveTests(ToolCase):
                             **{"chat-details": {"counts": {"total": 10}},
                                "wacli history backfill": mcp.ToolError("WhatsApp took too long to respond.")})
         text = self.tool_error("fetch_older_history", chat="Ana", phone_ready=True)
-        self.assertIn("keep WhatsApp open on the phone", text)
+        self.assertIn("did not answer", text)
+        self.assertIn("nothing older", text)
+        self.assertIn("phone of the linked number", text)
         self.assertEqual(len(recorder.wacli()), 1, "one attempt, never an automatic retry")
 
     def test_nothing_new_from_the_phone_says_so(self) -> None:
