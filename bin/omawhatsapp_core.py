@@ -23,6 +23,10 @@ import time
 from typing import Any, Iterator, Sequence
 from urllib.parse import parse_qsl, quote, unquote, urlparse
 
+# Delivery states of a sent message, indexed by the code wacli builds with
+# receipts store (the WhatsApp WebMessageInfo status order).
+DELIVERY_STATES = ("error", "pending", "sent", "delivered", "read", "played")
+
 MODULE_DIRECTORY = str(Path(__file__).resolve().parent)
 if MODULE_DIRECTORY not in sys.path:
     sys.path.insert(0, MODULE_DIRECTORY)
@@ -2457,6 +2461,9 @@ class Backend:
                 # again would hide real messages. Either way a reply from
                 # another device does not always clear the count, and the
                 # phone treats a reply as reading the chat.
+                last_delivery = self._delivery_status(connection, [
+                    (str(row["jid"]), str(row["last_message_id"]))
+                    for row in rows if bool(row["last_from_me"]) and row["last_message_id"]])
                 accurate_counts = self._store_schema_version(connection) >= 27
                 real_unread: dict[str, int] = {}
                 synthetic = synthetic_message_sql("messages")
@@ -2528,6 +2535,7 @@ class Backend:
                 "last_media_type": str(row["last_media_type"] or "")[:32],
                 "preview": " ".join(contact_preview(str(row["preview"] or "")).split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
+                "last_status": last_delivery.get((jid, str(row["last_message_id"] or "")), ""),
                 "last_sender": " ".join(str(row["last_sender"] or "").split())[:MAX_NOTIFY_SENDER],
                 "archived": archived, "pinned": bool(row["pinned"]),
                 "muted": muted,
@@ -2563,12 +2571,16 @@ class Backend:
                     ).fetchone()
                     if row is None or int(row["ts"] or 0) <= int(chat["timestamp"] or 0):
                         continue
+                    key = (lid, str(row["msg_id"] or ""))
+                    status = self._delivery_status(connection, [key]).get(key, "") \
+                        if bool(row["from_me"]) else ""
                     chat.update({
                         "timestamp": int(row["ts"] or 0),
                         "last_message_id": str(row["msg_id"] or "")[:256],
                         "last_media_type": str(row["media"] or "")[:32],
                         "preview": " ".join(contact_preview(str(row["preview"] or "")).split())[:512],
                         "last_from_me": bool(row["from_me"]),
+                        "last_status": status,
                         "last_sender": " ".join(str(row["sender_name"] or "").split())[:MAX_NOTIFY_SENDER],
                     })
         except (sqlite3.Error, OmaWhatsAppError):
@@ -3245,6 +3257,9 @@ class Backend:
                         })
                 polls = self._polls(connection, chat_jids, message_ids) \
                     if has_polls and message_ids else {}
+                delivery = self._delivery_status(connection, [
+                    (str(row["stored_chat_jid"]), str(row["msg_id"]))
+                    for row in rows if bool(row["from_me"])])
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         values = []
@@ -3312,6 +3327,9 @@ class Backend:
                 "location_address": str(row["location_address"] or ""),
                 "location_live": bool(row["location_live"]),
             })
+            status = delivery.get((str(row["stored_chat_jid"]), message_id), "")
+            if status:
+                values[-1]["status"] = status
             if not media_type:
                 cards = contact_cards(text)
                 if cards:
@@ -4053,6 +4071,34 @@ class Backend:
             return int(row[0] or 0) if row else 0
         except (sqlite3.Error, TypeError, ValueError):
             return 0
+
+    @classmethod
+    def _delivery_status(cls, connection: sqlite3.Connection,
+                         keys: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Delivery state of sent messages, from wacli builds that keep receipts.
+
+        Official wacli keeps none, so the table may be missing; a message
+        without a row has no known state and shows no tick.
+        """
+        if not keys or not cls._has_table(connection, "message_status"):
+            return {}
+        found: dict[tuple[str, str], str] = {}
+        by_chat: dict[str, list[str]] = {}
+        for chat_jid, message_id in keys:
+            by_chat.setdefault(chat_jid, []).append(message_id)
+        for chat_jid, ids in by_chat.items():
+            for start in range(0, len(ids), 400):
+                chunk = ids[start:start + 400]
+                rows = connection.execute(
+                    f"""SELECT msg_id, status FROM message_status
+                    WHERE chat_jid = ? AND msg_id IN ({",".join("?" for _ in chunk)})""",
+                    [chat_jid, *chunk],
+                ).fetchall()
+                for row in rows:
+                    code = row["status"]
+                    if isinstance(code, int) and 0 <= code < len(DELIVERY_STATES):
+                        found[(chat_jid, str(row["msg_id"]))] = DELIVERY_STATES[code]
+        return found
 
     @staticmethod
     def _has_table(connection: sqlite3.Connection, name: str) -> bool:

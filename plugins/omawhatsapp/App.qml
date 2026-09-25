@@ -130,13 +130,13 @@ Item {
   ]
   property var demoItems: [
     { id: "demo-5", text: "Yep — shipped.", sender: "Sam Rivera", sender_jid: "sam@s.whatsapp.net", timestamp: 1787540100, from_me: false, done: false, media_type: "", mime_type: "", local_path: "", tags: [] },
-    { id: "demo-1", text: "OmaWhatsApp is instant, native, and private #design", sender: "You", sender_jid: "", timestamp: 1787539920, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["design"], reactions: [{ emoji: "🔥", from_me: false }, { emoji: "🔥", from_me: true }], starred: true },
+    { id: "demo-1", text: "OmaWhatsApp is instant, native, and private #design", sender: "You", sender_jid: "", timestamp: 1787539920, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["design"], reactions: [{ emoji: "🔥", from_me: false }, { emoji: "🔥", from_me: true }], starred: true, status: "read" },
     { id: "demo-2a", text: "Two photos, one smooth send #capture", sender: "You", sender_jid: "", timestamp: 1787539200, from_me: true, done: false, media_type: "album", mime_type: "image/svg+xml", local_path: "__demo__", album_id: "demo-album", album_count: 2, tags: ["capture"], album_items: [
       { id: "demo-2a", text: "Two photos, one smooth send #capture", sender: "You", sender_jid: "", timestamp: 1787539200, from_me: true, media_type: "image", mime_type: "image/svg+xml", local_path: "__demo__", album_id: "demo-album", album_index: 0, album_count: 2 },
       { id: "demo-2b", text: "", sender: "You", sender_jid: "", timestamp: 1787539199, from_me: true, media_type: "image", mime_type: "image/svg+xml", local_path: "__demo_photo__", album_id: "demo-album", album_index: 1, album_count: 2 }
     ] },
-    { id: "demo-3", text: "Review the private repo README and release checklist #ship", sender: "You", sender_jid: "", timestamp: 1787538000, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["ship"], quoted_id: "demo-1", quoted_sender: "You", quoted_text: "OmaWhatsApp is instant, native, and private #design" },
-    { id: "demo-4", text: "https://github.com/openclaw/wacli #reference", sender: "You", sender_jid: "", timestamp: 1787536800, from_me: true, done: true, media_type: "", mime_type: "", local_path: "", tags: ["reference"] }
+    { id: "demo-3", text: "Review the private repo README and release checklist #ship", sender: "You", sender_jid: "", timestamp: 1787538000, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["ship"], quoted_id: "demo-1", quoted_sender: "You", quoted_text: "OmaWhatsApp is instant, native, and private #design", status: "delivered" },
+    { id: "demo-4", text: "https://github.com/openclaw/wacli #reference", sender: "You", sender_jid: "", timestamp: 1787536800, from_me: true, done: true, media_type: "", mime_type: "", local_path: "", tags: ["reference"], status: "sent" }
   ]
   property var demoMembers: [
     { jid: "sam@s.whatsapp.net", name: "Sam Rivera", phone: "+1 555 123 4567", role: "admin" },
@@ -719,6 +719,16 @@ Item {
     queuedSendKey = ""
     sendDraft()
     return true
+  }
+
+  // The tick for a sent message's delivery state; "" when none is known.
+  function tickGlyph(status) {
+    var value = String(status || "")
+    if (value === "sent") return "󰄬"
+    if (value === "delivered" || value === "read" || value === "played") return "󰄭"
+    if (value === "pending") return "󰅐"
+    if (value === "error") return "󰀦"
+    return ""
   }
 
   function sendDraft() {
@@ -2323,19 +2333,43 @@ Item {
                     }
                   }
                 }
-                Text {
-                  textFormat: Text.PlainText
-                  objectName: "chatPreview"
+                Item {
                   width: parent.width
-                  readonly property string draft: root.draftFor(modelData)
-                  text: draft !== "" ? "Draft: " + draft
-                    : AccountModel.previewPrefix(modelData, root.multiAccount)
-                      + (modelData.last_from_me ? "You · " : "")
-                      + (FormatModel.plain(String(modelData.preview || "")) || "No local messages yet")
-                  color: draft !== "" ? root.accent : root.dim
-                  elide: Text.ElideRight
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  height: chatPreviewText.implicitHeight
+                  // Your last message shows its tick instead of "You ·", as on
+                  // the phone, when wacli recorded its delivery state.
+                  Text {
+                    textFormat: Text.PlainText
+                    id: chatPreviewTicks
+                    objectName: "chatPreviewTicks"
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: text !== ""
+                    readonly property string status: chatPreviewText.draft === "" && modelData.last_from_me
+                      ? String(modelData.last_status || "") : ""
+                    text: root.tickGlyph(status)
+                    color: status === "read" || status === "played" ? root.accent
+                      : status === "error" ? Color.urgent : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                  Text {
+                    textFormat: Text.PlainText
+                    id: chatPreviewText
+                    objectName: "chatPreview"
+                    anchors.left: chatPreviewTicks.visible ? chatPreviewTicks.right : parent.left
+                    anchors.leftMargin: chatPreviewTicks.visible ? Style.space(4) : 0
+                    anchors.right: parent.right
+                    readonly property string draft: root.draftFor(modelData)
+                    text: draft !== "" ? "Draft: " + draft
+                      : AccountModel.previewPrefix(modelData, root.multiAccount)
+                        + (modelData.last_from_me && !chatPreviewTicks.visible ? "You · " : "")
+                        + (FormatModel.plain(String(modelData.preview || "")) || "No local messages yet")
+                    color: draft !== "" ? root.accent : root.dim
+                    elide: Text.ElideRight
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
                 }
               }
 

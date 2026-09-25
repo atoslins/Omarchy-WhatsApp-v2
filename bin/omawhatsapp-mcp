@@ -189,6 +189,8 @@ def shape_message(row: dict[str, Any]) -> dict[str, Any]:
         "forwarded": True if row.get("forwarded") else None,
         "starred": True if row.get("starred") else None,
         "deleted_for_everyone": True if row.get("revoked") else None,
+        # sent, delivered, read or played; absent when wacli recorded none.
+        "delivery": row.get("status") if from_me and row.get("status") else None,
     }
     cards = row.get("contacts")
     if isinstance(cards, list) and cards:

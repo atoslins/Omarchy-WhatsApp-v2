@@ -49,7 +49,7 @@ Panel {
   }
   property var demoItems: [
     { id: "demo-message-1", text: "The bar dropdown can send now.", sender: "Alex", timestamp: 1787540400, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] },
-    { id: "demo-message-2", text: "Fast, local, and keyboard-first.", sender: "You", timestamp: 1787540100, from_me: true, media_type: "", mime_type: "", local_path: "", reactions: [{ emoji: "⚡", from_me: false }] },
+    { id: "demo-message-2", text: "Fast, local, and keyboard-first.", sender: "You", timestamp: 1787540100, from_me: true, media_type: "", mime_type: "", local_path: "", reactions: [{ emoji: "⚡", from_me: false }], status: "read" },
     { id: "demo-message-3", text: "Open the full client only when you need the whole toolbox.", sender: "Design team", timestamp: 1787539800, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] }
   ]
 

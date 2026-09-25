@@ -144,9 +144,16 @@ Item {
     new Date(Number(message.timestamp || 0) * 1000),
     TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
   readonly property real maximumWidth: width * (narrow ? 0.92 : 0.76)
+  // Delivery state of a sent message, from wacli builds that keep receipts;
+  // empty when wacli recorded none (official wacli, or older messages).
+  readonly property string deliveryStatus: message && message.from_me === true
+    && !pending && !revoked ? String(message.status || "") : ""
+  readonly property bool showsTicks: ["pending", "sent", "delivered", "read", "played", "error"]
+    .indexOf(deliveryStatus) >= 0
   readonly property real metadataWidth: timestampMetrics.advanceWidth
     + (message.edited === true ? editedMetrics.advanceWidth + Style.space(6) : 0)
     + (message.starred === true ? Style.space(16) : 0)
+    + (showsTicks ? Style.space(18) : 0)
   readonly property real naturalTextWidth: Math.max(
     messageMetrics.advanceWidth,
     senderMetrics.advanceWidth,
@@ -712,10 +719,8 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
-        // No delivery tick: wacli's mirror records no delivery or read
-        // receipts, so any tick here would be a claim the data cannot back.
-        // A pending message shows a clock until the stored row replaces it,
-        // or an alert when it could not be sent.
+        // A message still on its way from here shows a clock until the stored
+        // row replaces it, or an alert when it could not be sent.
         Text {
           textFormat: Text.PlainText
           objectName: "messagePending"
@@ -742,6 +747,30 @@ Item {
           font.pixelSize: Style.font.caption
           HoverHandler { id: timestampHover }
           Ui.PanelToolTip { visible: timestampHover.hovered; text: root.fullTimestampText }
+        }
+        // Ticks only for a state wacli recorded: a guess would be a claim the
+        // data cannot back.
+        Text {
+          textFormat: Text.PlainText
+          objectName: "messageTicks"
+          visible: root.showsTicks
+          text: root.deliveryStatus === "sent" ? "󰄬"
+            : root.deliveryStatus === "pending" ? "󰅐"
+            : root.deliveryStatus === "error" ? "󰀦" : "󰄭"
+          color: root.deliveryStatus === "read" || root.deliveryStatus === "played" ? root.accent
+            : root.deliveryStatus === "error" ? Color.urgent : root.dimmer
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          HoverHandler { id: ticksHover }
+          Ui.PanelToolTip {
+            visible: ticksHover.hovered
+            text: root.deliveryStatus === "sent" ? "Sent"
+              : root.deliveryStatus === "delivered" ? (root.groupChat ? "Delivered to everyone" : "Delivered")
+              : root.deliveryStatus === "read" ? (root.groupChat ? "Read by everyone" : "Read")
+              : root.deliveryStatus === "played" ? (root.groupChat ? "Played by everyone" : "Played")
+              : root.deliveryStatus === "pending" ? "Waiting to go out from your phone"
+              : "Your phone could not send it"
+          }
         }
       }
       }

@@ -305,6 +305,16 @@ class ReadToolTests(ToolCase):
         self.assertEqual(rows["p1"]["poll"]["choices_allowed"], 1)
         self.assertTrue(rows["gone"]["deleted_for_everyone"])
 
+    def test_read_chat_says_whether_a_sent_message_was_read(self) -> None:
+        page = [message("r1", 30, from_me=True, status="read"),
+                message("u1", 20, from_me=True),
+                message("in", 10, status="read")]
+        self.chats(messages={"messages": page, "has_more": False})
+        rows = {row["id"]: row for row in self.run_tool("read_chat", chat="sam@s.whatsapp.net")["messages"]}
+        self.assertEqual(rows["r1"]["delivery"], "read")
+        self.assertNotIn("delivery", rows["u1"], "no record, nothing claimed")
+        self.assertNotIn("delivery", rows["in"], "only sent messages have a delivery state")
+
     def test_read_chat_gives_shared_contacts_with_their_numbers(self) -> None:
         page = [message("c1", 30, text="Contact: Ana (+55 16 99999-0000)", contacts=[
             {"name": "Ana", "phone": "+55 16 99999-0000", "digits": "5516999990000",

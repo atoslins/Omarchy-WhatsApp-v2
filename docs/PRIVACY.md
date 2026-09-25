@@ -25,6 +25,11 @@ Marking a chat read, automatically or from the chat list, sends WhatsApp an
 app-state change that syncs the read state to the user's own devices. wacli
 has no path that sends a read receipt, so the other side is not told.
 
+With a wacli build that keeps receipts, the mirror also records when each
+recipient received, read, or played the messages you sent, as WhatsApp
+reports it to your linked devices. The app shows that as ticks and never sends
+anything for it. The rows are removed with their chat.
+
 Desktop popups leave the process: chat names, senders, and message previews
 reach the notification daemon and its history. They are on by default, can be
 muted from the bar icon, the preview can be dropped so only chat names travel, and every field is truncated

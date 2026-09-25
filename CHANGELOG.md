@@ -2,6 +2,11 @@
 
 ## Unreleased (fork)
 
+- Show sent, delivered, read, and played ticks on your messages and before
+  your last message in the chat list. The helper reads them from
+  `message_status`, which wacli builds that keep receipts maintain. With
+  official wacli, or for messages synced before such a build, no tick is
+  shown. The agent server reports the same state as `delivery`.
 - Sending no longer holds up typing. Each Enter puts the message on screen
   at once, even while an earlier message or a read mark is still going out.
   Messages then go out in the order they were typed. A message that fails

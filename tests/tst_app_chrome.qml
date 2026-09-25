@@ -199,6 +199,37 @@ TestCase {
     return { app: app, service: service }
   }
 
+  function chatPreviewRow(app, index) {
+    var list = null
+    var queue = [app]
+    while (queue.length > 0 && list === null) {
+      var item = queue.shift()
+      if (item.objectName === "" && item.model !== undefined && item.itemAtIndex !== undefined
+          && item.count >= 2 && item.itemAtIndex(0) && findChild(item.itemAtIndex(0), "chatPreview")) list = item
+      for (var i = 0; i < (item.children || []).length; i++) queue.push(item.children[i])
+      if (item.contentItem) queue.push(item.contentItem)
+    }
+    verify(list !== null, "chat list")
+    tryVerify(function() { return list.itemAtIndex(index) !== null })
+    return list.itemAtIndex(index)
+  }
+
+  function test_the_chat_list_shows_the_tick_of_your_last_message() {
+    // As on the phone: your last message shows its tick instead of "You ·".
+    var read = Object.assign({}, workChat, { last_from_me: true, last_status: "read", preview: "see you" })
+    var unknown = Object.assign({}, otherChat, { last_from_me: true, last_status: "", preview: "older" })
+    var h = createHarness({ chats: [read, unknown] })
+    var first = chatPreviewRow(h.app, 0)
+    var ticks = findChild(first, "chatPreviewTicks")
+    verify(ticks.visible)
+    compare(ticks.text, "󰄭")
+    compare(String(ticks.color), String(h.app.accent), "read is in the accent color")
+    verify(findChild(first, "chatPreview").text.indexOf("You · ") < 0)
+    var second = chatPreviewRow(h.app, 1)
+    verify(!findChild(second, "chatPreviewTicks").visible, "no record, no tick")
+    verify(findChild(second, "chatPreview").text.indexOf("You · ") >= 0, "the words stay when no tick is known")
+  }
+
   function test_there_is_no_title_bar_above_the_chat_list() {
     var app = createHarness().app
     var settings = findChild(app, "railSettingsButton")

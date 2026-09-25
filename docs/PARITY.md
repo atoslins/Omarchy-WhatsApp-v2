@@ -103,7 +103,7 @@ button must remain reachable at every supported size.
 | Buttons/list rows | `messages.buttons` | building |
 | Contact card | payload not normalized by wacli | transport gap |
 | Link preview card | wacli sends previews; mirror lacks normalized card | transport gap |
-| Delivery/read receipts | not exposed in the mirror | transport gap |
+| Delivery/read receipts | `message_status` in wacli builds that keep receipts (fork `oma-presence-receipts`); official wacli has none, so no tick is shown | building |
 | Disappearing timer state | send flag exists; chat timer state not exposed | transport gap |
 | Native image/GIF/video gallery | local media path | building |
 | External image annotation | optional Omasnap CLI | done |

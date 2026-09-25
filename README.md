@@ -32,6 +32,10 @@ native, and visually at home in Omarchy.
   chat read too. wacli only syncs that state to your own devices, so contacts
   never get a read receipt from OmaWhatsApp. Settings can turn automatic
   reading off, and the chat list marks any chat read or unread.
+- **Ticks for what you send.** Sent, delivered, and read show on your
+  messages and in the chat list, as on the phone. They need a wacli build that
+  keeps receipts; with official wacli, and for messages synced before it, no
+  tick is shown rather than a guessed one.
 - **One native plugin.** The service, full app, and configurable recent-chat
   dropdown share a single Omarchy plugin lifecycle.
 - **No duplicate sync process.** Sends use wacli's live companion path and a

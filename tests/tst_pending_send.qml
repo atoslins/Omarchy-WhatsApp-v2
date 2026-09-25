@@ -209,6 +209,39 @@ TestCase {
     compare(pendingSpy.signalArguments[1][0], "discard")
   }
 
+  Component {
+    id: sentBubbleComponent
+    Oma.MessageBubble {
+      width: 420
+      message: ({ id: "stored-1", text: "went out", sender: "You", timestamp: 1787540100,
+        from_me: true, media_type: "", reactions: [] })
+      foreground: "#eeeeee"; background: "#111111"; accent: "#66ccaa"
+      dim: "#999999"; dimmer: "#777777"; fontFamily: "monospace"
+    }
+  }
+
+  function test_a_stored_message_shows_the_tick_wacli_recorded() {
+    // Sent, delivered and read, as on the phone, and nothing when wacli has
+    // no record for the message.
+    var bubble = createTemporaryObject(sentBubbleComponent, testCase)
+    var ticks = findChild(bubble, "messageTicks")
+    verify(!ticks.visible, "no record, no tick")
+    var cases = [["sent", "󰄬", "#777777"], ["delivered", "󰄭", "#777777"],
+                 ["read", "󰄭", "#66ccaa"], ["played", "󰄭", "#66ccaa"]]
+    for (var i = 0; i < cases.length; i++) {
+      var next = Object.assign({}, bubble.message)
+      next.status = cases[i][0]
+      bubble.message = next
+      verify(ticks.visible, cases[i][0])
+      compare(ticks.text, cases[i][1], cases[i][0])
+      compare(String(ticks.color), cases[i][2], cases[i][0])
+    }
+    var incoming = Object.assign({}, bubble.message)
+    incoming.from_me = false
+    bubble.message = incoming
+    verify(!ticks.visible, "an incoming message never has ticks")
+  }
+
   function test_a_pending_bubble_has_a_clock_and_no_message_actions() {
     var bubble = createTemporaryObject(bubbleComponent, testCase)
     verify(bubble.pending)

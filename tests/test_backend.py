@@ -1057,6 +1057,47 @@ class BackendTests(unittest.TestCase):
         self.assertEqual([value["id"] for value in values], ["t1", "t0b", "t0a", "t2"])
         self.assertNotIn("a1", [value["id"] for value in values])
 
+    def test_sent_messages_carry_the_delivery_state_wacli_recorded(self) -> None:
+        # The owner asked for sent, delivered and read ticks. Only wacli builds
+        # that keep receipts have message_status; without it nothing is claimed.
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                  ts, from_me, text, display_text, reaction_to_id, media_type)
+                VALUES ('team@g.us', 'Design team', ?, '', 'me', ?, ?, ?, ?, '', '')""",
+                [("mine-read", 70, 1, "read one", "read one"),
+                 ("mine-unknown", 71, 1, "older one", "older one"),
+                 ("mine-odd", 72, 1, "odd code", "odd code"),
+                 ("theirs", 73, 0, "incoming", "incoming")],
+            )
+        values = {value["id"]: value for value in self.backend.messages("team@g.us")["messages"]}
+        self.assertFalse(any("status" in value for value in values.values()),
+                         "official wacli keeps no receipts: no ticks")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("""CREATE TABLE message_status (
+              chat_jid TEXT NOT NULL, msg_id TEXT NOT NULL, status INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL, PRIMARY KEY (chat_jid, msg_id))""")
+            connection.executemany(
+                "INSERT INTO message_status VALUES ('team@g.us', ?, ?, 1)",
+                [("mine-read", 4), ("mine-odd", 99), ("theirs", 4)],
+            )
+        values = {value["id"]: value for value in self.backend.messages("team@g.us")["messages"]}
+        self.assertEqual(values["mine-read"]["status"], "read")
+        self.assertNotIn("status", values["mine-unknown"], "no record, no tick")
+        self.assertNotIn("status", values["mine-odd"], "an unknown code is not shown")
+        self.assertNotIn("status", values["theirs"], "ticks belong to sent messages")
+        chat = next(item for item in self.backend.chats()["chats"] if item["jid"] == "team@g.us")
+        self.assertEqual(chat["last_status"], "", "the last message is theirs")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                  ts, from_me, text, display_text, reaction_to_id, media_type)
+                VALUES ('team@g.us', 'Design team', 'mine-last', '', 'me', 80, 1,
+                  'latest', 'latest', '', '')""")
+            connection.execute("INSERT INTO message_status VALUES ('team@g.us', 'mine-last', 3, 1)")
+        chat = next(item for item in self.backend.chats()["chats"] if item["jid"] == "team@g.us")
+        self.assertEqual(chat["last_status"], "delivered", "the rail shows the last tick")
+
     def test_synthetic_placeholder_rows_are_neither_bubbles_nor_previews(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.executemany(
