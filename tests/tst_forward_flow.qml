@@ -209,4 +209,52 @@ TestCase {
     verify(app.deleteSelection(false))
     verify(app.demoItems[0].revoked)
   }
+
+  // L225: a number with no chat yet, checked once, joins as a chip.
+  function test_a_typed_number_is_checked_then_added() {
+    var app = createTemporaryObject(appComponent, testCase)
+    verify(app.startForward(app.demoItems[0]))
+    verify(app.openForwardDialog())
+    var dialog = findChild(app, "forwardPicker")
+    var search = findChild(dialog.contentItem, "forwardSearch")
+    search.text = "+1 555 000 7777"
+    compare(app.forwardDigits, "15550007777")
+    var row = findChild(dialog.contentItem, "forwardNumberRow")
+    verify(row.visible)
+    compare(app.forwardNumberState, "registered", "demo answers at once")
+    verify(findChild(dialog.contentItem, "forwardNumberLabel").text.indexOf("Add +15550007777") === 0)
+    verify(app.useForwardNumber())
+    compare(app.forwardChosen.length, 1)
+    compare(app.forwardChosen[0].phone, "15550007777")
+    compare(search.text, "", "the search clears for the next one")
+    search.text = "12"
+    compare(app.forwardDigits, "", "too short to be a number")
+    verify(!row.visible)
+    search.text = "+1 555 000 7777"
+    verify(app.useForwardNumber(), "a second press takes it out again")
+    compare(app.forwardChosen.length, 0)
+  }
+
+  function test_the_service_forwards_to_a_new_number_and_starts_its_chat_with_the_note() {
+    var service = createService()
+    var process = findChild(service, "writeProcess")
+    var target = { account: "work", jid: "", phone: "15550007777", name: "+15550007777" }
+    verify(service.forwardMany(origin, [{ id: "M1", timestamp: 1 }], [target], "hello", "app"))
+    var forward = JSON.parse(process.payload)
+    compare(forward.to_phone, "15550007777")
+    compare(forward.to_jid, "")
+    process.running = true
+    finish(service, 0, { ok: true, kind: "forward", message_id: "OUT1" })
+    compare(service.activeWriteKind, "send-new", "the note is the chat's first message")
+    var note = JSON.parse(process.payload)
+    compare(note.target.phone, "+15550007777")
+    compare(note.text, "hello")
+    var finished = null
+    service.forwardBatchFinished.connect(function(summary) { finished = summary })
+    process.running = true
+    finish(service, 0, { ok: true, kind: "send-new", chat_jid: "15550007777@s.whatsapp.net" })
+    verify(finished !== null)
+    compare(finished.failed, 0)
+    compare(finished.targets[0].jid, "15550007777@s.whatsapp.net")
+  }
 }

@@ -1375,7 +1375,10 @@ Item {
     copyToastVisible = false
     toastActionChat = null
     if (!chat) return false
-    var known = AccountModel.findChat(sourceChats, AccountModel.refOf(chat))
+    var ref = String(chat.jid || "") === "" && String(chat.phone || "") !== ""
+      ? AccountModel.chatRef(String(chat.account || ""), String(chat.phone) + "@s.whatsapp.net")
+      : AccountModel.refOf(chat)
+    var known = AccountModel.findChat(sourceChats, ref)
     if (known) selectChat(known)
     return !!known
   }
@@ -1717,19 +1720,58 @@ Item {
     forwardPicker.close()
   }
 
+  // A chosen chat, or a typed number (no chat yet) by its digits.
+  function forwardKey(chat) {
+    if (!chat) return ""
+    return String(chat.jid || "") === "" && String(chat.phone || "") !== ""
+      ? "phone:" + String(chat.phone) : AccountModel.refOf(chat).key
+  }
+
   function isForwardChosen(chat) {
-    var ref = AccountModel.refOf(chat)
-    return forwardChosen.some(function(item) { return AccountModel.sameRef(AccountModel.refOf(item), ref) })
+    var key = forwardKey(chat)
+    return key !== "" && forwardChosen.some(function(item) { return forwardKey(item) === key })
   }
 
   function toggleForwardTarget(chat) {
-    if (!chat || String(chat.jid || "") === ""
+    if (!chat || (String(chat.jid || "") === "" && !/^[0-9]{7,15}$/.test(String(chat.phone || "")))
         || String(chat.account || "") !== String(forwardOriginRef.account || "")) return false
-    var ref = AccountModel.refOf(chat)
+    var key = forwardKey(chat)
     forwardChosen = isForwardChosen(chat)
-      ? forwardChosen.filter(function(item) { return !AccountModel.sameRef(AccountModel.refOf(item), ref) })
+      ? forwardChosen.filter(function(item) { return forwardKey(item) !== key })
       : forwardChosen.concat([chat])
     return true
+  }
+
+  // The forward search as a phone number, when it reads as one.
+  readonly property string forwardDigits: {
+    var raw = forwardSearch ? String(forwardSearch.text || "").trim() : ""
+    if (!/^[+]?[0-9 ().-]+$/.test(raw)) return ""
+    var digits = raw.replace(/[^0-9]/g, "")
+    return digits.length >= 7 && digits.length <= 15 && digits.charAt(0) !== "0" ? digits : ""
+  }
+  readonly property var forwardNumberCheck: root.forwardDigits === "" ? null
+    : root.demoMode ? ({ phone: root.forwardDigits, loading: false, registered: true, error: "" })
+    : (root.service && typeof root.service.numberCheckFor === "function"
+      ? root.service.numberCheckFor(root.forwardDigits) : null)
+  readonly property string forwardNumberState: root.forwardDigits === "" ? ""
+    : root.forwardNumberCheck === null ? "idle"
+    : root.forwardNumberCheck.loading ? "checking"
+    : root.forwardNumberCheck.error ? "error"
+    : root.forwardNumberCheck.registered ? "registered" : "absent"
+  // The typed number: checked once, then added like a chat.
+  function useForwardNumber() {
+    if (root.forwardDigits === "") return false
+    if (root.forwardNumberState === "registered") {
+      // The chip reads as typed: +55 16 99999-0000.
+      var typed = String(forwardSearch.text || "").trim()
+      var added = toggleForwardTarget({ account: String(forwardOriginRef.account || ""), jid: "",
+        phone: root.forwardDigits, name: typed.charAt(0) === "+" ? typed : "+" + typed, kind: "dm" })
+      if (added) forwardSearch.text = ""
+      return added
+    }
+    if (root.forwardNumberState === "idle" || root.forwardNumberState === "error")
+      return !!root.service && root.service.checkNumber("+" + root.forwardDigits)
+    return false
   }
 
   function forwardNames(targets) {
@@ -5081,7 +5123,11 @@ Item {
         readonly property var matches: root.forwardCandidates.filter(function(chat) {
           var needle = String(forwardSearch.text || "").trim().toLowerCase()
           return needle === "" || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
+            || (root.forwardDigits !== "" && String(chat.jid || "").indexOf(root.forwardDigits) === 0)
         })
+        // A typed number that is not one of the chats above gets its own row.
+        readonly property bool numberRow: root.forwardDigits !== ""
+          && !matches.some(function(chat) { return String(chat.jid || "").indexOf(root.forwardDigits + "@") === 0 })
         background: Rectangle {
           radius: Style.cornerRadius + 4
           color: root.background
@@ -5233,7 +5279,8 @@ Item {
                   width: Math.max(Style.space(140), forwardChipFlow.width
                     - (root.forwardChosen.length > 0 ? Style.space(4) : 0))
                   height: Style.space(28)
-                  placeholderText: root.forwardChosen.length > 0 ? "Add another chat" : "Search chats"
+                  placeholderText: root.forwardChosen.length > 0 ? "Add another chat or number"
+                    : "Search chats or type a number"
                   foreground: root.foreground
                   accent: root.accent
                   font.family: root.fontFamily
@@ -5243,8 +5290,10 @@ Item {
                   Keys.onPressed: function(event) {
                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                         && !(event.modifiers & Qt.ControlModifier)) {
-                      // Enter picks the only match, or the first one.
-                      if (forwardPicker.matches.length > 0) {
+                      // Enter checks or adds a typed number, else picks the first match.
+                      if (forwardPicker.numberRow) {
+                        root.useForwardNumber()
+                      } else if (forwardPicker.matches.length > 0) {
                         root.toggleForwardTarget(forwardPicker.matches[0])
                         forwardSearch.text = ""
                       }
@@ -5269,10 +5318,69 @@ Item {
             }
           }
 
+          Rectangle {
+            id: forwardNumberRow
+            objectName: "forwardNumberRow"
+            visible: forwardPicker.numberRow
+            anchors.top: forwardHeaderColumn.bottom
+            anchors.topMargin: Style.space(4)
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(10)
+            height: visible ? Style.space(48) : 0
+            radius: Style.cornerRadius
+            readonly property bool actionable: root.forwardNumberState === "registered"
+              || root.forwardNumberState === "idle" || root.forwardNumberState === "error"
+            color: forwardNumberHover.hovered && actionable
+              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            Rectangle {
+              id: forwardNumberIcon
+              x: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(34)
+              height: width
+              radius: width / 2
+              color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
+              Text {
+                textFormat: Text.PlainText
+                anchors.centerIn: parent
+                text: "󰏲"
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+            }
+            Text {
+              textFormat: Text.PlainText
+              objectName: "forwardNumberLabel"
+              anchors.left: forwardNumberIcon.right
+              anchors.leftMargin: Style.space(12)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              readonly property string number: "+" + root.forwardDigits
+              text: ({
+                idle: "Check " + number + " on WhatsApp",
+                checking: "Checking " + number + " with WhatsApp…",
+                registered: "Add " + number + " · on WhatsApp",
+                absent: number + " is not on WhatsApp",
+                error: String(root.forwardNumberCheck && root.forwardNumberCheck.error || "Could not check") + " · try again"
+              })[root.forwardNumberState] || ""
+              elide: Text.ElideRight
+              color: root.forwardNumberState === "absent" ? root.dim
+                : root.forwardNumberState === "registered" ? root.accent : root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            HoverHandler { id: forwardNumberHover; cursorShape: forwardNumberRow.actionable ? Qt.PointingHandCursor : Qt.ArrowCursor }
+            TapHandler { enabled: forwardNumberRow.actionable; onTapped: root.useForwardNumber() }
+          }
+
           ListView {
             id: forwardList
             objectName: "forwardList"
-            anchors.top: forwardHeaderColumn.bottom
+            anchors.top: forwardNumberRow.visible ? forwardNumberRow.bottom : forwardHeaderColumn.bottom
             anchors.topMargin: Style.space(4)
             anchors.bottom: forwardFooter.top
             anchors.left: parent.left
@@ -5346,7 +5454,7 @@ Item {
             }
             Text {
               textFormat: Text.PlainText
-              visible: forwardList.count === 0
+              visible: forwardList.count === 0 && !forwardPicker.numberRow
               anchors.centerIn: parent
               text: "No chat matches"
               color: root.dim

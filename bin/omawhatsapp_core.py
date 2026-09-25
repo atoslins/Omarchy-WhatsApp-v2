@@ -4579,9 +4579,24 @@ class Backend:
         self._envelope(self._write(command, timeout=45))
         return {"ok": True, "kind": "delete"}
 
-    def forward_message(self, jid: str, message_id: str, to_jid: str) -> dict[str, Any]:
+    def forward_message(self, jid: str, message_id: str, to_jid: str,
+                        to_phone: Any = "") -> dict[str, Any]:
         source, message = self._message(jid, message_id)
-        target = self._chat(to_jid)
+        if str(to_phone or "").strip():
+            # A typed number with no chat yet: only one WhatsApp just confirmed,
+            # the same rule as a first message.
+            digits = self._phone_digits(to_phone)
+            phone_jid = f"{digits}@s.whatsapp.net"
+            try:
+                target = self._chat(phone_jid)
+            except OmaWhatsAppError:
+                cached = self._new_chat_checks().get(f"{self.active.name}\n{digits}")
+                if cached is None:
+                    raise OmaWhatsAppError("Check that number with WhatsApp first.") from None
+                target = {"jid": cached["jid"], "name": "+" + digits}
+        else:
+            target = self._chat(to_jid)
+            phone_jid = ""
         command = ["--json", "messages", "forward", "--chat", str(message["chat_jid"]),
             "--id", str(message["msg_id"]), "--to", target["jid"],
             "--post-send-wait", "0"]
@@ -4591,7 +4606,8 @@ class Backend:
         if forwarded_id and message["media_type"]:
             self._share_forwarded_media(source["jid"], message, target["jid"], forwarded_id)
         return {"ok": True, "kind": "forward", "target": target["name"],
-                "target_jid": target["jid"], "message_id": forwarded_id}
+                "target_jid": phone_jid if phone_jid and str(target["jid"]).endswith("@lid")
+                else target["jid"], "message_id": forwarded_id}
 
     def _share_forwarded_media(self, source_jid: str, message: sqlite3.Row,
                                target_jid: str, forwarded_id: str) -> None:
@@ -6344,7 +6360,8 @@ def main() -> int:
         if args.command == "forward":
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),
-                                                str(payload.get("to_jid") or "")))
+                                                str(payload.get("to_jid") or ""),
+                                                str(payload.get("to_phone") or "")))
         if args.command == "export-chat":
             return emit(backend.export_chat(str(payload.get("jid") or ""), payload.get("destination")))
         if args.command == "download-pending":

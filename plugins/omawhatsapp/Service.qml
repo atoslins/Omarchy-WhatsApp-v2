@@ -1089,8 +1089,9 @@ Item {
     var origin = AccountModel.chatRef(originRef ? originRef.account : "", originRef ? originRef.jid : "")
     var messages = (Array.isArray(items) ? items : []).filter(function(item) {
       return item && String(item.id || "") !== "" && item.pending !== true })
+    // A target is a chat of this account, or a number WhatsApp just confirmed.
     var chats = (Array.isArray(targets) ? targets : []).filter(function(chat) {
-      return chat && String(chat.jid || "") !== ""
+      return chat && (String(chat.jid || "") !== "" || /^[0-9]{7,15}$/.test(String(chat.phone || "")))
         && String(chat.account || "") === String(origin.account || "") })
     if (origin.jid === "" || messages.length === 0 || chats.length === 0 || writeBatch) return false
     var refusal = writeRefusal("forward", ({}), origin)
@@ -1108,7 +1109,10 @@ Item {
       if (text !== "") jobs.push({ kind: "note", text: text, target: chat })
     })
     writeBatch = { kind: "forward", origin: origin, owner: writeOwner(owner), targets: chats.map(function(chat) {
-      return { account: String(chat.account || ""), jid: String(chat.jid), name: String(chat.name || "") } }),
+      var phone = String(chat.phone || "")
+      return { account: String(chat.account || ""),
+        jid: String(chat.jid || "") !== "" ? String(chat.jid) : phone + "@s.whatsapp.net",
+        phone: String(chat.jid || "") !== "" ? "" : phone, name: String(chat.name || "") } }),
       total: jobs.length, done: 0, failed: 0, errors: [], note: text }
     batchJobs = jobs
     runNextBatchJob()
@@ -1119,14 +1123,22 @@ Item {
     while (!writing && !writeProcess.running && sendQueue.length === 0 && batchJobs.length > 0) {
       var job = batchJobs[0]
       batchJobs = batchJobs.slice(1)
-      var started = job.kind === "note"
+      var newNumber = job.target && String(job.target.jid || "") === "" && String(job.target.phone || "") !== ""
+      var started = job.kind === "note" && newNumber
+        // A number with no chat yet: the note is its first message.
+        ? runWriteForChat("send-new", { target: { phone: "+" + String(job.target.phone) },
+            text: ComposerModel.signedText(job.text, signatureFor(writeBatch.origin.account)), batch: true },
+            AccountModel.chatRef(writeBatch.origin.account, String(job.target.phone) + "@s.whatsapp.net"),
+            writeBatch.owner)
+        : job.kind === "note"
         ? sendText(AccountModel.refOf(job.target), job.text, "", [], writeBatch.owner)
         : job.kind === "delete"
         ? runWriteForChat("delete", { id: String(job.item.id), for_me: job.forMe === true,
             batch: true }, writeBatch.origin, writeBatch.owner)
-        : runWriteForChat("forward", { id: String(job.item.id), to_jid: String(job.target.jid),
-            batch: true }, writeBatch.origin, writeBatch.owner)
-      if (job.kind === "note") {
+        : runWriteForChat("forward", { id: String(job.item.id), to_jid: String(job.target.jid || ""),
+            to_phone: newNumber ? String(job.target.phone) : "", batch: true },
+            writeBatch.origin, writeBatch.owner)
+      if (job.kind === "note" && !newNumber) {
         // The note is one more queued text; it reports like any send.
         finishBatchJob(started, started ? "" : (errorText || "The note could not be sent."))
         continue
@@ -2347,7 +2359,7 @@ Item {
         // The failed text stays on screen as a bubble to retry, so surfaces
         // must not also put it back into the composer.
         if (finishedKind === "send") details.pending_kept = true
-        if ((finishedKind === "forward" || finishedKind === "delete") && finishedRequest.batch === true)
+        if (["forward", "delete", "send-new"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
           root.finishBatchJob(false, message)
         root.writeFailed(message, finishedChat, details, finishedOwner)
         root.runNextQueuedSend()
@@ -2382,7 +2394,7 @@ Item {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
       if (["contact-alias", "contact-tag", "download-pending"].indexOf(finishedKind) >= 0
           && root.chatDetailsWanted) Qt.callLater(root.refreshChatDetails)
-      if ((finishedKind === "forward" || finishedKind === "delete") && finishedRequest.batch === true)
+      if (["forward", "delete", "send-new"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
         root.finishBatchJob(true, "")
       // What the helper answered, for surfaces that report it (exports, downloads).
       root.lastWriteResult = payload

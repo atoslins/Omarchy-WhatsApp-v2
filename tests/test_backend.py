@@ -1853,6 +1853,26 @@ class BackendTests(unittest.TestCase):
         self.assertIn("--for-me", delete)
         self.assertEqual(forward[forward.index("--to") + 1], "alex@s.whatsapp.net")
 
+    def test_forwarding_to_a_typed_number_needs_a_fresh_check(self) -> None:
+        # L225: a number with no chat yet takes a forward once WhatsApp has
+        # just confirmed it, as a first message does.
+        completed = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"forwarded": True, "id": "FWD-9"}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=completed):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Check that number"):
+                self.backend.forward_message("team@g.us", "t1", "", "+1 555 000 7777")
+        self.backend._remember_new_chat_check("15550007777", "999000111@lid")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            result = self.backend.forward_message("team@g.us", "t1", "", "+1 555 000 7777")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--to") + 1], "999000111@lid",
+                         "sent to the person WhatsApp confirmed")
+        self.assertEqual(result["target_jid"], "15550007777@s.whatsapp.net",
+                         "the chat it lands in is the phone number's")
+        self.assertEqual(result["target"], "+15550007777")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "country code"):
+            self.backend.forward_message("team@g.us", "t1", "", "12")
+
     def test_a_forwarded_photo_shows_the_file_already_here(self) -> None:
         # The owner's report: a forwarded photo offered a download in the
         # target chat although the file was on this computer.

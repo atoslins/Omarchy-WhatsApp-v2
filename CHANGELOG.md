@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- Forward to a number with no chat yet: type it in the forward dialog, check
+  it with WhatsApp in one click (the check no longer stops sync), and it
+  joins the other chats as a chip. The note, if any, is that chat's first
+  message.
 - Picked messages can be deleted together from the selection bar: for you,
   or for everyone when they are all yours, after one confirmation, one
   WhatsApp action at a time, with a single notice at the end. With the
