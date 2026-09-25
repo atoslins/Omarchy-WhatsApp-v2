@@ -189,6 +189,28 @@ class BackendTests(unittest.TestCase):
         self._set_unread("archive@g.us", 2)
         self.assertEqual(self._unread("archive@g.us"), 1)
 
+    def _store_schema(self, version: int) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations "
+                               "(version INTEGER PRIMARY KEY, name TEXT, applied_at INTEGER)")
+            connection.execute("INSERT OR REPLACE INTO schema_migrations VALUES (?, 'x', 1)", [version])
+
+    def test_wacli_019_counts_are_not_discounted_twice(self) -> None:
+        # wacli 0.19 (migration 27) leaves reactions and undecodable rows out
+        # of its count; subtracting them again would hide real messages.
+        for index, msg_id in enumerate(("m1", "m2", "m3")):
+            self._insert("archive@g.us", msg_id, 12 + index, text=f"real {index}")
+        self._insert("archive@g.us", "r1", 20, reaction="m1")
+        self._insert("archive@g.us", "r2", 21, reaction="m2")
+        self._set_unread("archive@g.us", 3)
+        self._store_schema(26)
+        self.assertEqual(self._unread("archive@g.us"), 1,
+                         "0.18: two of the last three rows are reactions it counted")
+        self._store_schema(27)
+        self.assertEqual(self._unread("archive@g.us"), 3, "0.19: the count is already right")
+        self._insert("archive@g.us", "me1", 30, from_me=1, text="reply")
+        self.assertEqual(self._unread("archive@g.us"), 0, "a reply still bounds it")
+
     def test_a_reaction_is_not_an_unread_message(self) -> None:
         self._insert("archive@g.us", "r1", 12, reaction="some-message")
         self._set_unread("archive@g.us", 1)
@@ -2180,7 +2202,7 @@ class BackendTests(unittest.TestCase):
             "whatsapp-write", "destructive", "interactive",
         })
         capabilities = self.backend.capabilities()
-        self.assertEqual(capabilities["wacli_parity_version"], "0.18.3")
+        self.assertEqual(capabilities["wacli_parity_version"], "0.19.0")
         self.assertEqual(capabilities["wacli_minimum_version"], "0.17.1")
         self.assertEqual(capabilities["operation_count"], len(policies))
         self.assertEqual(len(capabilities["operations"]), len(policies))

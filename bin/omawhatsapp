@@ -296,7 +296,7 @@ def valid_ui_preference(name: str, setting: Any) -> bool:
 
 
 def chat_kind_sql(table: str = "chats") -> str:
-    """A chat's kind, repairing the one wacli 0.18.3 breaks.
+    """A chat's kind, repairing the one wacli 0.18.3 and 0.19.0 break.
 
     wacli files an outgoing poll or poll vote under the person's phone chat
     but takes the kind and the name from the @lid WhatsApp answered with, so
@@ -321,7 +321,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # the registry, tests, and CI were verified against. Any version in between
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 WACLI_MINIMUM_VERSION = "0.17.1"
-WACLI_PARITY_VERSION = "0.18.3"
+WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
 # their absence on an older accepted release; there the gateway still
 # demands the exact target flags, so wacli itself rejects the call.
@@ -348,7 +348,7 @@ WACLI_CHAT_TO_OPERATIONS = frozenset({
     ("send", "voice"),
 })
 
-# Existing-target selectors accepted by wacli 0.18.3. The gateway resolves
+# Existing-target selectors accepted by wacli 0.19.0. The gateway resolves
 # these against the selected account's local mirror so names, phone numbers,
 # and --pick can never choose a recipient or destructive target implicitly.
 WACLI_REQUIRED_CHAT_FLAGS: dict[tuple[str, ...], tuple[str, ...]] = {
@@ -432,7 +432,9 @@ WACLI_MESSAGE_TARGETS: dict[tuple[str, ...], tuple[str, str]] = {
     ("send", "select"): ("--to", "--id"),
 }
 
-# Every user-facing leaf in wacli 0.18.3 is classified here. Unknown leaves
+# Every user-facing leaf in wacli 0.19.0 is classified here (the same 104
+# leaves as 0.18.3; 0.19.0 adds only `chats mark-read --receipts`, which stays
+# a WhatsApp write). Unknown leaves
 # fail closed; a future wacli release can therefore never silently broaden an
 # agent's mutation surface. A few flag-dependent operations are narrowed by
 # _transport_policy (for example, cleanup --dry-run is a local read).
@@ -2443,10 +2445,14 @@ class Backend:
                     """,
                     parameters,
                 ).fetchall()
-                # wacli counts every new incoming row as unread, including
-                # reactions and payloads it cannot decode ("(message)"), and a
-                # reply from another device does not always clear it. The
-                # phone counts neither, and a reply marks the chat read.
+                # Before wacli 0.19 (store migration 27), wacli counted every
+                # new incoming row as unread, including reactions and payloads
+                # it cannot decode ("(message)"); those are subtracted here.
+                # From 0.19 its count already leaves them out, so subtracting
+                # again would hide real messages. Either way a reply from
+                # another device does not always clear the count, and the
+                # phone treats a reply as reading the chat.
+                accurate_counts = self._store_schema_version(connection) >= 27
                 real_unread: dict[str, int] = {}
                 synthetic = synthetic_message_sql("messages")
                 for row in rows:
@@ -2469,7 +2475,7 @@ class Backend:
                         """,
                         [jid, min(count, 999), jid],
                     ).fetchone()
-                    remaining = max(0, count - int(phantom or 0))
+                    remaining = count if accurate_counts else max(0, count - int(phantom or 0))
                     if mine is not None:
                         # Everything after your own last message is stored, so
                         # that bound never undercounts.
@@ -4030,6 +4036,17 @@ class Backend:
         if not 7 <= len(digits) <= 15 or digits.startswith("0"):
             raise OmaWhatsAppError("Type a phone number with its country code.")
         return digits
+
+    @classmethod
+    def _store_schema_version(cls, connection: sqlite3.Connection) -> int:
+        """The newest wacli store migration applied, 0 when unknown."""
+        try:
+            if not cls._has_table(connection, "schema_migrations"):
+                return 0
+            row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+            return int(row[0] or 0) if row else 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _has_table(connection: sqlite3.Connection, name: str) -> bool:

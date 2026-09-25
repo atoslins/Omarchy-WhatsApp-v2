@@ -46,7 +46,7 @@ native, and visually at home in Omarchy.
   preview, then explicitly send or discard it—never auto-send on stop.
 - **Agent-native.** The installer ships a shared `$omawhatsapp` skill with
   complete guarded wacli parity: ordinary chat work uses the app's exact-target
-  helpers, while all 104 advanced wacli 0.18.3 operations pass through a
+  helpers, while all 104 advanced wacli 0.19.0 operations pass through a
   classified, bounded JSON gateway.
 
 ## Everyday conversation flow
@@ -120,7 +120,7 @@ boundary.
 Installation also places the repository-owned skill at
 `~/.agents/skills/omawhatsapp`. Compatible agents can use `$omawhatsapp` to
 search or summarize local chats and, when you explicitly ask, use every
-capability exposed by wacli 0.18.3: messaging, media, calls, channels,
+capability exposed by wacli 0.19.0: messaging, media, calls, channels,
 contacts, group administration, history, polls, presence, profiles, accounts,
 sync, exports, and maintenance.
 
@@ -239,7 +239,7 @@ tell me what was installed, whether every check passed, and how to open it.
 Requirements:
 
 - Omarchy with the plugin-capable Quickshell shell
-- `wacli` 0.17.1 or newer at `~/.local/bin/wacli` (verified with 0.18.3;
+- `wacli` 0.17.1 or newer at `~/.local/bin/wacli` (verified with 0.18.3 and 0.19.0;
   commands added by a newer release stay blocked until classified)
 - Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `inotify-tools`,
   `jq`, Python 3, and systemd user services

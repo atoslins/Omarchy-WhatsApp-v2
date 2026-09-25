@@ -14,7 +14,7 @@ oma="$HOME/.local/bin/omawhatsapp"
 "$oma" capabilities
 ```
 
-It accounts for every command leaf in wacli 0.18.3 and accepts 0.17.1 or
+It accounts for every command leaf in wacli 0.19.0 and accepts 0.17.1 or
 newer; `wacli_minimum_version` and `wacli_parity_version` in the output say
 which, and each operation carries the `min_wacli` release it first appeared
 in. Before an advanced operation, inspect its flags without changing state:

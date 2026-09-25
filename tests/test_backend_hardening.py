@@ -791,7 +791,7 @@ class BackendHardeningTests(unittest.TestCase):
         installer = (source / "scripts" / "install").read_text(encoding="utf-8")
         parity = (source / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
         self.assertIn("wacli_minimum_version=0.17.1", installer)
-        self.assertIn("wacli_tested_version=0.18.3", installer)
+        self.assertIn("wacli_tested_version=0.19.0", installer)
         self.assertIn("wacli_operation_count=104", installer)
         self.assertIn("sort -V", installer)
         self.assertIn("list-unit-files", installer)

@@ -15,11 +15,15 @@ jobs:
       fail-fast: false
       matrix:
         wacli:
-          # Minimum accepted release and the newest verified release.
+          # Minimum accepted release, the previous verified release (its
+          # unread counts still need the helper's correction), and the
+          # newest verified release.
           - version: 0.17.1
             sha256: cbd5e74d5b805550cc36c7479aca552970cc1b314c5c08e02367e08b785714fd
           - version: 0.18.3
             sha256: a8b42ae59489d9377bd76d88da0faf92b8432c5c6e5f957cef619c04ae5b3018
+          - version: 0.19.0
+            sha256: 57ea00b26c0ffefa29758b2bcfc183b3e7b061271afee21cb0471a024f3c57ff
     name: release-gate (wacli ${{ matrix.wacli.version }})
     steps:
       - name: Install pinned test prerequisites

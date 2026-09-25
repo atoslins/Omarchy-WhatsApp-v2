@@ -119,6 +119,11 @@
 - Ctrl+V no longer waits behind a running send or read mark; it has its own
   process, and plain text still pastes when the helper cannot read the
   clipboard.
+- Verified with wacli 0.19.0 (CI runs 0.17.1, 0.18.3 and 0.19.0). From 0.19
+  (store migration 27) wacli's own unread counts already leave out reactions
+  and undecodable rows, so the helper stops subtracting them there; with an
+  older store it still does. `chats mark-read --receipts` is new in 0.19 and
+  stays a WhatsApp write in the gateway.
 - Chat details export the chat as readable text, like the phone ("2026-09-25
   10:15 - Ana: …"), to a file you choose outside code repositories; download
   the chat's missing attachments in one go; and, for a person, set your own

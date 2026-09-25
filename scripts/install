@@ -96,7 +96,7 @@ fi
 # tests, and CI were verified against. Newer releases are accepted: leaves the
 # registry does not know keep failing closed until they are classified.
 wacli_minimum_version=0.17.1
-wacli_tested_version=0.18.3
+wacli_tested_version=0.19.0
 wacli_operation_count=104
 wacli_version=$("$user_home/.local/bin/wacli" --version 2>&1 | sed -nE 's/^wacli[[:space:]]+v?([0-9]+([.][0-9]+)+).*/\1/p' | head -n 1)
 if [[ -z $wacli_version ]]; then
