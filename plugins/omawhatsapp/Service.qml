@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "SettingsPolicy.js" as SettingsPolicy
 import "AccountModel.js" as AccountModel
+import "PresenceModel.js" as PresenceModel
 
 // Resident state keeps the chat rail warm while the window is closed.
 Item {
@@ -45,6 +46,140 @@ Item {
   property string newChatPeopleQuery: ""
   property bool newChatPeopleLoading: false
   property bool newChatPeoplePending: false
+  // Presence: online, last seen and typing, from wacli builds that follow it.
+  // Their sync keeps presence.json in each store; WhatsApp only sends it to a
+  // device shown online, so the account is online while a surface looking at
+  // it has focus (and the setting allows it), on a lease the sync ends itself.
+  property bool showOnline: true
+  property bool presenceSupported: true
+  property var presenceByStore: ({})
+  property var presenceFocusOwners: []
+  // Seconds, ticking while presence is shown, so typing fades on time.
+  property int presenceNow: Math.floor(Date.now() / 1000)
+  property string presenceAccount: ""
+  readonly property bool presenceActive: showOnline && presenceSupported && ready
+    && !offlineMode && presenceFocusOwners.length > 0
+  function storeForAccount(account) {
+    var name = String(account || "")
+    for (var i = 0; i < accounts.length; i++)
+      if (String(accounts[i].account || "") === name && String(accounts[i].store || "") !== "")
+        return String(accounts[i].store)
+    return storeDirectory
+  }
+  function presenceSnapshotFor(account) {
+    return presenceByStore[storeForAccount(account)] || null
+  }
+  function applyPresence(store, text) {
+    var next = Object.assign({}, presenceByStore)
+    var snapshot = PresenceModel.parse(text)
+    if (snapshot) next[String(store)] = snapshot
+    else delete next[String(store)]
+    presenceByStore = next
+    presenceNow = Math.floor(Date.now() / 1000)
+  }
+  function reloadPresence(store) {
+    for (var i = 0; i < presenceFiles.count; i++) {
+      var file = presenceFiles.objectAt(i)
+      if (file && file.store === String(store)) file.reload()
+    }
+  }
+  function setPresenceFocus(owner, focused) {
+    var name = String(owner || "")
+    var owners = presenceFocusOwners.filter(function(item) { return item !== name })
+    if (focused) owners.push(name)
+    if (owners.length !== presenceFocusOwners.length || focused !== (presenceFocusOwners.indexOf(name) >= 0))
+      presenceFocusOwners = owners
+  }
+  property var presenceQueue: []
+  function queuePresence(action, account, jid) {
+    if (!presenceSupported) return false
+    var request = { action: String(action), account: String(account || ""), jid: String(jid || "") }
+    if (request.action === "available") request.lease = 90
+    presenceQueue = presenceQueue.filter(function(item) {
+      return !(item.action === request.action && item.account === request.account && item.jid === request.jid)
+    }).concat([request])
+    runNextPresence()
+    return true
+  }
+  function runNextPresence() {
+    if (presenceProcess.running || presenceQueue.length === 0) return
+    var next = presenceQueue[0]
+    presenceQueue = presenceQueue.slice(1)
+    presenceProcess.payload = JSON.stringify(next)
+    presenceProcess.stdinEnabled = true
+    presenceProcess.running = true
+  }
+  function followSelectedPresence() {
+    if (!presenceActive || selectedChatKind !== "dm" || selectedChatJid === "") return
+    queuePresence("subscribe", selectedChatAccount, selectedChatJid)
+  }
+  function syncPresenceAccount() {
+    var wanted = presenceActive ? String(selectedChatAccount || statusAccount || "") : ""
+    if (presenceAccount !== "" && presenceAccount !== wanted)
+      queuePresence("unavailable", presenceAccount, "")
+    if (wanted !== "" && wanted !== presenceAccount) {
+      queuePresence("available", wanted, "")
+      followSelectedPresence()
+    }
+    presenceAccount = wanted
+  }
+  onPresenceActiveChanged: syncPresenceAccount()
+  onSelectedChatJidChanged: followSelectedPresence()
+  Timer {
+    id: presenceRenew
+    interval: 60 * 1000
+    repeat: true
+    running: root.presenceActive
+    onTriggered: if (root.presenceAccount !== "") root.queuePresence("available", root.presenceAccount, "")
+  }
+  Timer {
+    // WhatsApp forgets subscriptions; the sync keeps them 10 minutes.
+    id: presenceFollowRenew
+    interval: 5 * 60 * 1000
+    repeat: true
+    running: root.presenceActive
+    onTriggered: root.followSelectedPresence()
+  }
+  Timer {
+    id: presenceClock
+    interval: 2000
+    repeat: true
+    running: Object.keys(root.presenceByStore).length > 0
+    onTriggered: root.presenceNow = Math.floor(Date.now() / 1000)
+  }
+  Instantiator {
+    id: presenceFiles
+    model: root.storeDirectories
+    delegate: FileView {
+      required property string modelData
+      readonly property string store: modelData
+      path: modelData + "/presence.json"
+      printErrors: false
+      onLoaded: root.applyPresence(modelData, text())
+      onLoadFailed: root.applyPresence(modelData, "")
+    }
+  }
+  Process {
+    id: presenceProcess
+    objectName: "presenceProcess"
+    property string payload: ""
+    command: [root.helper, "presence"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: presenceOutput }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var answer = root.parseJson(presenceOutput.text)
+      // An official wacli has no presence commands: stop asking this session.
+      if (answer && answer.supported === false) {
+        root.presenceQueue = []
+        root.presenceAccount = ""
+        root.presenceSupported = false
+        return
+      }
+      root.runNextPresence()
+    }
+  }
+
   // Messages sent from here that the mirror has not stored yet. They show at
   // once as pending bubbles: the send itself takes a second or more.
   property var pendingSends: []
@@ -1157,6 +1292,7 @@ Item {
     if (payload.auto_download_media !== undefined)
       root.autoDownloadMedia = payload.auto_download_media !== false
     root.readOnReply = payload.read_on_reply !== false
+    root.showOnline = payload.show_online !== false
     root.enterSends = payload.enter_sends !== false
     root.showAvatars = payload.show_avatars !== false
     root.autoRefreshAvatars = payload.auto_refresh_avatars !== false
@@ -1317,6 +1453,7 @@ Item {
     id: storeWatchers
     model: root.storeDirectories
     delegate: Process {
+      id: storeWatcher
       required property string modelData
       running: true
       command: [
@@ -1331,6 +1468,9 @@ Item {
           var name = String(fileName || "").trim()
           if (name === "wacli.db" || name === "wacli.db-wal")
             root.refreshFromStore()
+          // Presence changes alone never reload chats or messages.
+          else if (name === "presence.json")
+            root.reloadPresence(storeWatcher.modelData)
         }
       }
       onExited: storeWatchRestart.restart()

@@ -114,7 +114,11 @@ def main() -> int:
     installed_key = version_key(installed)
     expected_absent = []
     stale = []
+    optional = getattr(helper, "WACLI_OPTIONAL_LEAVES", frozenset())
     for path in sorted(registered - discovered):
+        if path in optional:
+            # A fork-only leaf: official releases lack it by design.
+            continue
         needs = helper.WACLI_LEAF_MINIMUM_VERSIONS.get(path, helper.WACLI_MINIMUM_VERSION)
         if version_key(needs) > installed_key:
             expected_absent.append((path, needs))

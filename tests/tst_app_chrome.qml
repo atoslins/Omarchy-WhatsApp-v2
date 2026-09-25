@@ -63,6 +63,10 @@ TestCase {
       property string mediaDownloadId: ""
       property string errorText: ""
       property var chats: []
+      // Presence as a wacli without presence support reports it: nothing.
+      property int presenceNow: 0
+      function presenceSnapshotFor() { return null }
+      function setPresenceFocus() {}
       property var accounts: []
       property var messages: []
       property var members: []

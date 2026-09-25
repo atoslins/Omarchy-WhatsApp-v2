@@ -2,6 +2,13 @@
 
 ## Unreleased (fork)
 
+- Show who is online, when they were last seen, and who is typing or
+  recording, under the chat name, in the dropdown, and as "typing…" in the
+  chat list. The account shows itself online while the window (or the
+  dropdown on a conversation) has focus, as WhatsApp requires to send any of
+  it, on a lease the sync ends by itself; Settings → Reading can turn it off.
+  It needs a wacli build that follows presence; with official wacli nothing
+  changes.
 - Fix the "N unread messages" divider moving onto your own replies. It is now
   anchored to the oldest unread message received when the chat opened, so
   anything sent or received afterwards stays below it.

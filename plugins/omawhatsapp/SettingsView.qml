@@ -100,6 +100,10 @@ Rectangle {
         title: "Mark chats read when you reply",
         subtitle: "Replying clears the unread count, as it does on the phone.",
         checked: value("readOnReply", true), busy: busy },
+      { kind: "toggle", key: "show_online",
+        title: "Show me online while OmaWhatsApp has focus",
+        subtitle: "Needed to see who is online, their last seen, and who is typing: WhatsApp only sends them to a device shown online. Needs a wacli build that follows presence.",
+        checked: value("showOnline", true), busy: busy },
       { kind: "note",
         text: "Marking a chat read only syncs your phone and linked devices. OmaWhatsApp never sends read receipts, so contacts are not told." }
     ]

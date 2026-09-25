@@ -9,6 +9,7 @@ import "AccountModel.js" as AccountModel
 import "TimeFormat.js" as TimeFormat
 import "ComposerModel.js" as ComposerModel
 import "FormatModel.js" as FormatModel
+import "PresenceModel.js" as PresenceModel
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -250,6 +251,23 @@ Panel {
   readonly property bool showAvatars: demoMode || !service || service.showAvatars !== false
   readonly property string composerHint: enterSends
     ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
+
+  // Open on a conversation, the dropdown shows the account online like the
+  // window does, and the chat's typing, online or last seen.
+  readonly property bool presenceFocused: opened && viewMode === "conversation" && !demoMode
+  onPresenceFocusedChanged: if (service) service.setPresenceFocus("dropdown", presenceFocused)
+  // The service may go first when the shell tears everything down.
+  Component.onDestruction: if (!demoMode && service && service.setPresenceFocus)
+    service.setPresenceFocus("dropdown", false)
+  readonly property var presenceLine: {
+    if (demoMode || !service || !currentChat) return { text: "", live: false }
+    var now = service.presenceNow
+    return PresenceModel.line(service.presenceSnapshotFor(String(currentChat.account || "")),
+      String(currentChat.jid || ""), {
+        now: now, date: new Date(now * 1000), group: String(currentChat.kind || "") === "group",
+        names: ({}), clock: TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat))
+      })
+  }
 
   function open() { openFor(true) }
   function openDemo() { openFor(false) }
@@ -1261,10 +1279,12 @@ Panel {
               }
               Text {
                 textFormat: Text.PlainText
+                objectName: "dropdownConversationStatus"
                 text: root.offline ? "offline · viewing local archive"
+                  : root.presenceLine.text !== "" ? root.presenceLine.text
                   : (root.sending ? "sending…" : "")
                 visible: text !== ""
-                color: root.muted
+                color: root.presenceLine.live && !root.offline ? root.accent : root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }

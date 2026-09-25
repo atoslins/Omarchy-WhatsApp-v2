@@ -257,6 +257,9 @@ SYNTHETIC_AUDIO_TEXT = "[Audio]"
 # keep their own validation and error messages below.
 UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
     "read_on_reply": (bool, True),
+    # Online while the window has focus: WhatsApp only sends others' online
+    # state and typing to a device that shows itself online.
+    "show_online": (bool, True),
     "enter_sends": (bool, True),
     "show_avatars": (bool, True),
     # Off by default: every photo batch pauses sync, and whatever arrives in
@@ -331,6 +334,13 @@ WACLI_PARITY_VERSION = "0.19.0"
 WACLI_LEAF_MINIMUM_VERSIONS: dict[tuple[str, ...], str] = {
     ("groups", "participants", "list"): "0.18.0",
 }
+# Leaves only wacli builds that follow presence have (fork branch
+# oma-presence-receipts). Official releases lack them; either is accepted.
+WACLI_OPTIONAL_LEAVES = frozenset({
+    ("presence", "available"),
+    ("presence", "subscribe"),
+    ("presence", "unavailable"),
+})
 WACLI_GLOBAL_FLAGS = frozenset({
     "--account", "--events", "--full", "--json", "--lock-wait",
     "--read-only", "--store", "--timeout",
@@ -340,6 +350,7 @@ WACLI_CHAT_TO_OPERATIONS = frozenset({
     ("poll", "show"),
     ("poll", "vote"),
     ("presence", "paused"),
+    ("presence", "subscribe"),
     ("presence", "typing"),
     ("send", "file"),
     ("send", "location"),
@@ -526,6 +537,9 @@ WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
     ("polls", "list"): "local-read",
     ("presence", "paused"): "whatsapp-write",
     ("presence", "typing"): "whatsapp-write",
+    ("presence", "available"): "whatsapp-write",
+    ("presence", "unavailable"): "whatsapp-write",
+    ("presence", "subscribe"): "remote-read",
     ("profile", "business"): "remote-read",
     ("profile", "get-about"): "remote-read",
     ("profile", "picture-info"): "remote-read",
@@ -4012,6 +4026,42 @@ class Backend:
             args.extend(["--reply-to-sender", sender])
         return quoted_id, args
 
+    def presence(self, action: str, jid: str = "", lease: Any = None) -> dict[str, Any]:
+        """Show this account online, offline, or follow a person's presence.
+
+        Only through the running sync, which owns the connection: wacli
+        refuses these without it, and the sync is never paused for them,
+        because a paused sync loses what arrives meanwhile. The official wacli
+        has no such commands; the answer then says so and the app stops asking.
+        """
+        if action not in ("available", "unavailable", "subscribe"):
+            raise OmaWhatsAppError("Choose available, unavailable or subscribe.")
+        if action != "unavailable" and not self.online(self.active):
+            return {"ok": True, "skipped": "offline"}
+        command = ["--json", "presence", action]
+        if action == "available":
+            command.extend(["--lease", f"{bounded_int(lease, 90, 30, 600)}s"])
+        if action == "subscribe":
+            chat = self._chat(jid)
+            if chat["kind"] != "dm":
+                raise OmaWhatsAppError("Only a person's presence can be followed.")
+            command.extend(["--to", chat["jid"]])
+        result = self._run(command, timeout=15)
+        if result.returncode != 0:
+            detail = f"{result.stderr or ''}\n{result.stdout or ''}"
+            supported = "unknown command" not in detail and "unknown flag" not in detail
+            return {"ok": False, "supported": supported,
+                    "error": "wacli could not change presence." if supported
+                    else "This wacli build does not follow presence."}
+        envelope = self._envelope(result)
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        answer: dict[str, Any] = {"ok": True, "action": action}
+        if action == "available":
+            answer["until"] = str(data.get("until") or "")[:40]
+        if action == "subscribe":
+            answer["sent_now"] = data.get("sent_now") is True
+        return answer
+
     def _validated_mentions(self, chat: dict[str, str], values: Any) -> list[str]:
         if values in (None, []):
             return []
@@ -6006,6 +6056,7 @@ def parser() -> argparse.ArgumentParser:
     messages = commands.add_parser("messages")
     messages.add_argument("--limit", type=int, default=160)
     commands.add_parser("members")
+    commands.add_parser("presence")
     commands.add_parser("chat-details")
     commands.add_parser("stickers")
     commands.add_parser("group-info")
@@ -6137,6 +6188,10 @@ def main() -> int:
             return emit(backend.stickers())
         if args.command == "fetch-stickers":
             return emit(backend.fetch_stickers())
+        if args.command == "presence":
+            return emit(backend.presence(str(payload.get("action") or ""),
+                                         str(payload.get("jid") or ""),
+                                         payload.get("lease")))
         if args.command == "chat-details":
             return emit(backend.chat_details(str(payload.get("jid") or "")))
         if args.command == "members":

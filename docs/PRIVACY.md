@@ -30,6 +30,15 @@ recipient received, read, or played the messages you sent, as WhatsApp
 reports it to your linked devices. The app shows that as ticks and never sends
 anything for it. The rows are removed with their chat.
 
+Such a build also keeps `presence.json` (mode `0600`) in the store while its
+sync runs: which followed contacts are online, their last seen when they share
+it, and who is typing. The app reads it directly and shows it for the open
+chat. To receive it, the account shows itself online to WhatsApp while the
+window, or the dropdown on a conversation, has focus. That is on by default
+and turned off in Settings → Reading. The sync ends that online state by
+itself about 90 seconds after the app stops renewing it, and removes the file
+when it stops.
+
 Desktop popups leave the process: chat names, senders, and message previews
 reach the notification daemon and its history. They are on by default, can be
 muted from the bar icon, the preview can be dropped so only chat names travel, and every field is truncated

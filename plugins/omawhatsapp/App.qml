@@ -10,6 +10,7 @@ import "AccountModel.js" as AccountModel
 import "ComposerModel.js" as ComposerModel
 import "TimeFormat.js" as TimeFormat
 import "FormatModel.js" as FormatModel
+import "PresenceModel.js" as PresenceModel
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -719,6 +720,32 @@ Item {
     queuedSendKey = ""
     sendDraft()
     return true
+  }
+
+  // Presence of the open chat: typing, online or last seen, when wacli
+  // follows presence; the account is shown online while this window has focus.
+  readonly property bool windowFocused: root.opened && focusScope.Window.active
+  onWindowFocusedChanged: if (!root.demoMode && root.service)
+    root.service.setPresenceFocus("app", root.windowFocused)
+  // The service may go first when the shell tears everything down.
+  Component.onDestruction: if (!root.demoMode && root.service && root.service.setPresenceFocus)
+    root.service.setPresenceFocus("app", false)
+  readonly property var presenceLine: {
+    if (root.demoMode || !root.service || root.currentJid() === "") return { text: "", live: false }
+    var names = ({})
+    var people = root.service.members || []
+    for (var i = 0; i < people.length; i++)
+      if (people[i] && people[i].jid) names[String(people[i].jid)] = String(people[i].name || "")
+    var now = root.service.presenceNow
+    return PresenceModel.line(root.service.presenceSnapshotFor(root.selectedAccount), root.currentJid(), {
+      now: now, date: new Date(now * 1000), group: root.displayKind === "group", names: names,
+      clock: TimeFormat.clockPattern(root.timeFormat, Qt.locale().timeFormat(Locale.ShortFormat))
+    })
+  }
+  function chatTyping(chat) {
+    if (root.demoMode || !root.service || !chat) return false
+    return PresenceModel.isTyping(root.service.presenceSnapshotFor(String(chat.account || "")),
+      String(chat.jid || ""), root.service.presenceNow)
   }
 
   // The tick for a sent message's delivery state; "" when none is known.
@@ -2359,7 +2386,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: text !== ""
                     readonly property string status: chatPreviewText.draft === "" && modelData.last_from_me
-                      ? String(modelData.last_status || "") : ""
+                      && !chatPreviewText.typing ? String(modelData.last_status || "") : ""
                     text: root.tickGlyph(status)
                     color: status === "read" || status === "played" ? root.accent
                       : status === "error" ? Color.urgent : root.dim
@@ -2374,11 +2401,14 @@ Item {
                     anchors.leftMargin: chatPreviewTicks.visible ? Style.space(4) : 0
                     anchors.right: parent.right
                     readonly property string draft: root.draftFor(modelData)
+                    // Someone typing replaces the preview, as on the phone.
+                    readonly property bool typing: draft === "" && root.chatTyping(modelData)
                     text: draft !== "" ? "Draft: " + draft
+                      : typing ? "typing…"
                       : AccountModel.previewPrefix(modelData, root.multiAccount)
                         + (modelData.last_from_me && !chatPreviewTicks.visible ? "You · " : "")
                         + (FormatModel.plain(String(modelData.preview || "")) || "No local messages yet")
-                    color: draft !== "" ? root.accent : root.dim
+                    color: draft !== "" || typing ? root.accent : root.dim
                     elide: Text.ElideRight
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -2602,13 +2632,14 @@ Item {
               Text {
                 textFormat: Text.PlainText
                 objectName: "conversationSubtitle"
-                // wacli keeps neither the contact's about text nor live
-                // presence, so the only honest subtitle is the account the
-                // chat belongs to, and only when more than one is linked.
-                text: root.multiAccount && root.selectedChat
+                // Typing, online or last seen when wacli follows presence;
+                // otherwise the account the chat belongs to, when more than
+                // one is linked.
+                text: root.presenceLine.text !== "" ? root.presenceLine.text
+                  : root.multiAccount && root.selectedChat
                   ? AccountModel.labelOf(root.selectedChat) : ""
                 visible: text !== ""
-                color: root.dim
+                color: root.presenceLine.live ? root.accent : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }

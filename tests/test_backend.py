@@ -1486,6 +1486,36 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(command[command.index("--to") + 1], "alex@s.whatsapp.net")
         self.assertEqual(command[command.index("--message") + 1], "hello")
 
+    def test_presence_goes_through_the_running_sync_and_never_pauses_it(self) -> None:
+        # The owner asked for online, last seen and typing. Presence is only
+        # meaningful on the sync's own connection, so the helper never yields
+        # the sync for it: a paused sync loses whatever arrives meanwhile.
+        answer = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"available": True, "until": "2026-09-25T12:01:30Z"}}), "")
+        with mock.patch.object(self.backend, "_run", return_value=answer) as run, \
+                mock.patch.object(self.backend, "_yield_active_sync") as yield_sync:
+            result = self.backend.presence("available", lease=45)
+        yield_sync.assert_not_called()
+        self.assertEqual(result, {"ok": True, "action": "available", "until": "2026-09-25T12:01:30Z"})
+        self.assertEqual(run.call_args.args[0], ["--json", "presence", "available", "--lease", "45s"])
+        subscribed = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"subscribed": True, "sent_now": True}}), "")
+        with mock.patch.object(self.backend, "_run", return_value=subscribed) as run:
+            result = self.backend.presence("subscribe", "alex@s.whatsapp.net")
+        self.assertEqual(run.call_args.args[0],
+                         ["--json", "presence", "subscribe", "--to", "alex@s.whatsapp.net"])
+        self.assertTrue(result["sent_now"])
+        with self.assertRaises(backend_module.OmaWhatsAppError):
+            self.backend.presence("subscribe", "team@g.us")
+        official = subprocess.CompletedProcess([], 1, "", 'Error: unknown command "available" for "wacli presence"')
+        with mock.patch.object(self.backend, "_run", return_value=official):
+            self.assertEqual(self.backend.presence("unavailable")["supported"], False,
+                             "official wacli lacks these commands; the app stops asking")
+        with mock.patch.object(self.backend, "_run") as run, \
+                mock.patch.object(self.backend, "online", return_value=False):
+            self.assertEqual(self.backend.presence("available"), {"ok": True, "skipped": "offline"})
+        run.assert_not_called()
+
     def test_chat_details_are_read_locally_for_a_group(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute("""INSERT INTO groups (jid, name, owner_jid, created_ts, updated_at)
@@ -2137,9 +2167,9 @@ class BackendTests(unittest.TestCase):
         defaults = self.backend.settings()
         self.assertEqual(
             {name: defaults[name] for name in backend_module.UI_PREFERENCES},
-            {"read_on_reply": True, "enter_sends": True, "show_avatars": True,
-             "auto_refresh_avatars": False, "rail_density": "comfortable",
-             "rail_width": 0},
+            {"read_on_reply": True, "show_online": True, "enter_sends": True,
+             "show_avatars": True, "auto_refresh_avatars": False,
+             "rail_density": "comfortable", "rail_width": 0},
         )
         updated = self.backend.settings({
             "read_on_reply": False, "enter_sends": False,
@@ -2230,7 +2260,13 @@ class BackendTests(unittest.TestCase):
 
     def test_wacli_parity_registry_covers_every_0183_leaf(self) -> None:
         policies = backend_module.WACLI_OPERATION_POLICIES
-        self.assertEqual(len(policies), 104)
+        self.assertEqual(len(policies), 107)
+        # Presence leaves exist only in wacli builds that follow presence;
+        # the parity check accepts their absence on official releases.
+        self.assertEqual(backend_module.WACLI_OPTIONAL_LEAVES, {
+            ("presence", "available"), ("presence", "subscribe"), ("presence", "unavailable")})
+        self.assertTrue(backend_module.WACLI_OPTIONAL_LEAVES <= set(policies))
+        self.assertEqual(policies[("presence", "subscribe")], "remote-read")
         self.assertEqual(policies[("groups", "participants", "list")], "local-read")
         self.assertIn(("groups", "participants", "list"),
                       backend_module.WACLI_GROUP_JID_OPERATIONS)
