@@ -2,6 +2,14 @@
 
 ## Unreleased (fork)
 
+- Restyle, phase 4 (bar dropdown): the header says "Chats" and how many are
+  unread (click to show only those, right-click or Clear to clear the
+  badges), with new chat and full app beside it. Rows are shorter, with the
+  same time stamps, ticks, media kinds and group senders as the full app;
+  hovering a row offers mark read and reply here in place of its badge. The
+  footer names what each key does. In a conversation, "3 new" marks where the
+  unread messages start and a line under the composer says what Enter,
+  Shift+Enter and Esc do.
 - Restyle, phase 3 (chat list): pinned and recent chats sit under their own
   labels, every row shows the time of its last message (the time today, then
   Yesterday, the weekday, a short date), unread chats have a bold name and an

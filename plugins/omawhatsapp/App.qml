@@ -770,12 +770,7 @@ Item {
 
   // The tick for a sent message's delivery state; "" when none is known.
   function tickGlyph(status) {
-    var value = String(status || "")
-    if (value === "sent") return "󰄬"
-    if (value === "delivered" || value === "read" || value === "played") return "󰄭"
-    if (value === "pending") return "󰅐"
-    if (value === "error") return "󰀦"
-    return ""
+    return AccountModel.deliveryGlyph(status)
   }
 
   function sendDraft() {
@@ -1534,8 +1529,7 @@ Item {
   }
 
   function previewKindGlyph(kind) {
-    return ({ photo: "󰄀", video: "󰕧", gif: "󰵸", sticker: "󰞅", voice: "󰍬",
-      document: "󰈙", location: "󰍎" })[String(kind || "")] || ""
+    return AccountModel.previewKindGlyph(kind)
   }
 
   function formatTime(seconds) {

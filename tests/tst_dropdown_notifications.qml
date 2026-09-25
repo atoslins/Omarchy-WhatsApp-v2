@@ -150,9 +150,19 @@ TestCase {
     dropdown.close()
   }
 
-  function test_footer_names_its_action_and_keeps_keys_in_tooltips() {
+  function test_footer_names_what_each_key_does() {
+    // The owner found "O · J/K · / · Enter" cryptic (L82); the restyle keeps
+    // the keys, each beside its action, and the full app gets a button.
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
-    compare(findChild(dropdown, "openFullAppLabel").text, "Open full app")
+    var keys = findChild(dropdown, "dropdownKeys")
+    verify(keys !== null)
+    function words(item, found) {
+      if (typeof item.text === "string" && item.text !== "") found.push(item.text)
+      for (var i = 0; i < item.children.length; i++) words(item.children[i], found)
+      return found
+    }
+    compare(words(keys, []).join(" "), "↑↓ move Enter reply O full app Esc close")
+    verify(findChild(dropdown, "dropdownOpenFullButton") !== null, "the full app has its own button")
     function texts(item, found) {
       if (typeof item.text === "string") found.push(item.text)
       for (var i = 0; i < item.children.length; i++) texts(item.children[i], found)

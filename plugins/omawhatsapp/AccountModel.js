@@ -295,3 +295,19 @@ function previewSender(chat) {
   var name = String(chat.last_sender || "").trim().split(/\s+/)[0] || ""
   return name === "" ? "" : name + ": "
 }
+
+// Nerd Font glyphs shared by the full app and the dropdown: a sent message's
+// delivery state ("" when none is known) and the kind of a preview.
+function deliveryGlyph(status) {
+  var value = String(status || "")
+  if (value === "sent") return "󰄬"
+  if (value === "delivered" || value === "read" || value === "played") return "󰄭"
+  if (value === "pending") return "󰅐"
+  if (value === "error") return "󰀦"
+  return ""
+}
+
+function previewKindGlyph(kind) {
+  return ({ photo: "󰄀", video: "󰕧", gif: "󰵸", sticker: "󰞅", voice: "󰍬",
+    document: "󰈙", location: "󰍎" })[String(kind || "")] || ""
+}
