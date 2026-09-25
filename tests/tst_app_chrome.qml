@@ -826,7 +826,7 @@ TestCase {
   function test_right_click_on_a_chat_opens_its_actions() {
     var harness = createHarness()
     var app = harness.app
-    var row = findChild(app, "chatReadToggle").parent.parent
+    var row = findChild(app, "chatRowBody")
     var menu = findChild(app, "chatContextMenu")
     verify(menu !== null)
     mouseMove(row, 40, 20)
@@ -864,7 +864,7 @@ TestCase {
 
   function test_compact_density_shortens_rail_rows() {
     var harness = createHarness()
-    var row = findChild(harness.app, "chatReadToggle").parent.parent
+    var row = findChild(harness.app, "chatRowBody")
     var comfortable = row.height
     harness.service.railDensity = "compact"
     verify(row.height < comfortable)

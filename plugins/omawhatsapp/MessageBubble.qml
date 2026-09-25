@@ -6,6 +6,7 @@ import "FormatModel.js" as FormatModel
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
 import "LinkModel.js" as LinkModel
+import "Tint.js" as Tint
 
 // One WhatsApp-style timeline item: quote, content, interactive options,
 // reactions, delivery metadata, and the hover action surface stay together so
@@ -50,14 +51,7 @@ Item {
   // One color per person in a group, derived from the theme's accent so it
   // follows the theme: the same hue turned, same strength.
   function senderColor(key) {
-    var text = String(key || "")
-    if (text === "") return root.accent
-    var hash = 0
-    for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0
-    var base = root.accent.hslHue >= 0 ? root.accent.hslHue : 0.6
-    var saturation = Math.max(0.45, root.accent.hslSaturation)
-    var lightness = Math.min(0.78, Math.max(0.62, root.accent.hslLightness))
-    return Qt.hsla((base + (hash % 8) / 8) % 1, saturation, lightness, 1)
+    return Tint.personColor(key, root.accent)
   }
 
   // Sent from here, not yet stored by the mirror: shown at once, with no

@@ -11,6 +11,7 @@ import "ComposerModel.js" as ComposerModel
 import "TimeFormat.js" as TimeFormat
 import "FormatModel.js" as FormatModel
 import "PresenceModel.js" as PresenceModel
+import "Tint.js" as Tint
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -151,7 +152,16 @@ Item {
   readonly property bool showAvatars: root.demoMode || !root.service || root.service.showAvatars !== false
   readonly property string syncPauseReason: !root.demoMode && root.service
     && typeof root.service.syncPauseReason === "string" ? root.service.syncPauseReason : ""
-  readonly property bool compactRail: !root.demoMode && !!root.service && root.service.railDensity === "compact"
+  // Demo captures pick the density with {"demo":true,"density":"compact"}.
+  property string demoRailDensity: ""
+  readonly property bool compactRail: root.demoMode ? root.demoRailDensity === "compact"
+    : !!root.service && root.service.railDensity === "compact"
+  // The list's stamps change with the day, so "now" ticks while the app is open.
+  property var clockNow: new Date()
+  // Demo stamps are measured from a fixed moment so captures do not age.
+  property var demoNow: new Date(1787540400 * 1000)
+  readonly property string listClock: TimeFormat.clockPattern(root.timeFormat,
+    Qt.locale().timeFormat(Locale.ShortFormat))
   readonly property bool enterSends: root.demoMode || !root.service || root.service.enterSends !== false
   readonly property string composerHint: root.enterSends
     ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
@@ -318,6 +328,8 @@ Item {
     var previousDemo = demoMode
     closingFromHost = false
     demoMode = payload.demo === true
+    demoRailDensity = demoMode && payload.density === "compact" ? "compact" : ""
+    clockNow = new Date()
     opened = true
     demoVoiceState = demoMode && payload.voice === true ? "review" : "idle"
     pendingOpenChatAccount = String(payload.account || "")
@@ -1508,6 +1520,24 @@ Item {
     root.focusComposer()
   }
 
+  // "Pinned" over the first pinned chat and "Recent" over the first chat
+  // after them, in the full list with no search only.
+  function railSectionLabel(index) {
+    if (root.chatView !== "all" || String(chatSearchField.text || "").trim() !== "") return ""
+    var chats = root.visibleChats
+    if (!chats || chats.length === 0 || !chats[0] || chats[0].pinned !== true) return ""
+    var chat = chats[index]
+    if (!chat) return ""
+    if (index === 0) return "Pinned"
+    var previous = chats[index - 1]
+    return chat.pinned !== true && previous && previous.pinned === true ? "Recent" : ""
+  }
+
+  function previewKindGlyph(kind) {
+    return ({ photo: "󰄀", video: "󰕧", gif: "󰵸", sticker: "󰞅", voice: "󰍬",
+      document: "󰈙", location: "󰍎" })[String(kind || "")] || ""
+  }
+
   function formatTime(seconds) {
     if (!seconds) return ""
     return Qt.formatDateTime(new Date(Number(seconds) * 1000),
@@ -1737,6 +1767,13 @@ Item {
     function onSettingsFailed(message) {
       root.showToast(String(message || "settings could not be saved"))
     }
+  }
+
+  Timer {
+    interval: 60000
+    repeat: true
+    running: root.opened && !root.demoMode
+    onTriggered: root.clockNow = new Date()
   }
 
   Timer {
@@ -2112,11 +2149,13 @@ Item {
         }
 
         Column {
+          id: railColumn
           anchors.fill: parent
           anchors.margins: Style.space(12)
           spacing: Style.space(10)
 
           Item {
+            id: railHeader
             width: parent.width
             height: Style.space(30)
             Text {
@@ -2127,6 +2166,7 @@ Item {
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.heading
+              font.weight: Font.Bold
             }
             Row {
               anchors.right: parent.right
@@ -2172,11 +2212,14 @@ Item {
           TextField {
             id: chatSearchField
             width: parent.width
+            height: root.compactRail ? Style.space(30) : Style.space(34)
             placeholderText: "Search chats"
             foreground: root.foreground
             accent: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
+            leftPadding: Style.space(30)
+            rightPadding: Style.space(30)
             onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterChatSearch()
             onTextChanged: root.chatCursorIndex = 0
             background: Rectangle {
@@ -2189,25 +2232,73 @@ Item {
                 ? Style.hoverBorderFor(root.foreground, root.accent)
                 : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
             }
+            Text {
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰍉"
+              color: chatSearchField.activeFocus ? root.accent : root.dimmer
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+            // "/" jumps here from the list; the key says so while the field is idle.
+            Rectangle {
+              objectName: "chatSearchKeyHint"
+              visible: !chatSearchField.activeFocus && chatSearchField.text === ""
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(18)
+              height: Style.space(16)
+              radius: 4
+              color: "transparent"
+              border.width: 1
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+              Text {
+                textFormat: Text.PlainText
+                anchors.centerIn: parent
+                text: "/"
+                color: root.dimmer
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
           }
 
           // The views scroll sideways when the rail is too narrow for them;
           // the wheel scrolls them too, and the bar shows only while moving.
+          // Comfortable: a segmented control that fills the rail. Compact:
+          // plain words, the current one underlined.
           Flickable {
             id: railViews
             objectName: "railViews"
+            readonly property real segmentHeight: root.compactRail ? Style.space(24) : Style.space(32)
+            readonly property real inset: root.compactRail ? 0 : Style.space(3)
+            // Each view is as wide as its words; what the rail has left is
+            // shared among them (whole pixels, so the sum never overflows).
+            readonly property real segmentPadding: root.compactRail ? 0 : Style.space(16)
+            readonly property var naturalWidths: root.chatViews.map(function(view) {
+              return Math.ceil(railViewMetrics.advanceWidth(view.label)
+                + (view.count > 0 ? Style.space(4) + railViewMetrics.advanceWidth(String(view.count)) : 0))
+                + segmentPadding
+            })
+            readonly property real extraWidth: root.compactRail || naturalWidths.length === 0 ? 0
+              : Math.max(0, Math.floor((width - inset * 2 - railViewsRow.spacing * (naturalWidths.length - 1)
+                - naturalWidths.reduce(function(sum, value) { return sum + value }, 0)) / naturalWidths.length))
+            readonly property bool overflowing: contentWidth > width + 1
             width: parent.width
-            height: Style.space(26) + (railViewsBar.visible ? Style.space(6) : 0)
-            contentWidth: railViewsRow.implicitWidth
-            contentHeight: Style.space(26)
+            height: segmentHeight + (railViewsBar.visible ? Style.space(6) : 0)
+            contentWidth: railViewsTrack.width
+            contentHeight: segmentHeight
             flickableDirection: Flickable.HorizontalFlick
             boundsBehavior: Flickable.StopAtBounds
-            interactive: contentWidth > width
+            interactive: overflowing
             clip: true
             ScrollBar.horizontal: ScrollBar {
               id: railViewsBar
               objectName: "railViewsBar"
-              policy: railViews.contentWidth > railViews.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+              policy: railViews.overflowing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
             }
             WheelHandler {
               acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -2217,40 +2308,81 @@ Item {
                   railViews.contentWidth - railViews.width, railViews.contentX - delta / 2))
               }
             }
-          Row {
-            id: railViewsRow
-            spacing: Style.space(6)
-            Repeater {
-              model: root.chatViews
-              delegate: Rectangle {
-                required property var modelData
-                objectName: "railView-" + modelData.id
-                readonly property bool active: root.chatView === modelData.id
-                width: viewLabel.implicitWidth + Style.space(20)
-                height: Style.space(26)
-                radius: height / 2
-                color: active ? Style.selectedFillFor(root.foreground, root.accent)
-                  : (viewHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
-                    : Style.normalFillFor(root.foreground, root.accent))
-                Text {
-                  textFormat: Text.PlainText
-                  id: viewLabel
-                  anchors.centerIn: parent
-                  text: modelData.label + (modelData.count > 0 ? " " + modelData.count : "")
-                  color: parent.active ? root.foreground : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-                HoverHandler { id: viewHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler {
-                  onTapped: {
-                    root.chatView = parent.active && modelData.id !== "all" ? "all" : modelData.id
-                    root.chatCursorIndex = 0
+            FontMetrics {
+              id: railViewMetrics
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Rectangle {
+              id: railViewsTrack
+              width: railViewsRow.width + railViews.inset * 2
+              height: railViews.segmentHeight
+              radius: Style.cornerRadius
+              color: root.compactRail ? "transparent" : Style.normalFillFor(root.foreground, root.accent)
+              Row {
+                id: railViewsRow
+                x: railViews.inset
+                y: railViews.inset
+                spacing: root.compactRail ? Style.space(12) : Style.space(2)
+                Repeater {
+                  model: root.chatViews
+                  delegate: Rectangle {
+                    id: viewChip
+                    required property var modelData
+                    objectName: "railView-" + modelData.id
+                    readonly property bool active: root.chatView === modelData.id
+                    required property int index
+                    width: Number(railViews.naturalWidths[index] || 0) + railViews.extraWidth
+                    height: railViews.segmentHeight - railViews.inset * 2
+                    radius: Style.cornerRadius - 2
+                    color: root.compactRail || !active
+                      ? (!root.compactRail && viewHover.hovered
+                        ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+                      : Style.selectedFillFor(root.foreground, root.accent)
+                    Row {
+                      id: viewLabel
+                      anchors.centerIn: parent
+                      spacing: Style.space(4)
+                      Text {
+                        textFormat: Text.PlainText
+                        text: modelData.label
+                        color: viewChip.active ? root.foreground
+                          : viewHover.hovered ? root.foreground : root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                      Text {
+                        textFormat: Text.PlainText
+                        visible: modelData.count > 0
+                        text: String(modelData.count)
+                        color: root.accent
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+                    Rectangle {
+                      objectName: "railViewUnderline"
+                      visible: root.compactRail && viewChip.active
+                      anchors.left: viewLabel.left
+                      anchors.right: viewLabel.right
+                      anchors.top: viewLabel.bottom
+                      anchors.topMargin: 1
+                      height: 2
+                      radius: 1
+                      color: root.accent
+                    }
+                    HoverHandler { id: viewHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                      onTapped: {
+                        root.chatView = viewChip.active && viewChip.modelData.id !== "all"
+                          ? "all" : viewChip.modelData.id
+                        root.chatCursorIndex = 0
+                      }
+                    }
                   }
                 }
               }
             }
-          }
           }
 
           AccountSwitcher {
@@ -2290,14 +2422,18 @@ Item {
           ListView {
             id: chatList
             width: parent.width
-            height: sidebar.height - Style.space(116)
-              - railViews.height - Style.space(10)
-              - appAccountSwitcher.height
-              - (railSyncStatus.visible ? railSyncStatus.height + Style.space(10) : 0)
-              - (appAccountReadiness.hasUnavailableAccounts
-                ? appAccountReadiness.height + Style.space(10) : 0)
+            // What the rail leaves below the controls above it, summed from
+            // the sidebar rather than read from the column, which has no size
+            // yet when the list is built. Not clamped at 0: a list that starts
+            // at height 0 defers its rows to the next frame, one that starts
+            // negative lays them out as soon as the height arrives.
+            height: (sidebar.height - railColumn.anchors.margins * 2
+              - railHeader.height - chatSearchField.height - railViews.height
+              - appAccountSwitcher.height - railColumn.spacing * 4
+              - (appAccountReadiness.visible ? appAccountReadiness.height + railColumn.spacing : 0)
+              - (railSyncStatus.visible ? railSyncStatus.height + railColumn.spacing : 0))
             clip: true
-            spacing: Style.space(3)
+            spacing: root.compactRail ? 0 : Style.space(2)
             model: root.visibleChats
             currentIndex: root.chatCursorIndex
             boundsBehavior: Flickable.StopAtBounds
@@ -2316,99 +2452,131 @@ Item {
               font.pixelSize: Style.font.caption
             }
 
-            delegate: Rectangle {
+            // Comfortable rows carry two lines: name and time, then the
+            // preview with its tick, kind and badge. Compact rows put name,
+            // preview and badge (or time) on one line.
+            delegate: Item {
               id: chatRow
+              objectName: "chatRow"
               required property var modelData
               required property int index
               width: chatList.width
-              height: root.compactRail ? Style.space(50) : Style.space(66)
-              radius: Style.cornerRadius
+              readonly property string sectionLabel: root.railSectionLabel(index)
+              readonly property real sectionHeight: sectionLabel === "" ? 0
+                : (root.compactRail ? Style.space(20) : Style.space(24))
+              height: sectionHeight + rowBody.height
               readonly property bool selected: String(modelData.account || "") === root.selectedAccount
                 && (root.demoMode
                   ? String(modelData.jid) === root.demoSelectedJid
                   : !!root.service && String(modelData.jid) === root.service.selectedChatJid)
               readonly property bool keyboardSelected: root.keyboardContext === "chats"
                 && index === root.chatCursorIndex
-              color: keyboardSelected || selected
-                ? Style.selectedFillFor(root.foreground, root.accent)
-                : (chatMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
-              border.width: keyboardSelected ? 1 : 0
-              border.color: root.accent
+              readonly property int unreadCount: Number(modelData.unread || 0)
+              // Muted and archived chats count quietly: grey badge, grey time.
+              readonly property bool loud: Number(modelData.notification_unread || 0) > 0
+              readonly property bool hovered: chatRowHover.hovered
+              readonly property string draft: root.draftFor(modelData)
+              // Someone typing replaces the preview, as on the phone.
+              readonly property bool typing: draft === "" && root.chatTyping(modelData)
+              readonly property var preview: AccountModel.previewParts(modelData)
+              readonly property real contentX: chatAvatar.x + chatAvatar.width
+                + (root.compactRail ? Style.space(8) : Style.space(12))
+              readonly property real contentRight: rowBody.width - Style.space(10)
 
-              HoverHandler { id: chatRowHover }
-
-              ChatAvatar {
-                showPhoto: root.showAvatars
-                id: chatAvatar
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                width: root.compactRail ? Style.space(30) : Style.space(38)
-                height: width
-                chat: modelData
-                selected: chatRow.selected
-                foreground: root.foreground
-                background: root.background
-                accent: root.accent
-                fontFamily: root.fontFamily
+              Text {
+                textFormat: Text.PlainText
+                objectName: "chatSection"
+                visible: chatRow.sectionLabel !== ""
+                x: Style.space(12)
+                y: chatRow.sectionHeight - height - Style.space(3)
+                text: chatRow.sectionLabel.toUpperCase()
+                color: root.dimmer
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption - 1
+                font.letterSpacing: 1.4
               }
 
+              Rectangle {
+                id: rowBody
+                objectName: "chatRowBody"
+                y: chatRow.sectionHeight
+                width: parent.width
+                height: root.compactRail ? Style.space(34) : Style.space(58)
+                radius: root.compactRail ? Style.cornerRadius : Style.cornerRadius + 2
+                color: chatRow.keyboardSelected || chatRow.selected
+                  ? Style.selectedFillFor(root.foreground, root.accent)
+                  : (chatMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+                border.width: chatRow.keyboardSelected ? 1 : 0
+                border.color: root.accent
 
-              Column {
-                anchors.left: chatAvatar.right
-                anchors.leftMargin: Style.space(9)
-                anchors.right: chatTrailing.left
-                anchors.rightMargin: Style.space(6)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(3)
-                Item {
-                  width: parent.width
-                  height: chatName.implicitHeight
-                  Text {
-                    textFormat: Text.PlainText
-                    id: chatName
-                    anchors.left: parent.left
-                    anchors.right: chatFlags.left
-                    anchors.rightMargin: chatFlags.width > 0 ? Style.space(6) : 0
-                    text: String(modelData.name || "WhatsApp chat")
-                    color: root.foreground
-                    elide: Text.ElideRight
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                  Row {
-                    id: chatFlags
-                    objectName: "chatFlags"
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(4)
-                    Text {
-                      textFormat: Text.PlainText
-                      objectName: "chatMutedIcon"
-                      visible: modelData.muted === true
-                      text: "󰪑"
-                      color: root.dimmer
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                    }
-                    Text {
-                      textFormat: Text.PlainText
-                      objectName: "chatPinnedIcon"
-                      visible: modelData.pinned === true
-                      text: "󰐃"
-                      // Accent and body size: the owner found the dim caption
-                      // pin too easy to miss.
-                      color: root.accent
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
-                    }
-                  }
+                HoverHandler { id: chatRowHover }
+
+                ChatAvatar {
+                  showPhoto: root.showAvatars
+                  id: chatAvatar
+                  x: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: root.compactRail ? Style.space(22) : Style.space(38)
+                  height: width
+                  chat: chatRow.modelData
+                  selected: chatRow.selected
+                  foreground: root.foreground
+                  background: root.background
+                  accent: root.accent
+                  fontFamily: root.fontFamily
                 }
+
+                // Comfortable: the two lines sit centred as one block.
+                readonly property real lineTop: (height - chatName.implicitHeight
+                  - Style.space(3) - chatPreviewLine.height) / 2
+
+                Text {
+                  textFormat: Text.PlainText
+                  id: chatName
+                  objectName: "chatName"
+                  x: chatRow.contentX
+                  y: root.compactRail ? (rowBody.height - implicitHeight) / 2 : rowBody.lineTop
+                  width: root.compactRail
+                    ? Math.min(implicitWidth, (chatRow.contentRight - chatRow.contentX) * 0.45)
+                    : Math.max(0, chatTime.x - Style.space(8) - x)
+                  text: String(chatRow.modelData.name || "WhatsApp chat")
+                  color: root.foreground
+                  elide: Text.ElideRight
+                  font.family: root.fontFamily
+                  font.pixelSize: root.compactRail ? Style.font.bodySmall : Style.font.body
+                  font.weight: chatRow.unreadCount > 0 ? Font.Bold : Font.Medium
+                }
+
+                // Comfortable: beside the name. Compact: in the trailing slot
+                // when there is no badge to show.
+                Text {
+                  textFormat: Text.PlainText
+                  id: chatTime
+                  objectName: "chatTime"
+                  visible: text !== "" && (!root.compactRail
+                    || (chatRow.unreadCount === 0 && !chatRow.hovered))
+                  x: chatRow.contentRight - implicitWidth
+                  y: root.compactRail ? (rowBody.height - implicitHeight) / 2
+                    : rowBody.lineTop + (chatName.implicitHeight - implicitHeight) / 2
+                  text: TimeFormat.listStamp(chatRow.modelData.timestamp, root.demoMode
+                    ? root.demoNow : root.clockNow, root.listClock,
+                    Qt.locale().dateFormat(Locale.ShortFormat))
+                  color: chatRow.loud ? root.accent : root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
                 Item {
-                  width: parent.width
+                  id: chatPreviewLine
+                  objectName: "chatPreviewLine"
+                  x: root.compactRail ? chatName.x + chatName.width + Style.space(8) : chatRow.contentX
+                  y: root.compactRail ? (rowBody.height - height) / 2
+                    : rowBody.lineTop + chatName.implicitHeight + Style.space(3)
+                  width: Math.max(0, chatTrailing.x - Style.space(6) - x)
                   height: chatPreviewText.implicitHeight
-                  // Your last message shows its tick instead of "You ·", as on
-                  // the phone, when wacli recorded its delivery state.
+
+                  // Your last message shows its tick instead of "You ·", as
+                  // on the phone, when wacli recorded its delivery state.
                   Text {
                     textFormat: Text.PlainText
                     id: chatPreviewTicks
@@ -2416,8 +2584,8 @@ Item {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     visible: text !== ""
-                    readonly property string status: chatPreviewText.draft === "" && modelData.last_from_me
-                      && !chatPreviewText.typing ? String(modelData.last_status || "") : ""
+                    readonly property string status: chatRow.draft === "" && chatRow.modelData.last_from_me
+                      && !chatRow.typing ? String(chatRow.modelData.last_status || "") : ""
                     text: root.tickGlyph(status)
                     color: status === "read" || status === "played" ? root.accent
                       : status === "error" ? Color.urgent : root.dim
@@ -2426,90 +2594,143 @@ Item {
                   }
                   Text {
                     textFormat: Text.PlainText
-                    id: chatPreviewText
-                    objectName: "chatPreview"
+                    id: chatPreviewKind
+                    objectName: "chatPreviewKind"
                     anchors.left: chatPreviewTicks.visible ? chatPreviewTicks.right : parent.left
                     anchors.leftMargin: chatPreviewTicks.visible ? Style.space(4) : 0
-                    anchors.right: parent.right
-                    readonly property string draft: root.draftFor(modelData)
-                    // Someone typing replaces the preview, as on the phone.
-                    readonly property bool typing: draft === "" && root.chatTyping(modelData)
-                    text: draft !== "" ? "Draft: " + draft
-                      : typing ? "typing…"
-                      : AccountModel.previewPrefix(modelData, root.multiAccount)
-                        + (modelData.last_from_me && !chatPreviewTicks.visible ? "You · " : "")
-                        + (FormatModel.plain(String(modelData.preview || "")) || "No local messages yet")
-                    color: draft !== "" || typing ? root.accent : root.dim
-                    elide: Text.ElideRight
+                    anchors.verticalCenter: parent.verticalCenter
+                    readonly property string kind: chatRow.draft === "" && !chatRow.typing
+                      ? chatRow.preview.kind : ""
+                    visible: text !== ""
+                    width: visible ? implicitWidth : 0
+                    text: root.previewKindGlyph(kind)
+                    color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                   }
-                }
-              }
-
-              // The unread count, or on hover the read/unread toggle, in one
-              // fixed slot above the row's click area.
-              Item {
-                id: chatTrailing
-                z: 2
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.max(Style.space(28), unreadBadge.width)
-                height: Style.space(28)
-
-                PanelActionButton {
-                  objectName: "chatReadToggle"
-                  anchors.centerIn: parent
-                  visible: chatRowHover.hovered
-                  iconText: root.chatIsUnread(modelData) ? "󰄭" : "󱥂"
-                  tooltipText: root.chatIsUnread(modelData) ? "Mark as read" : "Mark as unread"
-                  foreground: root.dim
-                  hoverColor: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: Style.font.body
-                  size: Style.space(28)
-                  onClicked: root.toggleChatRead(modelData)
-                }
-              }
-
-              Rectangle {
-                id: unreadBadge
-                parent: chatTrailing
-                anchors.centerIn: parent
-                visible: Number(modelData.unread || 0) > 0 && !chatRowHover.hovered
-                width: Math.max(Style.space(20), unreadText.implicitWidth + Style.space(8))
-                height: Style.space(20)
-                radius: height / 2
-                color: Number(modelData.notification_unread || 0) > 0
-                  ? root.accent : "transparent"
-                border.width: Number(modelData.notification_unread || 0) > 0 ? 0 : 1
-                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.28)
-                Text {
-                  textFormat: Text.PlainText
-                  id: unreadText
-                  anchors.centerIn: parent
-                  text: Number(modelData.unread || 0) > 99 ? "99+" : String(modelData.unread || 0)
-                  color: Number(modelData.notification_unread || 0) > 0
-                    ? root.background : root.dimmer
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              MouseArea {
-                id: chatMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: function(mouse) {
-                  if (mouse.button === Qt.RightButton) {
-                    var point = chatRow.mapToItem(sidebar, mouse.x, mouse.y)
-                    root.openChatContextMenu(modelData, point.x, point.y)
-                    return
+                  Text {
+                    textFormat: Text.PlainText
+                    id: chatPreviewText
+                    objectName: "chatPreview"
+                    anchors.left: chatPreviewKind.visible ? chatPreviewKind.right
+                      : chatPreviewTicks.visible ? chatPreviewTicks.right : parent.left
+                    anchors.leftMargin: chatPreviewKind.visible || chatPreviewTicks.visible ? Style.space(4) : 0
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: chatRow.draft !== "" ? "Draft: " + chatRow.draft
+                      : chatRow.typing ? "typing…"
+                      : AccountModel.previewPrefix(chatRow.modelData, root.multiAccount)
+                        + (chatRow.modelData.last_from_me && !chatPreviewTicks.visible ? "You · " : "")
+                        + AccountModel.previewSender(chatRow.modelData)
+                        + (FormatModel.plain(chatRow.preview.text) || "No local messages yet")
+                    color: chatRow.draft !== "" ? Tint.draftColor(root.accent)
+                      : chatRow.typing ? root.accent
+                      : chatRow.unreadCount > 0 ? root.foreground : root.dim
+                    opacity: chatRow.unreadCount > 0 && chatRow.draft === "" && !chatRow.typing ? 0.86 : 1
+                    elide: Text.ElideRight
+                    font.family: root.fontFamily
+                    font.pixelSize: root.compactRail ? Style.font.caption : Style.font.bodySmall
                   }
-                  root.chatCursorIndex = index
-                  root.selectChat(modelData)
+                }
+
+                // Flags, then one fixed slot: the unread badge, or on hover
+                // the read/unread toggle (compact: the time when neither).
+                Row {
+                  id: chatTrailing
+                  z: 2
+                  spacing: Style.space(5)
+                  x: chatRow.contentRight - width
+                  y: root.compactRail ? (rowBody.height - height) / 2
+                    : chatPreviewLine.y + (chatPreviewLine.height - height) / 2
+                  height: Style.space(22)
+
+                  Row {
+                    id: chatFlags
+                    objectName: "chatFlags"
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(4)
+                    Text {
+                      textFormat: Text.PlainText
+                      objectName: "chatMutedIcon"
+                      visible: chatRow.modelData.muted === true
+                      text: "󰪑"
+                      color: root.dimmer
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      textFormat: Text.PlainText
+                      objectName: "chatPinnedIcon"
+                      visible: chatRow.modelData.pinned === true
+                      text: "󰐃"
+                      // Accent: the owner found the dim pin too easy to miss.
+                      color: root.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  Item {
+                    id: chatSlot
+                    anchors.verticalCenter: parent.verticalCenter
+                    // Never narrower than the toggle, so hovering does not
+                    // move the preview.
+                    width: Math.max(Style.space(22), chatRow.unreadCount > 0 ? unreadBadge.width
+                      : root.compactRail ? chatTime.implicitWidth : 0)
+                    height: Style.space(22)
+
+                    PanelActionButton {
+                      objectName: "chatReadToggle"
+                      anchors.centerIn: parent
+                      visible: chatRow.hovered
+                      iconText: root.chatIsUnread(chatRow.modelData) ? "󰄭" : "󱥂"
+                      tooltipText: root.chatIsUnread(chatRow.modelData) ? "Mark as read" : "Mark as unread"
+                      foreground: root.dim
+                      hoverColor: root.foreground
+                      fontFamily: root.fontFamily
+                      fontSize: Style.font.bodySmall
+                      size: Style.space(22)
+                      onClicked: root.toggleChatRead(chatRow.modelData)
+                    }
+
+                    Rectangle {
+                      id: unreadBadge
+                      objectName: "chatUnreadBadge"
+                      anchors.centerIn: parent
+                      visible: chatRow.unreadCount > 0 && !chatRow.hovered
+                      height: root.compactRail ? Style.space(16) : Style.space(18)
+                      width: Math.max(height, unreadText.implicitWidth + Style.space(9))
+                      radius: height / 2
+                      color: chatRow.loud ? root.accent
+                        : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+                      Text {
+                        textFormat: Text.PlainText
+                        id: unreadText
+                        anchors.centerIn: parent
+                        text: chatRow.unreadCount > 99 ? "99+" : String(chatRow.unreadCount)
+                        color: chatRow.loud ? root.background : root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption - 1
+                        font.weight: Font.Bold
+                      }
+                    }
+                  }
+                }
+
+                MouseArea {
+                  id: chatMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
+                  onClicked: function(mouse) {
+                    if (mouse.button === Qt.RightButton) {
+                      var point = rowBody.mapToItem(sidebar, mouse.x, mouse.y)
+                      root.openChatContextMenu(chatRow.modelData, point.x, point.y)
+                      return
+                    }
+                    root.chatCursorIndex = chatRow.index
+                    root.selectChat(chatRow.modelData)
+                  }
                 }
               }
             }

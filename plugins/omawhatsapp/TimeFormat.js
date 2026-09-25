@@ -38,3 +38,24 @@ function startsDay(messages, index) {
   if (index === messages.length - 1) return true
   return dayKey(messages[index].timestamp) !== dayKey(messages[index + 1].timestamp)
 }
+
+// The chat list's stamp for its latest message: the time today, then
+// "Yesterday", the weekday within the week, and a short date after that. The
+// date keeps the locale's day/month order; the year shows only when it differs.
+function listStamp(timestamp, now, clock, localeDatePattern) {
+  var seconds = Number(timestamp || 0)
+  if (!isFinite(seconds) || seconds <= 0) return ""
+  var date = new Date(seconds * 1000)
+  var today = now ? new Date(now.getTime()) : new Date()
+  today.setHours(0, 0, 0, 0)
+  var day = new Date(date.getTime())
+  day.setHours(0, 0, 0, 0)
+  var days = Math.round((today.getTime() - day.getTime()) / 86400000)
+  if (days <= 0) return Qt.formatTime(date, String(clock || "HH:mm"))
+  if (days === 1) return "Yesterday"
+  if (days < 7) return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
+  var monthFirst = /^[^d]*M/.test(String(localeDatePattern || "dd/MM/yyyy"))
+  var pattern = monthFirst ? "MM/dd" : "dd/MM"
+  if (date.getFullYear() !== today.getFullYear()) pattern += "/yy"
+  return Qt.formatDate(date, pattern)
+}

@@ -268,3 +268,30 @@ function sameRun(older, newer) {
     return false
   return Math.abs(Number(newer.timestamp || 0) - Number(older.timestamp || 0)) < 600
 }
+
+// The list's preview for the latest message: media gets its kind, and a bare
+// "[image]"-style placeholder reads as a word. A caption or file name stays.
+var PREVIEW_KINDS = {
+  image: { kind: "photo", label: "Photo" },
+  video: { kind: "video", label: "Video" },
+  gif: { kind: "gif", label: "GIF" },
+  sticker: { kind: "sticker", label: "Sticker" },
+  audio: { kind: "voice", label: "Voice message" },
+  document: { kind: "document", label: "Document" },
+  location: { kind: "location", label: "Location" }
+}
+
+function previewParts(chat) {
+  var text = String(chat && chat.preview || "")
+  var entry = PREVIEW_KINDS[String(chat && chat.last_media_type || "").toLowerCase()]
+  if (!entry) return { kind: "", text: text }
+  var placeholder = /^\[[a-z]+\]$/i.test(text.trim()) || text.trim() === ""
+  return { kind: entry.kind, text: placeholder ? entry.label : text }
+}
+
+// A group's preview names who wrote it, by first name, as on the phone.
+function previewSender(chat) {
+  if (!chat || chat.kind !== "group" || chat.last_from_me === true) return ""
+  var name = String(chat.last_sender || "").trim().split(/\s+/)[0] || ""
+  return name === "" ? "" : name + ": "
+}

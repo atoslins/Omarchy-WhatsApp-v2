@@ -2,6 +2,15 @@
 
 ## Unreleased (fork)
 
+- Restyle, phase 3 (chat list): pinned and recent chats sit under their own
+  labels, every row shows the time of its last message (the time today, then
+  Yesterday, the weekday, a short date), unread chats have a bold name and an
+  accent time, and a muted chat counts in grey. Media previews name their
+  kind with an icon ("Photo", "Voice message") instead of "[image]", a group
+  preview names who wrote it, and a draft reads amber. People have round
+  avatars and groups rounded squares, each in its own color from the theme.
+  The views are a segmented control; compact density keeps each chat on one
+  line with underlined views. Demo captures take `"density":"compact"`.
 - Restyle, phase 2 (attachments): photos, GIFs, videos and albums fill a
   thin frame with rounded corners and a portrait photo gets a narrower
   bubble; with no caption the time sits on the picture. Voice notes get a
