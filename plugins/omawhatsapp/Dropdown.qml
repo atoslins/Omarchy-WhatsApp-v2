@@ -502,7 +502,8 @@ Panel {
       return
     }
     if (!service || offline) return
-    if (service.writing) {
+    // Plain texts join the service queue at once; files wait here.
+    if (service.writing && pendingAttachments.length > 0) {
       queuedSendKey = String(currentChatRef().key || "")
       return
     }
@@ -663,7 +664,9 @@ Panel {
       } else if (!AccountModel.sameRef(chatRef, root.currentChatRef())) return
       var kind = String(details && details.kind
         || (intent ? intent.kind : ""))
-      if (ComposerModel.validWriteIntent(intent)) {
+      // A failed text stays as a bubble to retry; the composer keeps what
+      // was typed since.
+      if (ComposerModel.validWriteIntent(intent) && !(details && details.pending_kept)) {
         var failed = ComposerModel.failedIntentState({
           text: String(composer.text || ""),
           attachments: root.pendingAttachments,
@@ -1406,6 +1409,9 @@ Panel {
                 }
                 onEditRequested: root.openFullApp()
                 onDeleteRequested: root.openFullApp()
+                onPendingSendRequested: function(action) {
+                  if (root.service) root.service.resolvePendingSend(modelData.id, action)
+                }
                 onForwardRequested: root.openFullApp()
                 onCopyRequested: function(text) { root.copyText(text) }
                 onPollVoteRequested: function(options) {
@@ -1684,13 +1690,15 @@ Panel {
                   width: composerRowItem.controlSize
                   height: width
                   radius: width / 2
+                  // Only files wait for the running action; text queues at once.
                   readonly property bool busy: root.sending && !root.sendQueued
+                    && root.pendingAttachments.length > 0
                   color: busy ? root.subtle : root.accent
                   opacity: busy ? 0.5 : 1
                   Text {
                     textFormat: Text.PlainText
                     anchors.centerIn: parent
-                    text: root.sendQueued ? "󰔟" : root.sending ? "…"
+                    text: root.sendQueued ? "󰔟" : sendButton.busy ? "…"
                       : (String(composer.text || "").trim() !== ""
                           || root.pendingAttachments.length > 0 ? "󰒊" : "󰍬")
                     color: sendButton.busy ? root.muted : root.background
@@ -1699,7 +1707,7 @@ Panel {
                   }
                   HoverHandler { id: sendHover; cursorShape: Qt.PointingHandCursor }
                   PanelToolTip {
-                    visible: sendHover.hovered && (!root.sending || root.sendQueued)
+                    visible: sendHover.hovered && (!sendButton.busy || root.sendQueued)
                     text: root.sendQueued ? "Sends as soon as the current WhatsApp action finishes"
                       : String(composer.text || "").trim() !== "" || root.pendingAttachments.length > 0
                       ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")

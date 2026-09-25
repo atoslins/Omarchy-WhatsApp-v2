@@ -7,8 +7,8 @@ export PATH := $(PATH):/usr/lib/qt6/bin
 validate: test manifest lint
 
 test:
-	python3 -m py_compile bin/omawhatsapp bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
-	OMAW_SCRIPT="$(CURDIR)/bin/omawhatsapp" python3 -B -m unittest discover -s tests -v
+	python3 -m py_compile bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
+	OMAW_SCRIPT="$(CURDIR)/bin/omawhatsapp_core.py" python3 -B -m unittest discover -s tests -v
 	jq empty manifest.json plugins/omawhatsapp/manifest.json
 
 manifest:

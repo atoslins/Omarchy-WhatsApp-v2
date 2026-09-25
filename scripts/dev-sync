@@ -33,6 +33,12 @@ for notice in LICENSE THIRD_PARTY_NOTICES.md; do
     changed+=$'\n'"$notice"
   fi
 done
+# The module before its launcher, so a call never pairs a new launcher with a
+# missing module.
+if ! cmp -s "$repo_root/bin/omawhatsapp_core.py" "$bin_target/omawhatsapp_core.py"; then
+  install -m644 "$repo_root/bin/omawhatsapp_core.py" "$bin_target/omawhatsapp_core.py"
+  changed+=$'\n'"bin/omawhatsapp_core.py"
+fi
 if ! cmp -s "$repo_root/bin/omawhatsapp" "$bin_target/omawhatsapp"; then
   install -m755 "$repo_root/bin/omawhatsapp" "$bin_target/omawhatsapp"
   changed+=$'\n'"bin/omawhatsapp"

@@ -14,7 +14,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-HELPER = ROOT / "bin/omawhatsapp"
+HELPER = ROOT / "bin/omawhatsapp_core.py"
 WACLI = Path(os.environ.get("WACLI_BIN", Path.home() / ".local/bin/wacli"))
 
 

@@ -2,6 +2,15 @@
 
 ## Unreleased (fork)
 
+- Sending no longer holds up typing. Each Enter puts the message on screen
+  at once, even while an earlier message or a read mark is still going out.
+  Messages then go out in the order they were typed. A message that fails
+  stays in the conversation, marked as not sent, with Try again and Discard
+  in its menu. The send button no longer dims for text.
+- Every helper call starts about 0.15–0.2 s sooner. `bin/omawhatsapp` is now
+  a launcher for the module `omawhatsapp_core.py`, whose compiled bytecode
+  is cached instead of rebuilt on every call. Thread pools are only loaded
+  when more than one account or download needs them.
 - Accept wacli 0.17.1 or newer instead of exactly 0.17.1. The parity
   registry, tests, and CI are verified against 0.18.3; the installer reports
   a newer release and keeps its unclassified commands blocked.

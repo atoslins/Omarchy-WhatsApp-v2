@@ -40,6 +40,8 @@ Item {
   signal forwardRequested()
   signal copyRequested(string text)
   signal saveRequested()
+  // Retry or discard a message that failed to send.
+  signal pendingSendRequested(string action)
 
   // Sent from here, not yet stored by the mirror: shown at once, with no
   // actions that need a WhatsApp message id.
@@ -94,7 +96,12 @@ Item {
   readonly property bool raised: actionSurface.visible || reactionPicker.opened
     || actionMenu.opened
   // The message menu, as data: tests and the right-click path share it.
-  readonly property var menuActions: pending
+  readonly property bool sendFailed: pending && message.send_state === "failed"
+  readonly property var menuActions: sendFailed
+    ? [{ label: "Try again", action: "retry-send", show: true },
+       { label: "Copy text", action: "copy", show: true },
+       { label: "Discard", action: "discard-send", show: true }]
+    : pending
     ? [{ label: "Copy text", action: "copy", show: true }]
     : revoked ? [{ label: "Delete for me", action: "delete-me", show: true }]
     : [
@@ -117,6 +124,8 @@ Item {
     else if (action === "edit") root.editRequested()
     else if (action === "forward") root.forwardRequested()
     else if (action === "save") root.saveRequested()
+    else if (action === "retry-send") root.pendingSendRequested("retry")
+    else if (action === "discard-send") root.pendingSendRequested("discard")
     else root.deleteRequested(action === "delete-me")
   }
   signal optionRequested(int index)
@@ -705,20 +714,23 @@ Item {
         }
         // No delivery tick: wacli's mirror records no delivery or read
         // receipts, so any tick here would be a claim the data cannot back.
-        // A pending message shows a clock until the stored row replaces it.
+        // A pending message shows a clock until the stored row replaces it,
+        // or an alert when it could not be sent.
         Text {
           textFormat: Text.PlainText
           objectName: "messagePending"
           visible: root.pending
-          text: "󰅐"
-          color: root.dimmer
+          text: root.sendFailed ? "󰀦" : "󰅐"
+          color: root.sendFailed ? Color.urgent : root.dimmer
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           HoverHandler { id: pendingHover }
           Ui.PanelToolTip {
             visible: pendingHover.hovered
-            text: root.message.send_state === "sent"
-              ? "Sent · saving it on this computer" : "Sending…"
+            text: root.sendFailed ? "Not sent · right-click to try again"
+              : root.message.send_state === "sent" ? "Sent · saving it on this computer"
+              : root.message.send_state === "queued" ? "Waiting for the message before it…"
+              : "Sending…"
           }
         }
         Text {

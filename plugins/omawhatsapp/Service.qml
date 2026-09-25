@@ -500,6 +500,8 @@ Item {
     if (!writing) {
       if (String(pendingReceiptRef.jid || "") !== "") receiptRetry.restart()
       runNextDiscard()
+      // Once the process that just ended is fully gone.
+      if (sendQueue.length > 0) Qt.callLater(runNextQueuedSend)
     }
   }
   function search(value) {
@@ -509,35 +511,35 @@ Item {
     refreshMessages()
   }
   function selectItem(id) { selectedId = String(id || "") }
+  function writeOwner(owner) {
+    return ["app", "dropdown", "service"].indexOf(String(owner || "")) >= 0
+      ? String(owner) : "service"
+  }
+  // Why a write for this chat cannot start now, or "" when it can.
+  function writeRefusal(kind, payload, targetRef) {
+    if (!statusReady || statusAccount !== targetRef.account)
+      return "That account is still loading. Try again in a moment."
+    if (!ready) return "That account is not linked or its local archive is not ready."
+    // Saving a copy works offline when the file is already local; the helper
+    // refuses the download part while offline.
+    var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
+      || ["save-media", "export-chat", "contact-alias", "contact-tag"].indexOf(kind) >= 0
+    if (offlineMode && !isLocalAction)
+      return "Offline mode is on. Go online before sending or changing WhatsApp state."
+    return ""
+  }
   function runWriteForChat(kind, payload, chatRef, owner) {
     var targetRef = AccountModel.chatRef(
       chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
     var target = targetRef.jid
     var scope = targetRef.account
-    var origin = ["app", "dropdown", "service"].indexOf(String(owner || "")) >= 0
-      ? String(owner) : "service"
+    var origin = writeOwner(owner)
     if (writing || writeProcess.running || target === "") return false
-    if (!statusReady || statusAccount !== scope) {
-      var waiting = "That account is still loading. Try again in a moment."
-      errorText = waiting
-      writeFailed(waiting, targetRef, ({}), origin)
-      refreshStatus()
-      return false
-    }
-    if (!ready) {
-      var unavailable = "That account is not linked or its local archive is not ready."
-      errorText = unavailable
-      writeFailed(unavailable, targetRef, ({}), origin)
-      return false
-    }
-    // Saving a copy works offline when the file is already local; the helper
-    // refuses the download part while offline.
-    var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
-      || ["save-media", "export-chat", "contact-alias", "contact-tag"].indexOf(kind) >= 0
-    if (offlineMode && !isLocalAction) {
-      var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
-      errorText = message
-      writeFailed(message, targetRef, ({}), origin)
+    var refusal = writeRefusal(kind, payload, targetRef)
+    if (refusal !== "") {
+      errorText = refusal
+      writeFailed(refusal, targetRef, ({}), origin)
+      if (!statusReady || statusAccount !== scope) refreshStatus()
       return false
     }
     writing = true
@@ -559,26 +561,81 @@ Item {
     writeProcess.running = true
     return true
   }
+  // Texts typed while another WhatsApp action runs wait here in order, each
+  // already on screen as a pending bubble, so Enter never waits for the
+  // network and the next message can be typed at once.
+  property var sendQueue: []
   function sendText(chatRef, text, replyId, mentions, owner) {
     var value = String(text || "").trim()
     if (value === "") return false
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    if (ref.jid === "") return false
+    var origin = writeOwner(owner)
     pendingSendSerial += 1
     var localId = "pending:" + pendingSendSerial
-    var started = runWriteForChat("send", {
+    var payload = {
       text: value,
       reply_id: String(replyId || ""),
-      mentions: Array.isArray(mentions) ? mentions : [],
+      mentions: Array.isArray(mentions) ? mentions.slice() : [],
       local_id: localId
-    }, chatRef, owner)
-    if (started) {
-      var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
-      pendingSends = pendingSends.concat([{
-        local_id: localId, key: ref.key, text: value, reply_id: String(replyId || ""),
-        timestamp: Math.floor(Date.now() / 1000), created: Date.now(),
-        state: "sending", message_id: ""
-      }])
     }
-    return started
+    var queued = writing || writeProcess.running || sendQueue.length > 0
+    if (queued) {
+      var refusal = writeRefusal("send", payload, ref)
+      if (refusal !== "") {
+        errorText = refusal
+        writeFailed(refusal, ref, ({}), origin)
+        return false
+      }
+      sendQueue = sendQueue.concat([{ payload: payload, chatRef: ref, owner: origin }])
+    } else if (!runWriteForChat("send", payload, ref, origin)) {
+      return false
+    }
+    pendingSends = pendingSends.concat([{
+      local_id: localId, key: ref.key, text: value, reply_id: payload.reply_id,
+      timestamp: Math.floor(Date.now() / 1000), created: Date.now(),
+      state: queued ? "queued" : "sending", message_id: "",
+      request: payload, chatRef: ref, owner: origin
+    }])
+    return true
+  }
+  function runNextQueuedSend() {
+    while (!writing && !writeProcess.running && sendQueue.length > 0) {
+      var next = sendQueue[0]
+      sendQueue = sendQueue.slice(1)
+      var refusal = writeRefusal("send", next.payload, next.chatRef)
+      if (refusal === "" && runWriteForChat("send", next.payload, next.chatRef, next.owner)) {
+        updatePendingSend(next.payload.local_id, { state: "sending" })
+        return true
+      }
+      // Offline or the account went away meanwhile: it stays on screen, not sent.
+      updatePendingSend(next.payload.local_id, { state: "failed",
+        error: refusal !== "" ? refusal : "WhatsApp could not send this message." })
+    }
+    return false
+  }
+  // Retry or discard a message that failed to send; it keeps its bubble until then.
+  function resolvePendingSend(localId, action) {
+    var id = String(localId || "")
+    var item = null
+    for (var i = 0; i < pendingSends.length; i++)
+      if (pendingSends[i].local_id === id) item = pendingSends[i]
+    if (!item || item.state !== "failed") return false
+    if (action === "discard") {
+      dropPendingSend(id)
+      return true
+    }
+    if (action !== "retry" || !item.request) return false
+    var refusal = writeRefusal("send", item.request, item.chatRef)
+    if (refusal !== "") {
+      errorText = refusal
+      updatePendingSend(id, { error: refusal })
+      return false
+    }
+    sendQueue = sendQueue.concat([{ payload: item.request, chatRef: item.chatRef, owner: item.owner }])
+    updatePendingSend(id, { state: "queued", error: "", created: Date.now() })
+    runNextQueuedSend()
+    return true
   }
   function updatePendingSend(localId, changes) {
     var id = String(localId || "")
@@ -605,6 +662,8 @@ Item {
       // after the upload finished carries them.
       if (item.kind === "files" && item.state === "sent") return false
       if (item.state === "sent" && now - item.created > 90000) return false
+      // Unsent text stays until it is retried or discarded.
+      if (item.state === "failed" || item.state === "queued" || item.state === "sending") return true
       return now - item.created < 300000
     })
     if (next.length !== pendingSends.length) pendingSends = next
@@ -1935,8 +1994,10 @@ Item {
         if (finishedKind === "voice")
           voiceRecorder.markSendFailed(message, finishedAccount, finishedJid)
         if (finishedKind === "voice") root.voiceOwner = "service"
-        if (finishedKind === "send" || finishedKind === "files" || finishedKind === "sticker")
+        if (finishedKind === "files" || finishedKind === "sticker")
           root.dropPendingSend(finishedRequest.local_id)
+        if (finishedKind === "send")
+          root.updatePendingSend(finishedRequest.local_id, { state: "failed", error: message })
         if (finishedKind === "chat-action") {
           root.lastChatsRaw = ""
           refreshDelay.restart()
@@ -1945,7 +2006,11 @@ Item {
           payload && payload.partial ? payload.partial : ({}))
         details.kind = finishedKind
         details.request = finishedRequest
+        // The failed text stays on screen as a bubble to retry, so surfaces
+        // must not also put it back into the composer.
+        if (finishedKind === "send") details.pending_kept = true
         root.writeFailed(message, finishedChat, details, finishedOwner)
+        root.runNextQueuedSend()
         return
       }
       if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
@@ -1979,6 +2044,8 @@ Item {
       // What the helper answered, for surfaces that report it (exports, downloads).
       root.lastWriteResult = payload
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
+      // Queued texts go before anything a handler above started later.
+      root.runNextQueuedSend()
       if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()
     }

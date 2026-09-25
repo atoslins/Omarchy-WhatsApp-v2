@@ -464,37 +464,26 @@ TestCase {
     verify(clicked >= 3, "enough rows were on screen to test")
   }
 
-  function test_a_reply_while_another_action_runs_waits_and_then_goes() {
-    // The owner's report: after opening a chat from a notification its read
-    // mark was still running, the send button stayed dim and nothing went out.
+  function test_a_reply_while_another_action_runs_goes_out_at_once() {
+    // The owner's reports: after opening a chat from a notification its read
+    // mark was still running and nothing went out; and typing, Enter, typing
+    // again had to wait for each send. Text now goes to the send queue at
+    // once, so the composer is free for the next message.
     var h = createHarness()
     h.service.acceptSends = true
     var composer = findChild(h.app, "composerInput")
     composer.text = "on my way"
     h.service.writing = true
     h.app.sendDraft()
-    compare(h.service.sentTexts.length, 0, "nothing starts while the read mark runs")
-    verify(h.app.sendQueued)
-    var button = findChild(h.app, "composerSendButton")
-    compare(button.opacity, 1, "the button shows a wait, not a disabled look")
-    h.service.writing = false
-    tryVerify(function() { return h.service.sentTexts.length === 1 }, 1000)
-    compare(h.service.sentTexts[0], "on my way")
+    compare(h.service.sentTexts, ["on my way"], "handed over while the read mark runs")
+    compare(composer.text, "", "the composer is free at once")
     verify(!h.app.sendQueued)
-  }
-
-  function test_a_queued_send_is_dropped_when_the_chat_changes() {
-    var h = createHarness()
-    h.service.acceptSends = true
-    findChild(h.app, "composerInput").text = "for the first chat"
-    h.service.writing = true
+    var button = findChild(h.app, "composerSendButton")
+    compare(button.opacity, 1, "the button never looks disabled for text")
+    composer.text = "be there in 5"
     h.app.sendDraft()
-    verify(h.app.sendQueued)
-    h.service.selectChat(otherChat)
-    h.service.writing = false
-    wait(100)
-    compare(h.service.sentTexts.length, 0, "a draft never goes to another chat")
-    compare(h.app.queuedSendKey, "")
+    compare(h.service.sentTexts, ["on my way", "be there in 5"], "in the order typed")
+    compare(h.app.queuedSendKey, "", "text never waits in the window")
   }
 
   function test_paste_runs_while_a_send_is_in_flight() {

@@ -36,8 +36,8 @@ TestCase {
       signal pasteFailed(string message, var chatRef, string owner)
       signal textPasted(string text, var chatRef, string owner)
       signal attachmentPasted(string path, var chatRef, string owner)
+      // Like the real service: text queues even while another action runs.
       function sendText(ref, text) {
-        if (writing) return false
         sentTexts = sentTexts.concat([text])
         return true
       }
@@ -158,9 +158,9 @@ TestCase {
       "no bare list of keys in the footer")
   }
 
-  function test_a_reply_during_a_background_read_mark_waits_and_then_goes() {
+  function test_a_reply_during_a_background_read_mark_goes_out_at_once() {
     // The same report as in the full app: a read mark in flight made the
-    // reply do nothing at all.
+    // reply do nothing at all, and each reply waited for the one before.
     var service = createTemporaryObject(serviceStub, testCase)
     var dropdown = createTemporaryObject(dropdownComponent, testCase,
       { demoMode: false, service: service })
@@ -171,12 +171,11 @@ TestCase {
     verify(!composer.readOnly, "typing never waits for a WhatsApp action")
     composer.text = "on my way"
     dropdown.sendDraft()
-    compare(service.sentTexts.length, 0)
-    verify(dropdown.sendQueued)
-    service.writing = false
-    tryVerify(function() { return service.sentTexts.length === 1 }, 1000)
-    compare(service.sentTexts[0], "on my way")
+    compare(service.sentTexts, ["on my way"], "handed to the send queue at once")
     verify(!dropdown.sendQueued)
+    composer.text = "be there in 5"
+    dropdown.sendDraft()
+    compare(service.sentTexts, ["on my way", "be there in 5"])
     service.writing = true
     dropdown.pasteClipboard()
     compare(service.pastes, 1, "Ctrl+V runs beside the read mark")

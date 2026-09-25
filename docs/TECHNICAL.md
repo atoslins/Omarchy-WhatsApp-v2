@@ -10,7 +10,11 @@ OmaWhatsApp is one Omarchy plugin with two shell entry points:
   it reads and writes through the same resident service.
 
 `bin/omawhatsapp` is a bounded Python bridge, not a daemon. The only long-lived
-backend is the user-owned `wacli sync --follow` process.
+backend is the user-owned `wacli sync --follow` process. `bin/omawhatsapp` is a
+short launcher. The bridge itself is the module `bin/omawhatsapp_core.py`,
+which Python compiles once and caches under
+`${XDG_CACHE_HOME:-~/.cache}/omawhatsapp/pycache`. Without that cache, every
+call would recompile about six thousand lines before doing any work.
 
 One account is one store. The helper reads the account list from wacli, opens
 each account's mirror separately, passes `--account` on every command it runs,
@@ -143,7 +147,9 @@ Build/test artifacts remain outside the installed plugin tree.
 |---|---|
 | `~/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp` | installed plugin |
 | `~/.agents/skills/omawhatsapp` | shared on-device agent skill |
-| `~/.local/bin/omawhatsapp` | bounded helper |
+| `~/.local/bin/omawhatsapp` | bounded helper (launcher) |
+| `~/.local/bin/omawhatsapp_core.py` | the helper's code, imported by the launcher |
+| `~/.cache/omawhatsapp/pycache` | the helper's compiled bytecode (disposable) |
 | `~/.local/bin/omawhatsapp_assets.py` | private bounded avatar-cache module |
 | `~/.config/systemd/user/wacli-sync.service` | background sync unit |
 | `~/.local/state/wacli` | linked-device store owned by wacli |

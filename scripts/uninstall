@@ -30,6 +30,8 @@ shell_config="$user_home/.config/omarchy/shell.json"
 user_service_root="$xdg_config_home/systemd/user"
 helper_target="$user_home/.local/bin/omawhatsapp"
 assets_helper_target="$user_home/.local/bin/omawhatsapp_assets.py"
+core_helper_target="$user_home/.local/bin/omawhatsapp_core.py"
+bytecode_cache="${XDG_CACHE_HOME:-$user_home/.cache}/omawhatsapp/pycache"
 mcp_target="$user_home/.local/bin/omawhatsapp-mcp"
 runtime="$xdg_state_home/omawhatsapp"
 transaction_parent="$xdg_state_home/omawhatsapp-installer"
@@ -174,6 +176,7 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
   --arg legacy_bar "$plugin_root/omawhatsapp-bar" \
   --arg skill "$skill_root/omawhatsapp" --arg helper "$helper_target" \
   --arg assets_helper "$assets_helper_target" --arg mcp "$mcp_target" \
+  --arg core_helper "$core_helper_target" --arg bytecode "$bytecode_cache" \
   --arg service "$user_service_root/wacli-sync.service" \
   --arg template "$user_service_root/wacli-sync@.service" \
   --arg shell "$shell_config" --arg staged_shell "$temporary" \
@@ -186,6 +189,8 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
     {operation:"remove", target:$mcp},
     {operation:"remove", target:$helper},
     {operation:"remove", target:$assets_helper},
+    {operation:"remove", target:$core_helper},
+    {operation:"remove", target:$bytecode},
     {operation:"remove", target:$service},
     {operation:"remove", target:$template},
     {operation:"replace", staged:$staged_shell, target:$shell,

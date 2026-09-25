@@ -737,7 +737,11 @@ Item {
       return
     }
     if (!service) return
-    if (service.writing) {
+    // Plain texts join the service queue at once; stickers, files and edits
+    // still wait here for the running action to finish.
+    var queuesInService = pendingStickerPath === "" && pendingAttachments.length === 0
+      && editTarget === null
+    if (service.writing && !queuesInService) {
       queuedSendKey = currentChatKey()
       return
     }
@@ -1600,11 +1604,13 @@ Item {
     }
     function onWriteFailed(message, chatRef, details, owner) {
       if (!ComposerModel.ownsOperation(owner, "app")) return
-      var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
+        var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey
       var kind = String(details && details.kind || root.pendingWriteKind)
       var request = details && details.request ? details.request : ({})
-      var snapshot = key === root.pendingWriteChatKey
+      // A failed text stays as a bubble to retry; the composer keeps what
+      // was typed since.
+      var snapshot = key === root.pendingWriteChatKey && !(details && details.pending_kept)
         ? root.pendingComposerSnapshot : null
       if (sameChat) {
         if (snapshot) root.applyLiveComposerState(ComposerModel.failedState(
@@ -2892,6 +2898,9 @@ Item {
               }
               onEditRequested: root.startEdit(modelData)
               onDeleteRequested: function(forMe) { root.requestDelete(modelData, forMe) }
+              onPendingSendRequested: function(action) {
+                if (root.service) root.service.resolvePendingSend(modelData.id, action)
+              }
               onForwardRequested: root.startForward(modelData)
               onCopyRequested: function(text) { root.copyText(text) }
               onSaveRequested: root.saveMediaAs(modelData)
@@ -3701,7 +3710,9 @@ Item {
             radius: width / 2
             color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
               || root.currentChatKey() !== "" ? root.accent : "transparent"
-            opacity: root.service && root.service.writing && !root.sendQueued ? 0.45 : 1
+            // Only a file or sticker waits for the running action; text queues.
+            opacity: root.service && root.service.writing && !root.sendQueued
+              && (root.pendingAttachments.length > 0 || root.pendingStickerPath !== "") ? 0.45 : 1
             Text {
               textFormat: Text.PlainText
               anchors.centerIn: parent

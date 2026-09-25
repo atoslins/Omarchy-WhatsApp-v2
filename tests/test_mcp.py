@@ -843,7 +843,7 @@ class EndToEndTests(unittest.TestCase):
         self.wacli.write_text(FAKE_WACLI, encoding="utf-8")
         self.wacli.chmod(0o700)
         self.log = self.root / "wacli.log"
-        self.environment = dict(os.environ, OMAW_HELPER=str(SCRIPT), WACLI_BIN=str(self.wacli),
+        self.environment = dict(os.environ, OMAW_HELPER=str(SCRIPT.with_name("omawhatsapp")), WACLI_BIN=str(self.wacli),
                                 WACLI_STORE_DIR=str(self.store), HOME=str(self.root),
                                 XDG_STATE_HOME=str(self.root / "state"),
                                 XDG_CONFIG_HOME=str(self.root / "config"),

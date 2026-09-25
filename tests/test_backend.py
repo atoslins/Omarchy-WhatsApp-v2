@@ -2424,14 +2424,37 @@ class BackendTests(unittest.TestCase):
     def test_entrypoint_stays_usable_during_companion_module_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             helper = Path(temporary) / "omawhatsapp"
-            helper.write_bytes(SCRIPT.read_bytes())
+            helper.write_bytes(SCRIPT.with_name("omawhatsapp").read_bytes())
             helper.chmod(0o755)
+            (Path(temporary) / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
             result = subprocess.run(
                 [str(helper), "capabilities"], text=True, capture_output=True,
-                check=False,
+                check=False, env=dict(os.environ, XDG_CACHE_HOME=str(Path(temporary) / "cache")),
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)["ok"])
+
+    def test_the_launcher_reuses_compiled_code_outside_the_bin_folder(self) -> None:
+        # The owner found sending slow: every call recompiled the whole helper
+        # (about 0.2 s) before doing anything. The launcher imports it as a
+        # module so Python caches the bytecode, in the user cache folder.
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary) / "bin"
+            bin_dir.mkdir()
+            launcher = bin_dir / "omawhatsapp"
+            launcher.write_bytes(SCRIPT.with_name("omawhatsapp").read_bytes())
+            launcher.chmod(0o755)
+            (bin_dir / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
+            cache = Path(temporary) / "cache"
+            environment = dict(os.environ, XDG_CACHE_HOME=str(cache))
+            environment.pop("PYTHONDONTWRITEBYTECODE", None)
+            for _ in range(2):
+                result = subprocess.run([str(launcher), "capabilities"], text=True,
+                                        capture_output=True, check=False, env=environment)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            compiled = list((cache / "omawhatsapp" / "pycache").rglob("omawhatsapp_core*.pyc"))
+            self.assertEqual(len(compiled), 1, "the module's bytecode is cached once")
+            self.assertFalse((bin_dir / "__pycache__").exists(), "nothing is written beside the helper")
 
 
     def test_a_person_chat_wacli_turned_unknown_stays_in_the_rail(self) -> None:
