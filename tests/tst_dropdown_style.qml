@@ -112,4 +112,13 @@ TestCase {
     verify(audio.finishCurrent())
     compare(audio.currentId, "v2", "the next voice note plays")
   }
+
+  function test_the_dropdown_marks_unread_mentions_too() {
+    var dropdown = openDropdown()
+    dropdown.demoChats = dropdown.demoChats.map(function(chat, index) {
+      return index === 0 ? Object.assign({}, chat, { mentioned: true }) : chat })
+    var first = rows(dropdown)[0]
+    verify(findChild(first, "dropdownMentionBadge").visible)
+    verify(!findChild(rows(dropdown)[2], "dropdownMentionBadge").visible)
+  }
 }

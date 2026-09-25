@@ -2528,6 +2528,10 @@ class Backend:
                     (str(row["jid"]), str(row["last_message_id"]))
                     for row in rows if bool(row["last_from_me"]) and row["last_message_id"]])
                 accurate_counts = self._store_schema_version(connection) >= 27
+                # wacli builds that record mentions (fork migration 1029) mark
+                # a chat whose unread messages @mention this account.
+                has_mentions = self._has_table(connection, "message_mentions")
+                mentioned: dict[str, bool] = {}
                 real_unread: dict[str, int] = {}
                 synthetic = synthetic_message_sql("messages")
                 for row in rows:
@@ -2562,6 +2566,17 @@ class Backend:
                         ).fetchone()[0]
                         remaining = min(remaining, int(after or 0))
                     real_unread[jid] = remaining
+                    if has_mentions and remaining > 0:
+                        mentioned[jid] = connection.execute(
+                            """SELECT EXISTS(SELECT 1 FROM (
+                                 SELECT msg_id FROM messages
+                                 WHERE chat_jid = ? AND from_me = 0 AND deleted_at IS NULL
+                                 ORDER BY ts DESC, rowid DESC LIMIT ?) AS recent
+                               JOIN message_mentions ON message_mentions.chat_jid = ?
+                                 AND message_mentions.msg_id = recent.msg_id
+                                 AND message_mentions.is_self = 1)""",
+                            [jid, min(remaining, 999), jid],
+                        ).fetchone()[0] == 1
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         account = self.active
@@ -2604,6 +2619,7 @@ class Backend:
                 "muted": muted,
                 "unread": unread,
                 "notification_unread": notification_unread,
+                "mentioned": bool(mentioned.get(jid)) and unread > 0,
             })
         self._fold_lid_latest(chats)
         return chats

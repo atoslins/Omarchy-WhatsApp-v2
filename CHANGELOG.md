@@ -2,6 +2,9 @@
 
 ## Unreleased (fork)
 
+- A chat whose unread messages @mention you shows an @ beside its count, in
+  the chat list and the bar dropdown. It needs the wacli fork, which records
+  mentions from the moment it is installed.
 - Star and unstar messages from the message menu or for all picked messages
   from the selection bar; the star reaches your phone and other linked
   devices. It needs the wacli fork's `messages star` and is hidden on a wacli

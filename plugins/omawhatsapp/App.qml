@@ -3120,6 +3120,26 @@ Item {
                     }
                   }
 
+                  // An unread message here @mentions you.
+                  Rectangle {
+                    objectName: "chatMentionBadge"
+                    visible: chatRow.modelData.mentioned === true && chatRow.unreadCount > 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: root.compactRail ? Style.space(16) : Style.space(18)
+                    width: height
+                    radius: height / 2
+                    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                    Text {
+                      textFormat: Text.PlainText
+                      anchors.centerIn: parent
+                      text: "@"
+                      color: root.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption - 1
+                      font.weight: Font.Bold
+                    }
+                  }
+
                   Item {
                     id: chatSlot
                     anchors.verticalCenter: parent.verticalCenter

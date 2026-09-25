@@ -138,4 +138,18 @@ TestCase {
     var hint = findChild(app, "chatSearchKeyHint")
     verify(hint !== null && hint.visible)
   }
+
+  function test_an_unread_mention_shows_an_at_sign() {
+    // L222: a chat whose unread messages @mention you says so beside its count.
+    var app = openApp()
+    var list = rows(app)
+    verify(!findChild(list[1], "chatMentionBadge").visible, "no mention, no sign")
+    var marked = chats.slice()
+    marked[1] = Object.assign({}, marked[1], { mentioned: true })
+    marked[0] = Object.assign({}, marked[0], { mentioned: true })
+    app.demoChats = marked
+    list = rows(app)
+    verify(findChild(list[1], "chatMentionBadge").visible, "unread and mentioned")
+    verify(!findChild(list[0], "chatMentionBadge").visible, "read chats show no sign")
+  }
 }

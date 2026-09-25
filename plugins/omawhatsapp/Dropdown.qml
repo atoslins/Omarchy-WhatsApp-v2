@@ -1331,6 +1331,24 @@ Panel {
                     }
                   }
                   Rectangle {
+                    objectName: "dropdownMentionBadge"
+                    visible: chatRow.modelData.mentioned === true && chatRow.unreadCount > 0 && !chatRow.hovered
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: Style.space(18)
+                    width: height
+                    radius: height / 2
+                    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.20)
+                    Text {
+                      textFormat: Text.PlainText
+                      anchors.centerIn: parent
+                      text: "@"
+                      color: root.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption - 1
+                      font.weight: Font.Bold
+                    }
+                  }
+                  Rectangle {
                     objectName: "dropdownChatBadge"
                     visible: chatRow.unreadCount > 0 && !chatRow.hovered
                     anchors.verticalCenter: parent.verticalCenter

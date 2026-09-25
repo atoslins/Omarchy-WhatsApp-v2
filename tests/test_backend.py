@@ -231,6 +231,26 @@ class BackendTests(unittest.TestCase):
         self._set_unread("archive@g.us", 4)
         self.assertEqual(self._unread("archive@g.us"), 4)
 
+    def test_a_chat_is_marked_when_an_unread_message_mentions_you(self) -> None:
+        # L222: with a wacli that records mentions, the rail knows a chat's
+        # unread messages @mention this account; without the table it never does.
+        def team() -> dict:
+            return next(chat for chat in self.backend.chats()["chats"] if chat["jid"] == "team@g.us")
+        self.assertFalse(team()["mentioned"], "an official wacli records no mentions")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("""CREATE TABLE message_mentions (chat_jid TEXT NOT NULL, msg_id TEXT NOT NULL,
+                jid TEXT NOT NULL, is_self INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (chat_jid, msg_id, jid))""")
+            connection.execute("INSERT INTO message_mentions VALUES ('team@g.us', 't1', 'me@s.whatsapp.net', 1)")
+            connection.execute("UPDATE chats SET unread_count = 1 WHERE jid = 'team@g.us'")
+        self.assertTrue(team()["mentioned"], "the unread message mentions you")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE message_mentions SET is_self = 0")
+        self.assertFalse(team()["mentioned"], "someone else was mentioned")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE message_mentions SET is_self = 1")
+            connection.execute("UPDATE chats SET unread_count = 0, unread = 0 WHERE jid = 'team@g.us'")
+        self.assertFalse(team()["mentioned"], "read: no badge")
+
     def test_a_chat_marked_unread_elsewhere_counts_as_one(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute("UPDATE chats SET unread = 1, unread_count = 0 WHERE jid = 'archive@g.us'")
