@@ -467,7 +467,9 @@ Item {
       return true
     }
     if (action === "unread") return root.toggleChatRead(chat, false)
+    if (action === "export") return root.exportChat()
     if (root.demoMode || !root.service) return false
+    if (action === "download-missing") return root.service.downloadPending(root.currentChatRef(), "app")
     return root.service.chatAction(root.currentChatRef(), action, "app")
   }
   function openFromChatDetails(jid, name, phone) {
@@ -1137,6 +1139,19 @@ Item {
     return true
   }
 
+  // Export chat: a zenity save dialog, then the helper writes readable text.
+  function exportChat() {
+    var origin = currentChatRef()
+    if (origin.jid === "" || root.demoMode || !root.service || exportPickerProcess.running) return false
+    var name = String(root.displayGroupName || "chat").replace(/[\/\\:*?"<>|]+/g, " ").trim() || "chat"
+    exportPickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
+    exportPickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
+      "--confirm-overwrite", "--title=Export chat",
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Documents/WhatsApp - " + name + ".txt"]
+    exportPickerProcess.running = true
+    return true
+  }
+
   function copyText(value) {
     var text = String(value || "")
     if (text === "" || clipboardProcess.running) return
@@ -1546,6 +1561,14 @@ Item {
       if (kind === "media" && root.mediaBrowserOpen && root.service)
         root.service.browseMedia(root.mediaBrowserKind)
       if (!ComposerModel.ownsOperation(owner, "app")) return
+      var answer = root.service && root.service.lastWriteResult ? root.service.lastWriteResult : ({})
+      if (kind === "export-chat")
+        root.showToast("exported " + Number(answer.messages || 0) + " messages")
+      if (kind === "download-pending")
+        root.showToast(Number(answer.downloaded || 0) + " downloaded"
+          + (Number(answer.expired || 0) > 0 ? ", " + answer.expired + " expired on WhatsApp" : ""))
+      if (kind === "contact-alias") root.showToast(String(request.alias || "") !== "" ? "alias saved" : "alias removed")
+      if (kind === "contact-tag") root.showToast(request.remove ? "tag removed" : "tag added")
       var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey
       // Only operations that actually consume composer content may clear its
@@ -1728,6 +1751,21 @@ Item {
           originRef = AccountModel.chatRef("", "")
           if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
           root.service.saveMedia(target, item, chosen, "app")
+        }
+      }
+
+      Process {
+        id: exportPickerProcess
+        objectName: "exportPickerProcess"
+        property var originRef: AccountModel.chatRef("", "")
+        command: []
+        stdout: StdioCollector { id: exportPickerOutput }
+        onExited: function(exitCode) {
+          var target = originRef
+          var chosen = String(exportPickerOutput.text || "").trim()
+          originRef = AccountModel.chatRef("", "")
+          if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
+          root.service.exportChat(target, chosen, "app")
         }
       }
 

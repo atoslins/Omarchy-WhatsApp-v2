@@ -1433,7 +1433,7 @@ class BackendTests(unittest.TestCase):
         run.assert_not_called()
         self.assertEqual(details["chat"]["name"], "Design team")
         self.assertEqual(details["counts"], {"total": 4, "media": 1, "documents": 0,
-                                             "links": 0, "starred": 1})
+                                             "links": 0, "starred": 1, "missing": 0})
         self.assertEqual(details["since"], 20)
         self.assertEqual(details["group"], {"created_ts": 100, "left": False,
                                             "owner_name": "Alex Kim", "participant_count": 2,
@@ -2656,6 +2656,105 @@ class BackendTests(unittest.TestCase):
         for bad in ("hello", "https://evil.example/AbCdEfGhIjKlMnOpQr12", ""):
             with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "invite link"):
                 self.backend.join_group(bad)
+
+    def test_a_chat_exports_as_readable_text_like_the_phone(self) -> None:
+        self._insert("alex@s.whatsapp.net", "a2", 41, from_me=0, text="*see* you")
+        self._insert("alex@s.whatsapp.net", "a3", 42, from_me=1, text="gone")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE messages SET revoked = 1, deleted_at = 50, "
+                               "deletion_reason = 'whatsapp-revoke' WHERE msg_id = 'a3'")
+        home = self.root / "home"
+        (home / "Documents").mkdir(parents=True)
+        destination = home / "Documents" / "alex.txt"
+        with mock.patch.object(backend_module, "HOME", home):
+            result = self.backend.export_chat("alex@s.whatsapp.net", str(destination))
+            self.assertEqual(result["messages"], 3)
+            lines = destination.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0], "WhatsApp chat with Alex")
+            self.assertTrue(lines[1].endswith(" - You: hello"))
+            self.assertTrue(lines[2].endswith(": *see* you"), "markers stay, as the phone exports them")
+            self.assertTrue(lines[3].endswith(" - You: This message was deleted"))
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+            (home / "code" / ".git").mkdir(parents=True)
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "code repository"):
+                self.backend.export_chat("alex@s.whatsapp.net", str(home / "code" / "x.txt"))
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "home folder"):
+                self.backend.export_chat("alex@s.whatsapp.net", str(self.root / "outside.txt"))
+
+    def test_pending_attachments_download_beside_sync_and_count_expired(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                   from_me, text, media_type, mime_type, filename, local_path, media_unavailable_at)
+                   VALUES ('alex@s.whatsapp.net', 'Alex', ?, 'alex@s.whatsapp.net', 'Alex', ?, 0,
+                   '', 'document', 'application/pdf', ?, '', ?)""",
+                [("d1", 50, "a.pdf", None), ("d2", 51, "b.pdf", None), ("d3", 52, "c.pdf", 60)])
+        def fake(jid: str, message_id: str) -> dict:
+            if message_id == "d2":
+                raise backend_module.OmaWhatsAppError("download failed with status code 403")
+            return {"ok": True, "local_path": "/private/a.pdf"}
+        with mock.patch.object(self.backend, "download_media", side_effect=fake) as download:
+            result = self.backend.download_pending("alex@s.whatsapp.net")
+        self.assertEqual((result["downloaded"], result["expired"], result["failed"]), (1, 2, 0))
+        self.assertEqual(sorted(call.args[1] for call in download.call_args_list), ["d1", "d2"])
+        details = self.backend.chat_details("alex@s.whatsapp.net")
+        self.assertEqual(details["counts"]["missing"], 2, "d3 expired on the server is not pending")
+
+    def test_an_attachment_expired_on_the_server_is_remembered(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                   from_me, text, media_type, mime_type, filename, local_path)
+                   VALUES ('alex@s.whatsapp.net', 'Alex', 'old1', 'alex@s.whatsapp.net', 'Alex', 50,
+                   0, '', 'image', 'image/jpeg', 'x.jpg', '')""")
+        self.assertEqual(self.backend.chat_details("alex@s.whatsapp.net")["counts"]["missing"], 1)
+        with mock.patch.object(self.backend, "_fetch_media_file", side_effect=backend_module.OmaWhatsAppError(
+                "download failed with status code 403")) as fetch:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "no longer available"):
+                self.backend.download_media("alex@s.whatsapp.net", "old1")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "no longer available"):
+                self.backend.download_media("alex@s.whatsapp.net", "old1")
+        self.assertEqual(fetch.call_count, 1, "a known expired file is not asked for again")
+        self.assertEqual(self.backend.chat_details("alex@s.whatsapp.net")["counts"]["missing"], 0)
+        row = next(m for m in self.backend.messages("alex@s.whatsapp.net")["messages"] if m["id"] == "old1")
+        self.assertTrue(row["media_unavailable"], "the bubble says it is gone")
+
+    def test_contact_alias_and_tags_are_local_writes_for_known_people(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO contacts (jid, phone) VALUES "
+                               "('15551234567@s.whatsapp.net', '15551234567')")
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        person = "15551234567@s.whatsapp.net"
+        with mock.patch.object(self.backend, "_mutate", return_value=completed) as mutate:
+            self.backend.contact_alias(person, "  Mechanic   Joao ")
+            self.backend.contact_alias(person, "")
+            self.backend.contact_tag(person, " suppliers ")
+            self.backend.contact_tag(person, "suppliers", remove=True)
+        commands = [call.args[0] for call in mutate.call_args_list]
+        self.assertEqual(commands[0][-2:], ["--alias", "Mechanic Joao"])
+        self.assertEqual(commands[1][1:4], ["contacts", "alias", "rm"])
+        self.assertEqual(commands[2][1:4], ["contacts", "tags", "add"])
+        self.assertEqual(commands[3][1:4], ["contacts", "tags", "rm"])
+        self.assertTrue(all(call.kwargs["require_online"] is False for call in mutate.call_args_list),
+                        "local metadata works offline")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your WhatsApp contacts"):
+            self.backend.contact_alias("19990000000@s.whatsapp.net", "x")
+
+    def test_a_contact_profile_is_an_explicit_remote_read(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("INSERT INTO contacts (jid, phone) VALUES "
+                               "('15551234567@s.whatsapp.net', '15551234567')")
+        person = "15551234567@s.whatsapp.net"
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "remote-read"):
+            self.backend.contact_profile(person)
+        answers = iter([
+            subprocess.CompletedProcess([], 0, '{"success":true,"data":{"about":"Busy"}}', ""),
+            subprocess.CompletedProcess([], 0, '{"success":true,"data":{"jid":"x","address":"Main st",'
+                                               '"email":"","website":["https://x.example"]}}', "")])
+        with mock.patch.object(self.backend, "_mutate", side_effect=lambda *a, **k: next(answers)):
+            profile = self.backend.contact_profile(person, "remote-read")
+        self.assertEqual(profile["about"], "Busy")
+        self.assertEqual(profile["business"], {"address": "Main st", "website": ["https://x.example"]})
 
     def test_attachments_list_every_rail_chat_newest_first(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:

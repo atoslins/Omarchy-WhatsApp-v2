@@ -69,4 +69,62 @@ TestCase {
   }
 
   Component { id: spyComponent; SignalSpy {} }
+
+  Component {
+    id: detailsServiceStub
+    Item {
+      property var calls: []
+      property var contactProfile: ({ jid: "", loading: false, about: "", business: ({}), error: "" })
+      function setContactAlias(ref, person, alias, owner) { calls = calls.concat([["alias", person, alias]]); return true }
+      function setContactTag(ref, person, tag, remove, owner) { calls = calls.concat([["tag", person, tag, remove]]); return true }
+      function loadContactProfile(ref, person) { calls = calls.concat([["profile", person]]); return true }
+    }
+  }
+
+  function personPanel(service) {
+    return createTemporaryObject(panelComponent, testCase, {
+      service: service,
+      details: { ok: true, account: "work", chat: { kind: "dm", name: "Ana" },
+        counts: { total: 9, media: 3, missing: 2 },
+        person: { phone: "15550000003", alias: "", full_name: "Ana", push_name: "", business_name: "",
+                  tags: ["suppliers"] }, groups_in_common: [] },
+      chat: { jid: "15550000003@s.whatsapp.net", name: "Ana", kind: "dm" } })
+  }
+
+  function test_export_and_missing_attachments_are_actions() {
+    var panel = personPanel(null)
+    compare(panel.actions[panel.actions.length - 1].action, "export")
+    var missing = findChild(panel, "chatDetailsMissing")
+    verify(missing.visible)
+    var actions = createTemporaryObject(spyComponent, testCase, { target: panel, signalName: "actionRequested" })
+    var label = missing.children[1]
+    mouseClick(label)
+    compare(actions.signalArguments[0][0], "download-missing")
+  }
+
+  function test_a_person_gets_an_alias_tags_and_a_business_profile() {
+    var service = createTemporaryObject(detailsServiceStub, testCase)
+    var panel = personPanel(service)
+    verify(findChild(panel, "chatDetailsContact").visible)
+    verify(panel.saveAlias("  Ana from the shop "))
+    compare(service.calls[0], ["alias", "15550000003@s.whatsapp.net", "Ana from the shop"])
+    verify(panel.changeTag("clients", false))
+    verify(panel.changeTag("suppliers", true))
+    compare(service.calls[1], ["tag", "15550000003@s.whatsapp.net", "clients", false])
+    compare(service.calls[2], ["tag", "15550000003@s.whatsapp.net", "suppliers", true])
+    compare(panel.personTags, ["suppliers"])
+    service.contactProfile = { jid: "15550000003@s.whatsapp.net", loading: false, about: "Open 8-18",
+      business: { address: "Main street, 1", website: ["https://shop.example"] }, error: "" }
+    var shown = findChild(panel, "chatDetailsProfile").text
+    verify(shown.indexOf("About: Open 8-18") === 0)
+    verify(shown.indexOf("Address: Main street, 1") > 0)
+    verify(shown.indexOf("Website: https://shop.example") > 0)
+  }
+
+  function test_a_group_has_no_contact_section() {
+    var panel = createTemporaryObject(panelComponent, testCase, {
+      details: groupDetails, chat: { name: "Synthetic group", kind: "group" } })
+    verify(!findChild(panel, "chatDetailsContact").visible)
+    verify(!findChild(panel, "chatDetailsMissing").visible)
+  }
 }

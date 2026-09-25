@@ -127,6 +127,8 @@ TestCase {
       function pasteClipboard(ref, owner) { pastes += 1; return pasteAccepts }
       function sendFilesReply() { return false }
       function sendSticker() { return false }
+      property var downloads: []
+      function downloadPending(ref, owner) { downloads = downloads.concat([ref.jid]); return true }
       property var pollVotes: []
       function votePoll(ref, item, options, owner) {
         pollVotes = pollVotes.concat([{ id: item.id, options: options, owner: owner }])
@@ -607,6 +609,17 @@ TestCase {
     var dialog = findChild(h.app, "groupDialog")
     tryCompare(dialog, "opened", true)
     compare(dialog.mode, "create")
+  }
+
+  function test_details_export_asks_where_and_missing_downloads_start() {
+    var h = createHarness()
+    verify(h.app.runChatDetailsAction("export"))
+    var picker = findChild(h.app, "exportPickerProcess")
+    verify(picker.command.indexOf("--save") >= 0)
+    verify(String(picker.command[picker.command.length - 1]).indexOf("/Documents/WhatsApp - ") > 0)
+    verify(String(picker.command[picker.command.length - 1]).slice(-4) === ".txt")
+    verify(h.app.runChatDetailsAction("download-missing"))
+    compare(h.service.downloads, ["shared@example"])
   }
 
   function test_closing_a_covering_panel_gives_the_draft_its_focus_back() {

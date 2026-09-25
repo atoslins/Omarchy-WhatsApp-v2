@@ -119,6 +119,12 @@
 - Ctrl+V no longer waits behind a running send or read mark; it has its own
   process, and plain text still pastes when the helper cannot read the
   clipboard.
+- Chat details export the chat as readable text, like the phone ("2026-09-25
+  10:15 - Ana: …"), to a file you choose outside code repositories; download
+  the chat's missing attachments in one go; and, for a person, set your own
+  alias, add or remove tags, and show their about text and business profile.
+- An attachment WhatsApp's server no longer has (403/404/410) is remembered:
+  it shows as no longer available and is not counted or asked for again.
 - A "To reply" view in the chat list shows the people whose message is the
   last one in the chat.
 - Groups inside a Community show in the chat list and open like any group,

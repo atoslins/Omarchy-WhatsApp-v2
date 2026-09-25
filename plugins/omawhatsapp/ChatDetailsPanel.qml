@@ -85,11 +85,45 @@ Rectangle {
       { key: "pin", icon: c.pinned ? "󰤰" : "󰤱", label: c.pinned ? "Unpin" : "Pin",
         action: c.pinned ? "unpin" : "pin" },
       { key: "unread", icon: "󱥂", label: "Unread", action: "unread" },
-      { key: "search", icon: "󰍉", label: "Search", action: "search" }
+      { key: "search", icon: "󰍉", label: "Search", action: "search" },
+      { key: "export", icon: "󰈇", label: "Export", action: "export" }
     ]
   }
   signal closeRequested()
   signal actionRequested(string action)
+  readonly property var personRef: ({ account: String(details && details.account || ""),
+    jid: String(chat && chat.jid || "") })
+  readonly property var personTags: {
+    var tags = person && person.tags ? person.tags : []
+    var list = []
+    for (var i = 0; i < Number(tags.length || 0); i++) list.push(String(tags[i]))
+    return list
+  }
+  readonly property var profile: service && service.contactProfile
+    && service.contactProfile.jid === personRef.jid ? service.contactProfile : null
+  readonly property var businessLines: {
+    var business = profile && profile.business ? profile.business : ({})
+    var labels = { description: "About the business", category: "Category", address: "Address",
+      email: "Email", website: "Website", business_hours: "Hours", hours: "Hours" }
+    var lines = []
+    for (var key in business) {
+      var value = business[key]
+      var text = typeof value === "string" ? value
+        : (value && value.length !== undefined ? Array.prototype.join.call(value, ", ") : JSON.stringify(value))
+      if (String(text || "").trim() !== "")
+        lines.push({ label: labels[key] || key.replace(/_/g, " "), text: String(text) })
+    }
+    return lines
+  }
+  function saveAlias(text) {
+    if (!service || !person) return false
+    return service.setContactAlias(personRef, personRef.jid, String(text || "").trim(), "app")
+  }
+  function changeTag(tag, remove) {
+    var value = String(tag || "").trim()
+    if (!service || !person || value === "") return false
+    return service.setContactTag(personRef, personRef.jid, value, remove === true, "app")
+  }
   signal filterRequested(string filter)
   signal openChatRequested(string jid, string name, string phone)
 
@@ -389,6 +423,149 @@ Rectangle {
         }
       }
 
+      Row {
+        objectName: "chatDetailsMissing"
+        spacing: Style.space(8)
+        visible: Number(root.counts.missing || 0) > 0
+        Text { textFormat: Text.PlainText; text: "󰇚"; color: root.accent; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+        Text {
+          textFormat: Text.PlainText
+          text: "Download " + root.countText(root.counts.missing)
+            + (Number(root.counts.missing) === 1 ? " missing attachment" : " missing attachments")
+          color: root.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          HoverHandler { cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: root.actionRequested("download-missing") }
+        }
+      }
+
+      Column {
+        objectName: "chatDetailsContact"
+        visible: !root.isGroup && root.person !== null
+        width: parent.width
+        spacing: Style.space(8)
+        Rectangle { width: parent.width; height: 1; color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08) }
+        Text {
+          textFormat: Text.PlainText
+          text: "Your name for them"
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Row {
+          width: parent.width
+          spacing: Style.space(6)
+          TextField {
+            id: aliasField
+            objectName: "chatDetailsAlias"
+            width: parent.width - aliasSave.width - Style.space(6)
+            text: root.person ? String(root.person.alias || "") : ""
+            placeholderText: "An alias only this computer shows"
+            foreground: root.foreground
+            accent: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            Keys.onReturnPressed: root.saveAlias(text)
+            Keys.onEnterPressed: root.saveAlias(text)
+          }
+          PanelActionButton {
+            id: aliasSave
+            objectName: "chatDetailsAliasSave"
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰄬"
+            tooltipText: "Save the alias"
+            foreground: root.accent
+            hoverColor: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.body
+            size: Style.space(30)
+            onClicked: root.saveAlias(aliasField.text)
+          }
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: "Tags"
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Flow {
+          width: parent.width
+          spacing: Style.space(6)
+          Repeater {
+            model: root.personTags
+            delegate: Rectangle {
+              required property string modelData
+              objectName: "chatDetailsTag"
+              width: tagText.implicitWidth + Style.space(30)
+              height: Style.space(26)
+              radius: height / 2
+              color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
+              Text {
+                textFormat: Text.PlainText
+                id: tagText
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+              Text {
+                textFormat: Text.PlainText
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "󰅖"
+                color: root.muted
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.changeTag(modelData, true) }
+              }
+            }
+          }
+          TextField {
+            id: tagField
+            objectName: "chatDetailsNewTag"
+            width: Style.space(140)
+            placeholderText: "Add a tag"
+            foreground: root.foreground
+            accent: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            Keys.onReturnPressed: if (root.changeTag(text, false)) text = ""
+            Keys.onEnterPressed: if (root.changeTag(text, false)) text = ""
+          }
+        }
+        Text {
+          textFormat: Text.PlainText
+          objectName: "chatDetailsProfileButton"
+          visible: root.profile === null || (!root.profile.loading && root.profile.error !== "")
+          text: "󰋽  Show their about and business profile"
+          color: root.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          HoverHandler { cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: if (root.service) root.service.loadContactProfile(root.personRef, root.personRef.jid) }
+        }
+        Text {
+          textFormat: Text.PlainText
+          objectName: "chatDetailsProfile"
+          visible: root.profile !== null
+          width: parent.width
+          wrapMode: Text.Wrap
+          text: !root.profile ? "" : root.profile.loading ? "Asking WhatsApp…"
+            : root.profile.error !== "" ? root.profile.error
+            : (root.profile.about !== "" ? "About: " + root.profile.about : "No about text.")
+              + root.businessLines.map(function(line) { return "\n" + line.label + ": " + line.text }).join("")
+          color: root.profile && root.profile.error !== "" ? root.urgent : root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
       Rectangle { width: parent.width; height: 1; color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08) }
 
       Text {

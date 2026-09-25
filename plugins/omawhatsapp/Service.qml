@@ -533,7 +533,7 @@ Item {
     // Saving a copy works offline when the file is already local; the helper
     // refuses the download part while offline.
     var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
-      || kind === "save-media"
+      || ["save-media", "export-chat", "contact-alias", "contact-tag"].indexOf(kind) >= 0
     if (offlineMode && !isLocalAction) {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
@@ -868,6 +868,40 @@ Item {
     return runWriteForChat("forward", {
       id: String(item.id), to_jid: String(targetJid)
     }, chatRef, owner)
+  }
+  property var lastWriteResult: ({})
+  function exportChat(chatRef, destination, owner) {
+    return runWriteForChat("export-chat", { destination: String(destination || "") }, chatRef, owner)
+  }
+  function downloadPending(chatRef, owner) {
+    return runWriteForChat("download-pending", { limit: 50 }, chatRef, owner)
+  }
+  function setContactAlias(chatRef, person, alias, owner) {
+    return runWriteForChat("contact-alias", { person: String(person || ""),
+      alias: String(alias || "") }, chatRef, owner)
+  }
+  function setContactTag(chatRef, person, tag, remove, owner) {
+    return runWriteForChat("contact-tag", { person: String(person || ""),
+      tag: String(tag || ""), remove: remove === true }, chatRef, owner)
+  }
+  // A person's about and business profile, asked of WhatsApp on request.
+  property var contactProfile: ({ jid: "", loading: false, about: "", business: ({}), error: "" })
+  function loadContactProfile(chatRef, person) {
+    var jid = String(person || "")
+    if (jid === "" || contactProfileProcess.running) return false
+    if (offlineMode) {
+      contactProfile = { jid: jid, loading: false, about: "", business: ({}),
+        error: "Offline mode is on. Go online to ask WhatsApp." }
+      return false
+    }
+    contactProfile = { jid: jid, loading: true, about: "", business: ({}), error: "" }
+    contactProfileProcess.person = jid
+    contactProfileProcess.payload = JSON.stringify({
+      account: chatRef ? String(chatRef.account || "") : "", person: jid,
+      authorization: "remote-read" })
+    contactProfileProcess.stdinEnabled = true
+    contactProfileProcess.running = true
+    return true
   }
   function votePoll(chatRef, item, options, owner) {
     if (!item || !item.id || !options || Number(options.length || 0) === 0) return false
@@ -1647,6 +1681,28 @@ Item {
   }
 
   Process {
+    id: contactProfileProcess
+    objectName: "contactProfileProcess"
+    property string person: ""
+    property string payload: ""
+    command: [root.helper, "contact-profile"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: contactProfileOutput }
+    stderr: StdioCollector { id: contactProfileError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var result = root.parseJson(contactProfileOutput.text)
+      if (exitCode === 0 && result && result.ok === true)
+        root.contactProfile = { jid: person, loading: false, about: String(result.about || ""),
+          business: result.business || ({}), error: "" }
+      else
+        root.contactProfile = { jid: person, loading: false, about: "", business: ({}),
+          error: (result && result.error)
+            || String(contactProfileError.text || "WhatsApp did not answer.").trim() }
+    }
+  }
+
+  Process {
     id: groupRequestProcess
     objectName: "groupRequestProcess"
     property string kind: ""
@@ -1918,6 +1974,10 @@ Item {
       if (finishedKind === "send" || finishedKind === "sticker")
         root.updatePendingSend(finishedRequest.local_id, {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
+      if (["contact-alias", "contact-tag", "download-pending"].indexOf(finishedKind) >= 0
+          && root.chatDetailsWanted) Qt.callLater(root.refreshChatDetails)
+      // What the helper answered, for surfaces that report it (exports, downloads).
+      root.lastWriteResult = payload
       root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
       if (root.replyKinds.indexOf(finishedKind) >= 0) root.markReadAfterReply(finishedChat)
       refreshDelay.restart()

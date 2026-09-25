@@ -137,6 +137,10 @@ MAX_STICKER_FETCH = 24
 STICKER_FETCH_SECONDS = 25.0
 # Stickers WhatsApp answered 403/404/410 for: expired on the server, not retried.
 STICKERS_GONE_FILE = "stickers-gone.json"
+# Attachments WhatsApp's server answered 403/404/410 for: expired there, so
+# they are shown as no longer available instead of offered for download.
+MEDIA_GONE_FILE = "media-gone.json"
+MAX_MEDIA_GONE = 5000
 MAX_STICKERS_GONE = 512
 DOCTOR_CACHE_FILE = "doctor-cache.json"
 DOCTOR_CACHE_TTL = 60
@@ -3143,7 +3147,8 @@ class Backend:
                 if has_polls:
                     where += f" AND NOT {poll_vote_sql('base')}"
                 rows = connection.execute(
-                    f"""SELECT base.msg_id, base.sender_jid, base.sender_name,
+                    f"""SELECT base.msg_id, base.chat_jid AS stored_chat_jid,
+                      base.sender_jid, base.sender_name,
                       base.ts, base.from_me, base.text, base.display_text,
                       {revoked_sql("base")} AS is_revoked,
                       base.media_type, base.media_caption, base.filename,
@@ -3231,6 +3236,7 @@ class Backend:
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         values = []
+        gone_media = self._media_gone()
         for row in rows:
             message_id = str(row["msg_id"])
             if bool(row["is_revoked"]):
@@ -3267,7 +3273,8 @@ class Backend:
                 "local_path": local_path if local_exists else "",
                 "filename": str(row["filename"] or hint.get("filename") or ""),
                 "file_size": int(row["file_length"] or 0),
-                "media_unavailable": row["media_unavailable_at"] is not None,
+                "media_unavailable": row["media_unavailable_at"] is not None
+                    or f"{row['stored_chat_jid']}\n{message_id}" in gone_media,
                 "edited": bool(row["edited"]), "forwarded": bool(row["is_forwarded"]),
                 "starred": bool(row["is_starred"]),
                 "quoted_id": quoted_id,
@@ -3542,6 +3549,9 @@ class Backend:
                         "push_name": str(contact["push_name"] or "")[:128] if contact else "",
                         "business_name": str(contact["business_name"] or "")[:128] if contact else "",
                         "alias": str(contact["alias"] or "")[:128] if contact else "",
+                        "tags": sorted(str(item[0])[:64] for item in connection.execute(
+                            "SELECT tag FROM contact_tags WHERE jid = ?", [target]).fetchall())
+                            if self._has_table(connection, "contact_tags") else [],
                     }
                     common = [{"jid": str(item["jid"]), "name": str(item["name"])[:128]}
                               for item in connection.execute(
@@ -3577,6 +3587,29 @@ class Backend:
             "counts": {name: int(row[name] or 0)
                        for name in ("total", "media", "documents", "links", "starred")},
         }
+        # Attachments of this chat not on this computer yet, for "Download missing".
+        try:
+            chat_jids = self._chat_jids(target)
+            with closing(self._connect()) as connection:
+                gone = self._media_gone()
+                hints = self._sent_media_hints()
+
+                def on_disk(message_id: str) -> bool:
+                    # A file sent from here is on disk under its send hint.
+                    hinted = str(hints.get(self._sent_hint_key(target, message_id), {})
+                                 .get("local_path") or "")
+                    return bool(hinted) and Path(hinted).is_file()
+
+                output["counts"]["missing"] = sum(
+                    1 for item in connection.execute(
+                        f"""SELECT chat_jid, msg_id FROM messages
+                        WHERE chat_jid IN ({",".join("?" for _ in chat_jids)})
+                        AND media_type IN ('image', 'gif', 'video', 'audio', 'document', 'sticker')
+                        AND COALESCE(local_path, '') = '' AND media_unavailable_at IS NULL
+                        AND deleted_at IS NULL LIMIT 5000""", chat_jids).fetchall()
+                    if f"{item[0]}\n{item[1]}" not in gone and not on_disk(str(item[1])))
+        except (sqlite3.Error, OmaWhatsAppError):
+            output["counts"]["missing"] = 0
         if person is not None:
             output["person"] = person
             output["groups_in_common"] = common
@@ -3800,6 +3833,21 @@ class Backend:
                 break
         return {"ok": True, "kind": "stickers", "stickers": choices}
 
+    def _media_gone(self) -> set[str]:
+        value = self._read_state_json(MEDIA_GONE_FILE, 512 * 1024, [])
+        return {str(item) for item in value if isinstance(item, str)} if isinstance(value, list) else set()
+
+    def _remember_media_gone(self, key: str) -> None:
+        try:
+            with self._state_lock("media-gone.lock"):
+                current = self._read_state_json(MEDIA_GONE_FILE, 512 * 1024, [])
+                current = [str(item) for item in current if isinstance(item, str)] \
+                    if isinstance(current, list) else []
+                merged = list(dict.fromkeys(current + [key]))
+                self._write_state_json(MEDIA_GONE_FILE, merged[-MAX_MEDIA_GONE:], 512 * 1024)
+        except (OmaWhatsAppError, OSError):
+            pass
+
     def _stickers_gone(self) -> list[str]:
         value = self._read_state_json(STICKERS_GONE_FILE, 128 * 1024, [])
         return [str(item) for item in value if isinstance(item, str)] if isinstance(value, list) else []
@@ -3863,11 +3911,19 @@ class Backend:
         existing = self._local_media_path(chat, target, row)
         if existing:
             return {"ok": True, "kind": "media", "local_path": existing}
-        if row["media_unavailable_at"] is not None:
+        gone_key = f"{row['chat_jid']}\n{target}"
+        if row["media_unavailable_at"] is not None or gone_key in self._media_gone():
             raise OmaWhatsAppError("That older attachment is no longer available from WhatsApp.")
         if not self.online():
             raise OmaWhatsAppError("Offline mode is on. Go online to download attachments.")
-        saved = self._fetch_media_file(chat["jid"], str(row["chat_jid"]), target, row)
+        try:
+            saved = self._fetch_media_file(chat["jid"], str(row["chat_jid"]), target, row)
+        except OmaWhatsAppError as exc:
+            if re.search(r"status code (403|404|410)", str(exc)):
+                self._remember_media_gone(gone_key)
+                raise OmaWhatsAppError(
+                    "That older attachment is no longer available from WhatsApp.") from exc
+            raise
         return {"ok": True, "kind": "media", "local_path": str(saved)}
 
     def save_media(self, jid: str, message_id: str, destination: Any) -> dict[str, Any]:
@@ -4141,6 +4197,7 @@ class Backend:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         chats: dict[str, dict[str, str] | None] = {}
         items: list[dict[str, Any]] = []
+        gone = self._media_gone()
         for row in rows:
             stored = str(row["chat_jid"])
             folded = aliases.get(stored, stored)
@@ -4167,7 +4224,8 @@ class Backend:
                 "caption": str(row["media_caption"] or ""),
                 "file_size": int(row["file_length"] or 0),
                 "local_path": local_path,
-                "available": row["media_unavailable_at"] is None,
+                "available": row["media_unavailable_at"] is None
+                    and f"{row['chat_jid']}\n{target}" not in gone,
             }
             if row["latitude"] is not None:
                 item.update(latitude=row["latitude"], longitude=row["longitude"],
@@ -4361,6 +4419,135 @@ class Backend:
             "--post-send-wait", "0"]
         self._envelope(self._write(command, timeout=90))
         return {"ok": True, "kind": "forward", "target": target["name"]}
+
+    def export_chat(self, jid: str, destination: Any) -> dict[str, Any]:
+        """Write one chat as readable text, like the phone's Export chat."""
+        chat = self._chat(jid)
+        target = Path(str(destination or "")).expanduser()
+        if not target.is_absolute() or target.name in {"", ".", ".."}:
+            raise OmaWhatsAppError("Choose where to save the export.")
+        try:
+            home = HOME.resolve(strict=True)
+            parent = target.parent.resolve(strict=True)
+        except OSError as exc:
+            raise OmaWhatsAppError("That folder does not exist.") from exc
+        if parent != home and home not in parent.parents:
+            raise OmaWhatsAppError("Save the export inside your home folder.")
+        if any((folder / ".git").exists() for folder in (parent, *parent.parents)
+               if folder == home or home in folder.parents):
+            raise OmaWhatsAppError("Save the export outside a code repository; it holds private messages.")
+        destination_path = parent / target.name
+        if destination_path.is_symlink() or destination_path.is_dir():
+            raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
+        rows: list[dict[str, Any]] = []
+        cursor: Any = None
+        while True:
+            page = self.messages(chat["jid"], "", 500, cursor)
+            rows.extend(page["messages"])
+            if not page["has_more"] or not page["messages"] or len(rows) >= 200000:
+                break
+            last = page["messages"][-1]
+            cursor = {"ts": last["timestamp"], "id": last["id"]}
+        lines = [f"WhatsApp chat with {chat['name']}"]
+        for row in reversed(rows):
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row["timestamp"])))
+            who = "You" if row.get("from_me") else (row.get("sender") or chat["name"])
+            if row.get("revoked"):
+                body = "This message was deleted"
+            elif row.get("poll"):
+                poll = row["poll"]
+                body = "POLL: " + str(poll.get("question") or "") + "".join(
+                    f"\nOPTION: {option['text']} ({option['votes']} votes)" for option in poll["options"])
+            elif row.get("media_type") == "location":
+                body = (f"location: https://www.openstreetmap.org/?mlat={row.get('latitude')}"
+                        f"&mlon={row.get('longitude')} {row.get('location_name') or ''}").strip()
+            elif row.get("media_type"):
+                label = row.get("filename") or row.get("media_type")
+                body = f"<attached: {label}>" + (f" {row['text']}" if row.get("text") else "")
+            else:
+                body = str(row.get("text") or "")
+            lines.append(f"{when} - {who}: {body}")
+        temporary = destination_path.with_name(f".{destination_path.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            os.replace(temporary, destination_path)
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            raise OmaWhatsAppError("The export could not be written there.") from exc
+        return {"ok": True, "kind": "export-chat", "path": str(destination_path),
+                "messages": len(rows)}
+
+    def download_pending(self, jid: str, limit: Any = 50) -> dict[str, Any]:
+        """Download this chat's attachments that are not on this computer, beside sync."""
+        chat = self._chat(jid)
+        pending = self.attachments(jid=chat["jid"], missing_only=True,
+                                   limit=bounded_int(limit, 50, 1, 200))["attachments"]
+        downloaded = expired = failed = 0
+        for item in pending:
+            if item["media_type"] == "location":
+                continue
+            if not item["available"]:
+                expired += 1
+                continue
+            try:
+                self.download_media(chat["jid"], item["id"])
+                downloaded += 1
+            except OmaWhatsAppError as exc:
+                if "403" in str(exc) or "no longer available" in str(exc):
+                    expired += 1
+                else:
+                    failed += 1
+        return {"ok": True, "kind": "download-pending", "downloaded": downloaded,
+                "expired": expired, "failed": failed}
+
+    def _known_contact(self, jid: str) -> str:
+        target = str(jid or "").strip()
+        if not NEW_CHAT_JID.fullmatch(target) or self._known_person(target) is None:
+            raise OmaWhatsAppError("Choose a person from your WhatsApp contacts.")
+        return target
+
+    def contact_alias(self, jid: str, alias: Any) -> dict[str, Any]:
+        """Your own name for a person, on this computer; empty clears it."""
+        target = self._known_contact(jid)
+        name = " ".join(str(alias or "").split())[:128]
+        command = (["--json", "contacts", "alias", "set", "--jid", target, "--alias", name] if name
+                   else ["--json", "contacts", "alias", "rm", "--jid", target])
+        self._envelope(self._mutate(command, timeout=60, require_online=False))
+        return {"ok": True, "kind": "contact-alias", "alias": name}
+
+    def contact_tag(self, jid: str, tag: Any, remove: bool = False) -> dict[str, Any]:
+        """Add a tag to a person, or remove it, on this computer."""
+        target = self._known_contact(jid)
+        label = " ".join(str(tag or "").split())
+        if not 1 <= len(label) <= 64:
+            raise OmaWhatsAppError("A tag needs 1 to 64 characters.")
+        self._envelope(self._mutate(
+            ["--json", "contacts", "tags", "rm" if remove else "add", "--jid", target, "--tag", label],
+            timeout=60, require_online=False))
+        return {"ok": True, "kind": "contact-tag", "tag": label, "removed": bool(remove)}
+
+    def contact_profile(self, jid: str, authorization: str = "") -> dict[str, Any]:
+        """A person's about text and business profile, asked of WhatsApp."""
+        if authorization != "remote-read":
+            raise OmaWhatsAppError("This asks WhatsApp; pass authorization='remote-read'.")
+        target = self._known_contact(jid)
+        about_data = self._envelope(self._mutate(
+            ["--json", "profile", "get-about", "--jid", target], timeout=45,
+            require_online=True)).get("data")
+        about = str(about_data.get("about") or "").strip() if isinstance(about_data, dict) else ""
+        business: dict[str, Any] = {}
+        try:
+            data = self._envelope(self._mutate(
+                ["--json", "profile", "business", "--jid", target], timeout=45,
+                require_online=True)).get("data")
+            if isinstance(data, dict):
+                business = {key: value for key, value in data.items()
+                            if key != "jid" and value not in (None, "", [], {})}
+        except OmaWhatsAppError:
+            business = {}
+        return {"ok": True, "kind": "contact-profile", "about": about[:1024], "business": business}
 
     GROUP_INVITE = re.compile(r"^(?:https?://)?(?:chat\.whatsapp\.com/(?:invite/)?)?([A-Za-z0-9]{16,32})/?$")
 
@@ -5778,6 +5965,11 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("poll-vote")
     commands.add_parser("statuses")
     commands.add_parser("create-group")
+    commands.add_parser("export-chat")
+    commands.add_parser("download-pending")
+    commands.add_parser("contact-alias")
+    commands.add_parser("contact-tag")
+    commands.add_parser("contact-profile")
     commands.add_parser("join-group")
     commands.add_parser("delete-status")
     commands.add_parser("chat-action")
@@ -5950,6 +6142,18 @@ def main() -> int:
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),
                                                 str(payload.get("to_jid") or "")))
+        if args.command == "export-chat":
+            return emit(backend.export_chat(str(payload.get("jid") or ""), payload.get("destination")))
+        if args.command == "download-pending":
+            return emit(backend.download_pending(str(payload.get("jid") or ""), payload.get("limit", 50)))
+        if args.command == "contact-alias":
+            return emit(backend.contact_alias(str(payload.get("person") or ""), payload.get("alias")))
+        if args.command == "contact-tag":
+            return emit(backend.contact_tag(str(payload.get("person") or ""), payload.get("tag"),
+                                            payload.get("remove") is True))
+        if args.command == "contact-profile":
+            return emit(backend.contact_profile(str(payload.get("person") or ""),
+                                                str(payload.get("authorization") or "")))
         if args.command == "create-group":
             return emit(backend.create_group(payload.get("name"), payload.get("participants")))
         if args.command == "join-group":
