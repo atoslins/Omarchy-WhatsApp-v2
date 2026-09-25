@@ -4536,8 +4536,38 @@ class Backend:
         command = ["--json", "messages", "forward", "--chat", str(message["chat_jid"]),
             "--id", str(message["msg_id"]), "--to", target["jid"],
             "--post-send-wait", "0"]
-        self._envelope(self._write(command, timeout=90))
-        return {"ok": True, "kind": "forward", "target": target["name"]}
+        envelope = self._envelope(self._write(command, timeout=90))
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        forwarded_id = str(data.get("id") or "").strip()[:256]
+        if forwarded_id and message["media_type"]:
+            self._share_forwarded_media(source["jid"], message, target["jid"], forwarded_id)
+        return {"ok": True, "kind": "forward", "target": target["name"],
+                "target_jid": target["jid"], "message_id": forwarded_id}
+
+    def _share_forwarded_media(self, source_jid: str, message: sqlite3.Row,
+                               target_jid: str, forwarded_id: str) -> None:
+        """A forwarded copy shows the file already on this computer.
+
+        A download of the original is wacli's own local path; a file sent
+        from here only lives in the sent-media hints. Either way the copy is
+        pointed at it, so the target chat never offers to download it again.
+        """
+        hint = self._sent_media_hints().get(
+            self._sent_hint_key(source_jid, str(message["msg_id"])), {})
+        path = Path(str(hint.get("local_path") or ""))
+        if not path.is_file():
+            try:
+                row = self._media_row({"jid": source_jid}, str(message["msg_id"]))
+            except OmaWhatsAppError:
+                return
+            path = Path(str(row["local_path"] or ""))
+            if not path.is_absolute() or not path.is_file():
+                return
+            mime = str(row["mime_type"] or "")
+        else:
+            mime = str(hint.get("mime_type") or "")
+        self._remember_sent_media_best_effort(
+            target_jid, forwarded_id, path, mime, str(message["media_type"]))
 
     def export_chat(self, jid: str, destination: Any) -> dict[str, Any]:
         """Write one chat as readable text, like the phone's Export chat."""

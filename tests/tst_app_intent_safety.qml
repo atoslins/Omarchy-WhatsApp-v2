@@ -391,4 +391,16 @@ TestCase {
     compare(header.avatarReady, false)
     compare(findChild(header, "chatAvatarFallback").text, "SH")
   }
+
+  function test_a_forward_started_in_the_dropdown_opens_its_picker_here() {
+    var harness = createHarness()
+    var app = harness.app
+    app.open(JSON.stringify({ account: "work", jid: "shared@example", conversation: true,
+      forward: { id: "synthetic-message", text: "hello", media_type: "" } }))
+    tryVerify(function() { return app.forwardTarget !== null }, 1000, "the picker opens for that message")
+    compare(app.forwardTarget.id, "synthetic-message")
+    verify(AccountModel.sameRef(app.forwardOriginRef, AccountModel.chatRef("work", "shared@example")))
+    verify(app.forwardTo(workTarget))
+    compare(harness.service.lastForward.targetJid, "target@example")
+  }
 }

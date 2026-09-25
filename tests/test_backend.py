@@ -1843,6 +1843,32 @@ class BackendTests(unittest.TestCase):
         self.assertIn("--for-me", delete)
         self.assertEqual(forward[forward.index("--to") + 1], "alex@s.whatsapp.net")
 
+    def test_a_forwarded_photo_shows_the_file_already_here(self) -> None:
+        # The owner's report: a forwarded photo offered a download in the
+        # target chat although the file was on this computer.
+        photo = self.root / "synthetic-photo.jpg"
+        photo.write_bytes(b"\xff\xd8synthetic")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                  from_me, text, display_text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES ('team@g.us', 'Design team', 'photo1', 'member@s.whatsapp.net', 'Sam', 90,
+                  0, '', '', '', 'image', 'image/jpeg', ?)""", [str(photo)])
+        answer = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"forwarded": True, "id": "FWD-1", "to": "alex@s.whatsapp.net"}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=answer):
+            result = self.backend.forward_message("team@g.us", "photo1", "alex@s.whatsapp.net")
+        self.assertEqual(result["message_id"], "FWD-1")
+        self.assertEqual(result["target_jid"], "alex@s.whatsapp.net")
+        hint = self.backend._sent_media_hints()[self.backend._sent_hint_key("alex@s.whatsapp.net", "FWD-1")]
+        self.assertEqual(hint["local_path"], str(photo), "the copy points at the file already here")
+        text_only = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"forwarded": True, "id": "FWD-2"}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=text_only):
+            self.backend.forward_message("team@g.us", "t1", "alex@s.whatsapp.net")
+        self.assertNotIn(self.backend._sent_hint_key("alex@s.whatsapp.net", "FWD-2"),
+                         self.backend._sent_media_hints(), "text has no file to share")
+
     def test_chat_actions_are_allowlisted(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:

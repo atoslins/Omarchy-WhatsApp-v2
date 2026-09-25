@@ -390,6 +390,20 @@ Panel {
     compactDayHold.restart()
   }
 
+  // Choosing where to forward needs the full app's picker; it opens there
+  // for this message, so the forward is never started twice.
+  function forwardInFullApp(item) {
+    if (sending || !item || !item.id) return false
+    var payload = DropdownModel.fullAppPayload(currentChat)
+    payload.forward = { id: String(item.id), text: String(item.text || ""),
+      media_type: String(item.media_type || ""), filename: String(item.filename || "") }
+    if (!demoMode && service) service.discardStages(pendingAttachments)
+    pendingAttachments = []
+    close()
+    fullAppRequested(payload)
+    return true
+  }
+
   function openFullApp() {
     if (sending) return
     var payload = DropdownModel.fullAppPayload(currentChat)
@@ -1460,7 +1474,7 @@ Panel {
                 onPendingSendRequested: function(action) {
                   if (root.service) root.service.resolvePendingSend(modelData.id, action)
                 }
-                onForwardRequested: root.openFullApp()
+                onForwardRequested: root.forwardInFullApp(modelData)
                 onCopyRequested: function(text) { root.copyText(text) }
                 onPollVoteRequested: function(options) {
                   if (!root.demoMode && root.service)

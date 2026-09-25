@@ -2,6 +2,12 @@
 
 ## Unreleased (fork)
 
+- Forwarding is quick and says where it went. With a wacli build that
+  delegates `messages forward`, the sync is no longer paused for it (it took
+  seconds and could lose what arrived meanwhile); a toast names the chat it
+  went to; a forwarded photo or file shows the copy already on this computer
+  instead of offering a download; and forwarding from the dropdown opens the
+  full app's picker for that message instead of starting over.
 - The emoji picker stays open for as many emoji as wanted, closing with Esc,
   a click outside, the emoji button, or its new close button. Emoji are
   grouped by theme under headers, with a row of theme tabs that jump to each

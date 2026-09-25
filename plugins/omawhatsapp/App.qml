@@ -335,6 +335,14 @@ Item {
     var selectedFromPayload = false
     if (pendingOpenChatJid !== "") selectedFromPayload = selectPendingOpenChat()
     chatDetailsOpen = demoMode && payload.details === true
+    // {"forward":{…}} from the dropdown carries on the forward it started
+    // there: the picker opens for that message instead of asking again.
+    if (!demoMode && payload.forward && typeof payload.forward === "object"
+        && String(payload.forward.id || "") !== "" && String(payload.jid || "") !== "") {
+      var forwardItem = Object.assign({}, payload.forward)
+      var forwardRef = AccountModel.chatRef(String(payload.account || ""), String(payload.jid))
+      Qt.callLater(function() { root.startForwardFrom(forwardRef, forwardItem) })
+    }
     // {"newChat":true} opens the new chat dialog; demo captures may prefill it.
     if (payload.newChat === true) {
       // A real open may prefill digits (a shared contact's number); demo
@@ -1444,8 +1452,12 @@ Item {
   }
 
   function startForward(item) {
+    startForwardFrom(currentChatRef(), item)
+  }
+
+  function startForwardFrom(originRef, item) {
     forwardTarget = item
-    forwardOriginRef = currentChatRef()
+    forwardOriginRef = originRef
     forwardSearch.text = ""
     forwardPicker.open()
     Qt.callLater(function() { forwardSearch.forceActiveFocus() })
@@ -1639,6 +1651,8 @@ Item {
         root.showToast(Number(answer.downloaded || 0) + " downloaded"
           + (Number(answer.expired || 0) > 0 ? ", " + answer.expired + " expired on WhatsApp" : ""))
       if (kind === "contact-alias") root.showToast(String(request.alias || "") !== "" ? "alias saved" : "alias removed")
+      // Forwarding happens in another chat: say where it went.
+      if (kind === "forward") root.showToast("forwarded to " + String(answer.target || "the chat"))
       if (kind === "contact-tag") root.showToast(request.remove ? "tag removed" : "tag added")
       var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey

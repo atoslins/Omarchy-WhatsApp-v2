@@ -186,6 +186,25 @@ TestCase {
     dropdown.close()
   }
 
+  function test_forwarding_from_the_dropdown_carries_on_in_the_full_app() {
+    // The owner's report: forwarding here switched to the full app, where
+    // the forward had to be started again.
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+    var spy = createTemporaryObject(spyComponent, testCase,
+      { target: dropdown, signalName: "fullAppRequested" })
+    verify(dropdown.forwardInFullApp({ id: "m1", text: "hello", media_type: "image" }))
+    compare(spy.count, 1)
+    var payload = spy.signalArguments[0][0]
+    compare(payload.jid, "x@s.whatsapp.net")
+    compare(payload.forward.id, "m1")
+    compare(payload.forward.media_type, "image")
+  }
+
   function test_the_dropdown_formats_and_hands_a_contact_to_the_full_app() {
     var service = createTemporaryObject(serviceStub, testCase)
     service.writing = false
