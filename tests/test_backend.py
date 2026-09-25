@@ -83,6 +83,13 @@ class BackendTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = self.root / "wacli"
         self.store.mkdir()
         self.wacli = self.root / "wacli-bin"
@@ -1980,7 +1987,47 @@ class BackendTests(unittest.TestCase):
             result = self.backend.set_online(True)
         self.assertTrue(result["online"])
         self.assertTrue(self.backend.online())
-        self.assertIn("enable", run.call_args.args[0])
+        verbs = [call.args[0][2] for call in run.call_args_list]
+        self.assertIn("enable", verbs, "back online it starts with the system again")
+        self.assertEqual(verbs[-1], "start")
+
+    def test_quit_stops_sync_until_launch_and_says_it_is_closed(self) -> None:
+        # L233: quitting stops every account's sync for this session.
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.assertTrue(self.backend.quit_app()["closed"])
+        verbs = [call.args[0][2] for call in run.call_args_list]
+        self.assertEqual(verbs, ["stop"], "stopped, not disabled: it still starts at the next login")
+        with mock.patch.object(self.backend, "_sync_active", return_value=False):
+            self.assertTrue(self.backend.status()["closed"])
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.assertEqual(self.backend.launch_app()["started"], 1)
+        self.assertEqual([call.args[0][2] for call in run.call_args_list], ["start"])
+        with mock.patch.object(self.backend, "_sync_active", return_value=True):
+            self.assertFalse(self.backend.status()["closed"])
+
+    def test_starting_with_the_system_is_a_setting(self) -> None:
+        # L234: on by default; off disables the unit without stopping it.
+        self.assertTrue(self.backend.settings()["start_at_login"])
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.assertFalse(self.backend.settings({"start_at_login": False})["start_at_login"])
+        self.assertEqual([call.args[0][2] for call in run.call_args_list], ["disable"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "on or off"):
+            self.backend.settings({"start_at_login": "no"})
+        # Not started at login: closed until opened, even with nothing quit.
+        with mock.patch.object(self.backend, "_sync_active", return_value=False):
+            self.assertTrue(self.backend.status()["closed"])
+        with mock.patch.object(self.backend, "_sync_active", return_value=True):
+            self.assertFalse(self.backend.status()["closed"], "running this session")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.backend.set_online(True)
+        verbs = [call.args[0][2] for call in run.call_args_list]
+        self.assertNotIn("enable", verbs, "online again does not re-enable autostart")
+        self.assertEqual(verbs[-1], "start")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.backend.settings({"start_at_login": True})
+        self.assertEqual([call.args[0][2] for call in run.call_args_list], ["enable"])
 
     def test_open_chat_reads_by_default_and_settings_are_bounded(self) -> None:
         defaults = self.backend.settings()
@@ -3076,6 +3123,13 @@ sys.exit(0)
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.work = self.root / "stores" / "work"
         self.home = self.root / "stores" / "home"
         for store, chats in ((self.work, self.WORK_CHATS), (self.home, self.HOME_CHATS)):

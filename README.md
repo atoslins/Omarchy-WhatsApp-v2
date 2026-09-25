@@ -88,6 +88,8 @@ native, and visually at home in Omarchy.
 - Drag across message text to copy it automatically, or use Copy from the
   message menu; a small confirmation toast appears. Reply, edit, forward,
   delete for you, and delete for everyone share the same action surface.
+- Quit with Ctrl+Q (nothing arrives until it opens again from the bar), and
+  choose whether it starts with the system in Settings → Sync & storage.
 - Sign messages per account (off by default): the name in bold at the top or
   the end of texts and captions, with Skip once in the message box.
 - Forward picks the message in the conversation, where more can be picked,

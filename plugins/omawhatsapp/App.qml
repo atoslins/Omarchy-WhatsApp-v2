@@ -374,6 +374,8 @@ Item {
     var previousDemo = demoMode
     closingFromHost = false
     demoMode = payload.demo === true
+    // Opening a closed OmaWhatsApp starts it again.
+    if (!demoMode && service && service.closed === true) service.launchApp()
     demoRailDensity = demoMode && payload.density === "compact" ? "compact" : ""
     clockNow = new Date()
     opened = true
@@ -680,6 +682,15 @@ Item {
     pendingOpenChatAccount = ""
     pendingOpenChatJid = ""
     selectChat(target, "composer")
+    return true
+  }
+
+  // Quit: the window closes and every account's sync stops until
+  // OmaWhatsApp opens again; it still starts with the system if set to.
+  function quitApp() {
+    if (demoMode) { close(); return true }
+    if (!service || !service.quitApp()) return false
+    close()
     return true
   }
 
@@ -2225,6 +2236,12 @@ Item {
       }
 
       Shortcut {
+        sequence: "Ctrl+Q"
+        context: Qt.WindowShortcut
+        onActivated: root.quitApp()
+      }
+
+      Shortcut {
         sequence: "Escape"
         context: Qt.WindowShortcut
         enabled: root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
@@ -3209,7 +3226,9 @@ Item {
           Item {
             id: railSyncStatus
             objectName: "railSyncStatus"
+            readonly property bool closedApp: !root.demoMode && !!root.service && root.service.closed === true
             readonly property string label: root.demoMode ? ""
+              : closedApp ? "Closed · click to receive messages again"
               : (!root.selectedStatusReady ? "Loading…"
                 : (root.offlineForSelectedAccount ? "Offline · local archive"
                   : (root.service && root.service.syncActive ? ""
@@ -3243,13 +3262,19 @@ Item {
               id: railSyncStatusMouse
               anchors.fill: parent
               hoverEnabled: true
-              cursorShape: root.offlineForSelectedAccount ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: if (root.offlineForSelectedAccount && root.service
-                && !root.service.controlWriting) root.service.setOnline(true)
+              cursorShape: root.offlineForSelectedAccount || railSyncStatus.closedApp
+                ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: {
+                if (!root.service || root.service.controlWriting) return
+                if (railSyncStatus.closedApp) root.service.launchApp()
+                else if (root.offlineForSelectedAccount) root.service.setOnline(true)
+              }
             }
             PanelToolTip {
               visible: railSyncStatusMouse.containsMouse
-              text: root.offlineForSelectedAccount
+              text: railSyncStatus.closedApp
+                ? "OmaWhatsApp is closed: nothing arrives until it opens again. Click to open it."
+                : root.offlineForSelectedAccount
                 ? "Background sync is paused. Click to resume it."
                 : (railSyncStatus.label === "Loading…"
                   ? "Reading the account state."

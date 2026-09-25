@@ -179,7 +179,15 @@ Rectangle {
           subtitle: offline ? "Paused. The local archive stays readable; nothing is sent or received."
             : "Keeps the local mirror current while the app is closed.",
           checked: demoMode || !offline, available: live && value("statusReady", false),
-          busy: controlBusy }
+          busy: controlBusy },
+        { kind: "toggle", key: "start_at_login", title: "Start with the system",
+          subtitle: value("startAtLogin", true)
+            ? "Messages and popups arrive as soon as you log in."
+            : "At login OmaWhatsApp stays closed until you open it from the bar or with Super+Shift+W.",
+          checked: value("startAtLogin", true), busy: busy },
+        { kind: "action", key: "quit", title: "Quit OmaWhatsApp",
+          subtitle: "Stops receiving messages, popups and showing you online until you open it again. Ctrl+Q in the app.",
+          button: "Quit", available: live }
       ]
       var stores = Array.isArray(about.stores) ? about.stores : []
       for (var i = 0; i < stores.length; i++) {
@@ -269,6 +277,8 @@ Rectangle {
     case "auto_download_media": return service.setAutoDownloadMedia(next)
     case "online": return service.setOnline(next)
     case "refresh_avatars": return service.accountOperations.refreshAvatars()
+    case "quit": return settings.app && typeof settings.app.quitApp === "function"
+      ? settings.app.quitApp() : service.quitApp()
     case "link": return service.accountOperations.linkAccount(next)
     default: return service.setPreference(row.key, next)
     }

@@ -2,6 +2,11 @@
 
 ## Unreleased (fork)
 
+- Quit OmaWhatsApp (Ctrl+Q in the app, or Settings → Sync & storage): every
+  account's sync stops, so no message, popup or "online" until it opens
+  again from the bar icon, which shows grey meanwhile. Start with the system
+  is now its own setting: off, OmaWhatsApp stays closed at login until
+  opened; the installer and offline mode respect it.
 - A chat whose unread messages @mention you shows an @ beside its count, in
   the chat list and the bar dropdown. It needs the wacli fork, which records
   mentions from the moment it is installed.

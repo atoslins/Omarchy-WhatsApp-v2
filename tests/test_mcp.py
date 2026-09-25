@@ -827,6 +827,13 @@ class EndToEndTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = self.root / "wacli"
         self.store.mkdir()
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:

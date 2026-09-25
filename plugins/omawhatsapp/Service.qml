@@ -60,7 +60,7 @@ Item {
   // Seconds, ticking while presence is shown, so typing fades on time.
   property int presenceNow: Math.floor(Date.now() / 1000)
   property string presenceAccount: ""
-  readonly property bool presenceActive: showOnline && presenceSupported && ready
+  readonly property bool presenceActive: showOnline && presenceSupported && ready && !closed
     && !offlineMode && presenceFocusOwners.length > 0
   function storeForAccount(account) {
     var name = String(account || "")
@@ -458,7 +458,8 @@ Item {
   readonly property int notificationMessageCount: chats.reduce(function(total, chat) {
     return total + Number(chat.notification_unread || 0)
   }, 0)
-  readonly property string barTooltip: !railReady ? "OmaWhatsApp · reconnecting"
+  readonly property string barTooltip: closed ? "OmaWhatsApp is closed · click to open"
+    : !railReady ? "OmaWhatsApp · reconnecting"
     : offlineMode ? "OmaWhatsApp · offline archive"
     : notificationUnreadCount === 0 ? "OmaWhatsApp · no unread chats"
     : "OmaWhatsApp · " + notificationUnreadCount
@@ -1504,6 +1505,29 @@ Item {
     return true
   }
 
+  // Quit: every account's sync stops until OmaWhatsApp opens again (this
+  // login session); nothing arrives, no popup, not shown online.
+  property bool closed: false
+  property bool startAtLogin: true
+  function quitApp() {
+    if (controlProcess.running || writing) return false
+    return runControl("quit", ({}))
+  }
+  // Opening a closed OmaWhatsApp starts its sync again.
+  function launchApp() {
+    if (controlProcess.running) return false
+    return runControl("launch", ({}))
+  }
+  function runControl(kind, payload) {
+    controlWriting = true
+    controlProcess.kind = kind
+    controlProcess.account = root.selectedChatAccount
+    controlProcess.payload = JSON.stringify(payload || ({}))
+    controlProcess.command = [helper, kind]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
   function setOnline(online) {
     if (controlProcess.running || writing) return false
     controlWriting = true
@@ -1800,6 +1824,8 @@ Item {
         root.authenticated = readiness.authenticated
         root.railReady = readiness.railReady
         root.syncActive = payload.sync_active === true
+        root.closed = payload.closed === true
+        root.startAtLogin = payload.start_at_login !== false
         root.offlineMode = payload.offline_mode === true
         var notifications = payload.notifications
         // A status read that started before a mute toggle must not undo it.
@@ -1932,6 +1958,10 @@ Item {
       if (finishedKind === "sync-mode" && accountIsCurrent) {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
+      }
+      if (finishedKind === "quit" || finishedKind === "launch") {
+        root.closed = payload.closed === true
+        root.syncActive = finishedKind === "launch" && !root.offlineMode
       }
       if (finishedKind === "media-mode")
         root.autoDownloadMedia = payload.auto_download_media !== false
@@ -2205,6 +2235,7 @@ Item {
       }
       root.showUnreadCount = payload.show_unread_count !== false
       root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
+      root.startAtLogin = payload.start_at_login !== false
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
         ? Number(payload.dropdown_rows) : 7
       root.composerMaxLines = [4, 6, 8, 10].indexOf(Number(payload.composer_max_lines)) >= 0

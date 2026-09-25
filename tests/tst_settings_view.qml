@@ -54,6 +54,8 @@ TestCase {
         record("setNotifications", [enabled, preview, sound === undefined ? null : sound]); return true }
       function setAutoDownloadMedia(enabled) { record("setAutoDownloadMedia", [enabled]); return true }
       function setOnline(online) { record("setOnline", [online]); return true }
+      property bool startAtLogin: true
+      function quitApp() { record("quitApp", []); return true }
       property int aboutRequests: 0
       function refreshAbout() { aboutRequests += 1; return true }
     }
@@ -65,6 +67,8 @@ TestCase {
       property string demoTimeFormat: "auto"
       property string timeFormat: "auto"
       property int composerMaxLines: 6
+      property int quits: 0
+      function quitApp() { quits += 1; return true }
     }
   }
 
@@ -106,7 +110,8 @@ TestCase {
       ["chats", "show_avatars", "setPreference", ["show_avatars", false]],
       ["media", "auto_download_media", "setAutoDownloadMedia", [false]],
       ["media", "auto_refresh_avatars", "setPreference", ["auto_refresh_avatars", false]],
-      ["sync", "online", "setOnline", [false]]
+      ["sync", "online", "setOnline", [false]],
+      ["sync", "start_at_login", "setPreference", ["start_at_login", false]]
     ]
     for (var i = 0; i < cases.length; i++) {
       h.view.openSection(cases[i][0])
@@ -197,5 +202,13 @@ TestCase {
     h.view.openSection("media")
     verify(!sections.visible)
     verify(page.visible)
+  }
+
+  function test_quit_lives_with_sync_and_goes_through_the_app() {
+    var h = create()
+    h.view.openSection("sync")
+    wait(0)
+    verify(h.view.runRow({ key: "quit" }, true))
+    compare(h.app.quits, 1, "the app closes its window and quits")
   }
 }

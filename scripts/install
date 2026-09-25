@@ -391,11 +391,18 @@ for index in "${!account_units[@]}"; do
       '.accounts[] | select(.account == $account) | .online == false' \
       <<<"$status_json" >/dev/null; then
     systemctl --user disable --now "$unit"
-  else
+  elif jq -e '.start_at_login != false' <<<"$status_json" >/dev/null; then
     systemctl --user enable "$unit"
     # `enable --now` does not restart an already-running unit after an upgrade,
     # so explicitly restart to activate the new sandbox and ExecStart.
     systemctl --user restart "$unit"
+  else
+    # It does not start with the system, by the user's choice: leave it off at
+    # login, and restart it only if it was running.
+    systemctl --user disable "$unit"
+    if [[ -n ${was_active[$unit]+x} ]]; then
+      systemctl --user restart "$unit"
+    fi
   fi
 done
 

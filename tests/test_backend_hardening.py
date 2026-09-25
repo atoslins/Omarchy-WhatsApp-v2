@@ -21,6 +21,13 @@ class BackendHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = self.root / "store"
         self.store.mkdir()
         self.wacli = self.root / "wacli"
@@ -804,6 +811,13 @@ class AccountLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.wacli = self.root / "wacli"
         self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         self.wacli.chmod(0o700)

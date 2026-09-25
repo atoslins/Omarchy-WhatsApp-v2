@@ -109,14 +109,19 @@ BarWidget {
         ? " " + (root.unreadCount > 99 ? "99+" : root.unreadCount) : "")
         + (root.muted ? " 󰂛" : "")
     active: root.available && root.unreadCount > 0
-    dimmed: root.muted
+    // Closed: grey until it opens again.
+    dimmed: root.muted || (!!root.oma && root.oma.closed === true)
     horizontalMargin: 8
     tooltipText: root.oma ? root.oma.barTooltipWithMute : "OmaWhatsApp · reconnecting"
 
     onPressed: function(code) {
       if (code === Qt.MiddleButton) root.dismissNotifications()
       else if (code === Qt.RightButton) root.toggleMute()
-      else root.toggleDropdown()
+      else {
+        // A closed OmaWhatsApp opens again from its icon.
+        if (root.oma && root.oma.closed === true) root.oma.launchApp()
+        root.toggleDropdown()
+      }
     }
   }
 

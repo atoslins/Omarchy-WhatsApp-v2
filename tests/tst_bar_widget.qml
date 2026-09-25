@@ -25,6 +25,9 @@ TestCase {
       property int toggles: 0
       property int dismissals: 0
       property int refreshes: 0
+      property bool closed: false
+      property int launches: 0
+      function launchApp() { launches++; closed = false; return true }
       signal openDropdownRequested(var payload)
       signal toggleDropdownRequested()
       function toggleNotificationsMuted() { toggles++; notificationsMuted = !notificationsMuted; return true }
@@ -88,5 +91,18 @@ TestCase {
     compare(h.button.text, "󰖣")
     h.service.notificationsMuted = true
     compare(h.button.text, "󰂛")
+  }
+
+  function test_a_closed_whatsapp_is_grey_and_opens_from_its_icon() {
+    // L233: after Quit the icon is dimmed, and a click starts it again.
+    var h = createWidget(false)
+    verify(!h.button.dimmed)
+    h.service.closed = true
+    verify(h.button.dimmed, "closed shows grey")
+    h.button.pressed(Qt.LeftButton)
+    compare(h.service.launches, 1)
+    verify(!h.service.closed)
+    h.button.pressed(Qt.LeftButton)
+    compare(h.service.launches, 1, "an open one just toggles its dropdown")
   }
 }

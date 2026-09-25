@@ -100,6 +100,11 @@ TestCase {
         return true
       }
       function numberCheckFor(digits) { return numberChecks[String(digits || "")] || null }
+      property bool closed: false
+      property int quits: 0
+      property int launches: 0
+      function quitApp() { quits += 1; closed = true; return true }
+      function launchApp() { launches += 1; closed = false; return true }
       function startNewChat(jid, text, owner) {
         startedChats = startedChats.concat([{ jid: jid, text: text, owner: owner }])
         return true
@@ -1012,5 +1017,18 @@ TestCase {
     verify(h.app.contactDraft !== null)
     compare(findChild(h.app, "contactDraftError").text, "WhatsApp refused it.")
     verify(findChild(h.app, "contactDraftField").enabled)
+  }
+
+  function test_quit_closes_the_window_and_opening_starts_it_again() {
+    var h = createHarness()
+    verify(h.app.quitApp())
+    compare(h.service.quits, 1)
+    verify(!h.app.opened, "the window closes")
+    var status = findChild(h.app, "railSyncStatus")
+    verify(status.label.indexOf("Closed") === 0, "the list says it is closed")
+    h.app.open(JSON.stringify({}))
+    compare(h.service.launches, 1, "opening a closed OmaWhatsApp starts it")
+    h.app.open(JSON.stringify({}))
+    compare(h.service.launches, 1, "an open one is not started twice")
   }
 }

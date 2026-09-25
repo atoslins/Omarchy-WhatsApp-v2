@@ -1374,6 +1374,7 @@ class Backend:
             "version": PREFERENCES_VERSION,
             "show_unread_count": value.get("show_unread_count") is not False,
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
+            "start_at_login": value.get("start_at_login") is not False,
             "dropdown_rows": dropdown_rows,
             "composer_max_lines": composer_max_lines,
             "time_format": time_format,
@@ -1441,6 +1442,7 @@ class Backend:
                 "show_unread_count",
                 "dropdown_rows",
                 "check_updates_on_launch",
+                "start_at_login",
                 "composer_max_lines",
                 "time_format",
                 *UI_PREFERENCES,
@@ -1469,6 +1471,8 @@ class Backend:
                 raise OmaWhatsAppError("The unread badge must be on or off.")
             if "check_updates_on_launch" in update and not isinstance(update["check_updates_on_launch"], bool):
                 raise OmaWhatsAppError("Update checks must be on or off.")
+            if "start_at_login" in update and not isinstance(update["start_at_login"], bool):
+                raise OmaWhatsAppError("Starting with the system must be on or off.")
             if "dropdown_rows" in update and update["dropdown_rows"] not in {5, 7, 9}:
                 raise OmaWhatsAppError("Dropdown size must be 5, 7, or 9 chats.")
             if "composer_max_lines" in update and update["composer_max_lines"] not in {4, 6, 8, 10}:
@@ -1499,6 +1503,8 @@ class Backend:
                         value[name] = setting
 
             value = self._update_preferences(apply)
+            if "start_at_login" in update:
+                self._apply_start_at_login(bool(update["start_at_login"]))
         state = self._account_state(value)
         return {
             "ok": True,
@@ -1508,6 +1514,7 @@ class Backend:
             "signature": self._signature(state.get("signature")),
             "show_unread_count": value.get("show_unread_count") is not False,
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
+            "start_at_login": value.get("start_at_login") is not False,
             "dropdown_rows": value.get("dropdown_rows", 7),
             "composer_max_lines": value.get("composer_max_lines", 6),
             "time_format": value.get("time_format", "auto"),
@@ -2288,6 +2295,9 @@ class Backend:
             "signature": current["signature"],
             "show_unread_count": preferences.get("show_unread_count") is not False,
             "check_updates_on_launch": preferences.get("check_updates_on_launch") is True,
+            "start_at_login": preferences.get("start_at_login") is not False,
+            # Quit, or not started because it does not start with the system.
+            "closed": self._closed(preferences, reports),
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "composer_max_lines": preferences.get("composer_max_lines", 6),
             "time_format": preferences.get("time_format", "auto"),
@@ -3154,7 +3164,10 @@ class Backend:
 
     def set_online(self, online: bool) -> dict[str, Any]:
         account = self.active
-        command = "enable" if online else "disable"
+        # Online starts sync now; it also starts at login only when OmaWhatsApp
+        # starts with the system. Offline stops it and keeps it stopped.
+        command = "disable" if not online else (
+            "enable" if self._preferences().get("start_at_login") is not False else "disable")
 
         with self._state_lock(self._lifecycle_lock_name(account)):
             was_enabled = self._systemctl_user(
@@ -3164,7 +3177,12 @@ class Backend:
                 ["is-active", "--quiet", account.unit], require_success=False
             ).returncode == 0
             previous_online = self.online(account)
-            self._systemctl_user([command, "--now", account.unit])
+            if online:
+                self._systemctl_user([command, account.unit])
+                self._systemctl_user(["start", account.unit])
+                self._set_session_marker("closed", False)
+            else:
+                self._systemctl_user([command, "--now", account.unit])
 
             def update(state: dict[str, Any]) -> None:
                 state["online"] = bool(online)
@@ -3198,6 +3216,61 @@ class Backend:
                 ) from exc
         return {"ok": True, "kind": "sync-mode", "account": account.name,
                 "online": bool(online)}
+
+    # Quitting and launching are for this login session: markers live in the
+    # private runtime directory, which the system empties at reboot.
+    def _session_marker(self, name: str) -> Path:
+        return self._clipboard_stage_root() / "omawhatsapp-session" / name
+
+    def _set_session_marker(self, name: str, present: bool) -> None:
+        path = self._session_marker(name)
+        try:
+            if present:
+                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                path.write_text("1\n", encoding="utf-8")
+                path.chmod(0o600)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise OmaWhatsAppError("The session state could not be saved.") from exc
+
+    def _closed(self, preferences: dict[str, Any], reports: list[dict[str, Any]]) -> bool:
+        """Quit by the user, or not started because it does not start at login."""
+        if self._session_marker("closed").exists():
+            return True
+        if preferences.get("start_at_login") is not False or self._session_marker("launched").exists():
+            return False
+        return not any(report.get("sync_active") for report in reports if report.get("online"))
+
+    def quit_app(self) -> dict[str, Any]:
+        """Stop every account's sync until OmaWhatsApp opens again."""
+        self._set_session_marker("launched", False)
+        self._set_session_marker("closed", True)
+        for account in self.accounts():
+            with self._state_lock(self._lifecycle_lock_name(account)):
+                self._systemctl_user(["stop", account.unit], require_success=False)
+        return {"ok": True, "kind": "quit", "closed": True}
+
+    def launch_app(self) -> dict[str, Any]:
+        """Start the sync of every account that is not in offline mode."""
+        self._set_session_marker("closed", False)
+        self._set_session_marker("launched", True)
+        started = 0
+        for account in self.accounts():
+            if not self.online(account):
+                continue
+            with self._state_lock(self._lifecycle_lock_name(account)):
+                self._systemctl_user(["start", account.unit])
+            started += 1
+        return {"ok": True, "kind": "launch", "closed": False, "started": started}
+
+    def _apply_start_at_login(self, enabled: bool) -> None:
+        """Enable or disable each online account's sync at login; what runs now stays."""
+        for account in self.accounts():
+            if not self.online(account):
+                continue
+            with self._state_lock(self._lifecycle_lock_name(account)):
+                self._systemctl_user(["enable" if enabled else "disable", account.unit])
 
     def messages(self, jid: str, query: str = "", limit: int = 160,
                  before: Any = None, kind: str = "") -> dict[str, Any]:
@@ -6231,6 +6304,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("save-media")
     commands.add_parser("notify-open")
     commands.add_parser("sync-mode")
+    commands.add_parser("quit")
+    commands.add_parser("launch")
     commands.add_parser("settings")
     commands.add_parser("avatars")
     commands.add_parser("capabilities")
@@ -6450,6 +6525,10 @@ def main() -> int:
             return emit(backend.about())
         if args.command == "media-mode":
             return emit(backend.media_mode(payload.get("auto_download_media")))
+        if args.command == "quit":
+            return emit(backend.quit_app())
+        if args.command == "launch":
+            return emit(backend.launch_app())
         if args.command == "sync-mode":
             if not isinstance(payload.get("online"), bool):
                 raise OmaWhatsAppError("Online mode must be true or false.")
