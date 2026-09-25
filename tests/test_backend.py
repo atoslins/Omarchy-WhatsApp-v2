@@ -1968,6 +1968,27 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
             self.backend.settings({"surprise": True})
 
+    def test_the_signature_is_off_by_default_and_needs_a_name(self) -> None:
+        self.assertEqual(self.backend.settings()["signature"],
+                         {"enabled": False, "name": "", "position": "top"})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Type the name"):
+            self.backend.settings({"signature": {"enabled": True, "name": "   "}})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "without \\*"):
+            self.backend.settings({"signature": {"enabled": True, "name": "At*os"}})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "top or the bottom"):
+            self.backend.settings({"signature": {"position": "left"}})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsupported value"):
+            self.backend.settings({"signature": {"color": "red"}})
+        updated = self.backend.settings({"signature": {"enabled": True, "name": "  Atos  "}})
+        self.assertEqual(updated["signature"], {"enabled": True, "name": "Atos", "position": "top"})
+        # A later change keeps what it does not mention.
+        moved = self.backend.settings({"signature": {"position": "bottom"}})
+        self.assertEqual(moved["signature"], {"enabled": True, "name": "Atos", "position": "bottom"})
+        self.assertEqual(self.backend.status()["signature"]["name"], "Atos")
+        reloaded = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli)
+        self.assertEqual(reloaded.settings()["signature"]["position"], "bottom")
+
     def test_time_format_is_global_persisted_and_survives_other_settings(self) -> None:
         self.assertEqual(self.backend.settings()["time_format"], "auto")
         for choice in ("12h", "24h", "auto"):
@@ -3155,6 +3176,17 @@ sys.exit(0)
         stored = json.loads(
             (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
         self.assertEqual(list(stored["stores"]), [str(self.work)])
+
+    def test_each_account_signs_with_its_own_name(self) -> None:
+        self.backend.use_account("work")
+        self.backend.settings({"signature": {"enabled": True, "name": "Atos · DLX"}})
+        self.backend.use_account("home")
+        self.assertFalse(self.backend.settings()["signature"]["enabled"],
+                         "the other account is untouched")
+        self.backend.settings({"signature": {"enabled": True, "name": "Atos"}})
+        reports = {report["account"]: report for report in self.backend.status()["accounts"]}
+        self.assertEqual(reports["work"]["signature"]["name"], "Atos · DLX")
+        self.assertEqual(reports["home"]["signature"]["name"], "Atos")
 
     def test_avatar_cache_is_isolated_for_identical_jids_across_accounts(self) -> None:
         work = self.backend.account("work")

@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- Signature (Settings → Chats → Sign my messages): each account can sign its
+  texts and captions with a name in bold, on its own first line or at the
+  end. It is off by default, never touches reactions, stickers or audio, and
+  the message box shows it with a Skip once for a single message.
 - A voice note keeps playing when a message arrives, and when it ends the
   next message plays if it is audio too, as on the phone. Each voice note had
   its own player inside its row, and a new message rebuilds the rows; the

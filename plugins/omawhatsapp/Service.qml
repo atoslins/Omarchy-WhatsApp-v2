@@ -4,6 +4,7 @@ import Quickshell.Io
 import "SettingsPolicy.js" as SettingsPolicy
 import "AccountModel.js" as AccountModel
 import "PresenceModel.js" as PresenceModel
+import "ComposerModel.js" as ComposerModel
 
 // Resident state keeps the chat rail warm while the window is closed.
 Item {
@@ -705,11 +706,17 @@ Item {
   // already on screen as a pending bubble, so Enter never waits for the
   // network and the next message can be typed at once.
   property var sendQueue: []
-  function sendText(chatRef, text, replyId, mentions, owner) {
+  // The signature of an account, as its status reports it.
+  function signatureFor(account) {
+    return ComposerModel.signatureOf(root.accounts, account)
+  }
+  // `signed` false sends this one message without the account's signature.
+  function sendText(chatRef, text, replyId, mentions, owner, signed) {
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
     var value = String(text || "").trim()
     if (value === "") return false
-    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
     if (ref.jid === "") return false
+    if (signed !== false) value = ComposerModel.signedText(value, signatureFor(ref.account))
     var origin = writeOwner(owner)
     pendingSendSerial += 1
     var localId = "pending:" + pendingSendSerial
@@ -851,11 +858,14 @@ Item {
       caption: String(caption || "").trim()
     }, chatRef, owner)
   }
-  function sendFilesReply(chatRef, paths, caption, replyId, owner) {
+  function sendFilesReply(chatRef, paths, caption, replyId, owner, signed) {
     var files = Array.isArray(paths) ? paths : []
     pendingSendSerial += 1
     var localId = "pending:" + pendingSendSerial
     var text = String(caption || "").trim()
+    // A caption carries the signature; a file sent without one gets none.
+    if (signed !== false && text !== "")
+      text = ComposerModel.signedText(text, signatureFor(chatRef ? String(chatRef.account || "") : ""))
     var started = runWriteForChat("files", {
       paths: files,
       caption: text,
@@ -2083,6 +2093,14 @@ Item {
       // density are one global UI preference shared by every account.
       if (account === String(root.selectedChatAccount || ""))
         root.sendReadReceipts = payload.send_read_receipts === true
+      // The composer shows the new signature at once, before the next status.
+      if (payload.signature && typeof payload.signature === "object") {
+        var signedAccount = String(payload.account || account || "")
+        root.accounts = root.accounts.map(function(item) {
+          return item && String(item.account || "") === signedAccount
+            ? Object.assign({}, item, { signature: payload.signature }) : item
+        })
+      }
       root.showUnreadCount = payload.show_unread_count !== false
       root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0

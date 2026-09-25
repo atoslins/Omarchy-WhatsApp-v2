@@ -111,6 +111,15 @@ Item {
     : contactDraft.jid !== "" ? contactDraft.jid
     : demoMode ? contactDraft.digits + "@s.whatsapp.net"
     : contactDraftCheck && contactDraftCheck.registered ? String(contactDraftCheck.jid || "") : ""
+  // The account's signature on outgoing texts and captions, and a one-message
+  // opt-out from the composer.
+  property var demoSignature: ({ enabled: false, name: "", position: "top" })
+  property bool signatureSkipped: false
+  readonly property var composerSignature: root.demoMode ? root.demoSignature
+    : (root.service && typeof root.service.signatureFor === "function"
+      ? root.service.signatureFor(root.selectedAccount) : ({ enabled: false, name: "", position: "top" }))
+  readonly property bool signatureActive: root.composerSignature.enabled === true && !root.editTarget
+    && root.pendingStickerPath === ""
   // A toast can offer one action, such as opening the chat a forward went to.
   property string toastActionLabel: ""
   property var toastActionChat: null
@@ -825,8 +834,10 @@ Item {
     var value = composer.text.trim()
     if (value === "" && pendingAttachments.length === 0) return
     if (demoMode) {
-      demoItems = [ComposerModel.demoMessage(value,
+      demoItems = [ComposerModel.demoMessage(root.signatureSkipped ? value
+        : ComposerModel.signedText(value, root.demoSignature),
         pendingAttachments.length > 0, replyTarget, Date.now())].concat(demoItems)
+      signatureSkipped = false
       composer.text = ""
       pendingAttachments = []
       pendingStickerPath = ""
@@ -889,7 +900,8 @@ Item {
       pendingComposerSnapshot = snapshot
       pendingWriteKind = kind
       started = service.sendFilesReply(chatRef, request.paths, request.caption,
-        request.reply_id, "app")
+        request.reply_id, "app", !root.signatureSkipped)
+      if (started) root.signatureSkipped = false
       if (started) applyLiveComposerState(
         ComposerModel.startedState(snapshot, kind, request))
       else {
@@ -912,7 +924,8 @@ Item {
     started = editTarget
       ? service.editMessage(chatRef, editTarget, value, "app")
       : service.sendText(chatRef, value, request.reply_id,
-          request.mentions, "app")
+          request.mentions, "app", !root.signatureSkipped)
+    if (started && kind === "send") root.signatureSkipped = false
     if (started) applyLiveComposerState(
       ComposerModel.startedState(snapshot, kind, request))
     else {
@@ -1393,6 +1406,7 @@ Item {
 
   function selectChat(chat, focusTarget) {
     if (!chat) return
+    root.signatureSkipped = false
     root.unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0),
       anchor: "", resolved: Number(chat.unread || 0) <= 0 }
     root.unreadMarkerPositioned = Number(chat.unread || 0) <= 0
@@ -3904,7 +3918,8 @@ Item {
           anchors.bottom: parent.bottom
           property real replyContextHeight: root.replyTarget || root.editTarget ? Style.space(48) : 0
           property real attachmentContextHeight: root.pendingAttachments.length > 0 ? Style.space(68) : 0
-          property real contextHeight: replyContextHeight + attachmentContextHeight
+          property real signatureContextHeight: root.signatureActive ? Style.space(26) : 0
+          property real contextHeight: replyContextHeight + attachmentContextHeight + signatureContextHeight
           readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
           readonly property int maxLines: root.composerMaxLines
           readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, maxLines))
@@ -3996,6 +4011,47 @@ Item {
               HoverHandler { id: cancelContextHover }
               PanelToolTip { visible: cancelContextHover.hovered; text: root.editTarget ? "Cancel edit · Esc" : "Cancel reply · Esc" }
               TapHandler { onTapped: root.cancelComposerContext() }
+            }
+          }
+
+          // The signature this message will carry, with a one-click skip.
+          Item {
+            id: composerSignatureStrip
+            objectName: "composerSignature"
+            visible: composerBar.signatureContextHeight > 0
+            anchors.top: parent.top
+            anchors.topMargin: composerBar.replyContextHeight + composerBar.attachmentContextHeight
+              + Style.space(6)
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(16)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(16)
+            height: composerBar.signatureContextHeight - Style.space(6)
+            Text {
+              textFormat: Text.PlainText
+              id: composerSignatureLabel
+              objectName: "composerSignatureLabel"
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.signatureSkipped ? "󰷼  This message goes without your signature"
+                : "󰷼  Signed as " + root.composerSignature.name
+                  + (root.composerSignature.position === "bottom" ? " · at the end" : " · at the top")
+              color: root.signatureSkipped ? root.dimmer : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Text {
+              textFormat: Text.PlainText
+              objectName: "composerSignatureToggle"
+              anchors.left: composerSignatureLabel.right
+              anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.signatureSkipped ? "Sign it" : "Skip once"
+              color: signatureToggleHover.hovered ? root.foreground : root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              HoverHandler { id: signatureToggleHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: root.signatureSkipped = !root.signatureSkipped }
             }
           }
 

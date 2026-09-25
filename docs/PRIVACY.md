@@ -13,7 +13,8 @@ runtime file, pass through wacli, and are removed in a `finally` path.
 OmaWhatsApp's mode-`0600` preferences contain the bar badge visibility, the
 dropdown density, and the desktop-notification choice, plus one private section
 per account store holding that account's offline choice,
-automatic-reading choice, local notification acknowledgements, and the
+automatic-reading choice, the name it signs messages with (when the signature
+is on), local notification acknowledgements, and the
 per-chat watermark that decides which popups are still owed. Accounts never
 read each other's section, so the same contact reachable from two linked
 phones keeps two independent local badges. State reads and locks are descriptor-bound,

@@ -135,6 +135,7 @@ Rectangle {
         options: [{ value: 5, label: "5" }, { value: 7, label: "7" }, { value: 9, label: "9" }] }
     ]
     if (section === "chats") return [
+      { kind: "signature", key: "signature", busy: busy, multi: multi },
       { kind: "toggle", key: "enter_sends", title: "Enter sends messages",
         subtitle: value("enterSends", true) ? "Shift+Enter adds a line." : "Ctrl+Enter sends; Enter adds a line.",
         checked: value("enterSends", true), busy: busy },
@@ -237,6 +238,21 @@ Rectangle {
       { kind: "note", text: "Settings live in a private preferences file on this device. Chats stay in wacli's local mirror; nothing here sends chat data anywhere." }
     ]
     return []
+  }
+
+  // The signature of the account whose chat is open (each account has one).
+  readonly property var signature: demoMode && app ? app.demoSignature
+    : (live && typeof service.signatureFor === "function"
+      ? service.signatureFor(String(service.selectedChatAccount || ""))
+      : ({ enabled: false, name: "", position: "top" }))
+  function saveSignature(change) {
+    var next = Object.assign({}, change)
+    if (demoMode && app) {
+      app.demoSignature = Object.assign({}, signature, next)
+      return true
+    }
+    if (!live) return false
+    return service.setPreference("signature", next)
   }
 
   function runRow(row, next) {
@@ -412,6 +428,7 @@ Rectangle {
             : modelData.kind === "action" ? actionRow
             : modelData.kind === "link" ? linkRow
             : modelData.kind === "updates" ? updatesRow
+            : modelData.kind === "signature" ? signatureRow
             : noteRow
         }
       }
@@ -469,6 +486,176 @@ Rectangle {
         foreground: settings.foreground
         accent: settings.accent
         onToggled: settings.runRow(row, !checked)
+      }
+    }
+  }
+
+  Component {
+    id: signatureRow
+    Rectangle {
+      id: signatureCard
+      readonly property var row: parent ? parent.row : ({})
+      readonly property var current: settings.signature
+      width: parent ? parent.width : 0
+      height: signatureColumn.implicitHeight + Style.space(24)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(settings.foreground, settings.accent)
+      function commitName() {
+        var name = String(signatureName.text || "").trim()
+        if (name === String(current.name || "")) return
+        settings.saveSignature(name === "" ? { enabled: false, name: "" } : { name: name })
+      }
+      Column {
+        id: signatureColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(14)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(10)
+        Item {
+          width: parent.width
+          height: Math.max(signatureToggle.height, signatureTitle.implicitHeight)
+          Column {
+            id: signatureTitle
+            anchors.left: parent.left
+            anchors.right: signatureToggle.left
+            anchors.rightMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(3)
+            Text {
+              textFormat: Text.PlainText
+              text: "Sign my messages"
+              color: settings.foreground
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              wrapMode: Text.Wrap
+              text: "Your name in bold on texts and captions, never on reactions, stickers or audio. "
+                + "The message box shows it and can skip it for one message."
+                + (signatureCard.row.multi ? " Applies to the account of the open chat." : "")
+              color: settings.dim
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+          ToggleSwitch {
+            id: signatureToggle
+            objectName: "setting-signature"
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            checked: signatureCard.current.enabled === true
+            enabled: settings.live || settings.demoMode
+            busy: signatureCard.row.busy === true
+            foreground: settings.foreground
+            accent: settings.accent
+            onToggled: {
+              var name = String(signatureName.text || "").trim()
+              // Nothing to sign with yet: the name comes first.
+              if (!checked && name === "") { signatureName.forceActiveFocus(); return }
+              settings.saveSignature(checked ? { enabled: false } : { enabled: true, name: name })
+            }
+          }
+        }
+        Row {
+          spacing: Style.space(8)
+          TextField {
+            id: signatureName
+            objectName: "signatureName"
+            width: Math.min(Style.space(260), signatureColumn.width - Style.space(180))
+            text: String(signatureCard.current.name || "")
+            placeholderText: "Name to sign with"
+            maximumLength: 40
+            foreground: settings.foreground
+            accent: settings.accent
+            font.family: settings.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            validator: RegularExpressionValidator { regularExpression: /[^*\n]*/ }
+            onEditingFinished: signatureCard.commitName()
+          }
+          Repeater {
+            model: [{ value: "top", label: "At the top" }, { value: "bottom", label: "At the end" }]
+            delegate: Rectangle {
+              required property var modelData
+              readonly property bool chosen: String(signatureCard.current.position || "top") === modelData.value
+              objectName: "signaturePosition-" + modelData.value
+              width: signaturePositionLabel.implicitWidth + Style.space(22)
+              height: Style.space(32)
+              radius: Style.cornerRadius
+              color: chosen ? Style.selectedFillFor(settings.foreground, settings.accent)
+                : (signaturePositionHover.hovered ? Style.hoverFillFor(settings.foreground, settings.accent) : "transparent")
+              border.width: 1
+              border.color: chosen ? Qt.rgba(settings.accent.r, settings.accent.g, settings.accent.b, 0.8)
+                : Qt.rgba(settings.foreground.r, settings.foreground.g, settings.foreground.b, 0.14)
+              Text {
+                textFormat: Text.PlainText
+                id: signaturePositionLabel
+                anchors.centerIn: parent
+                text: modelData.label
+                color: parent.chosen ? settings.foreground : settings.dim
+                font.family: settings.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+              HoverHandler { id: signaturePositionHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: settings.saveSignature({ position: modelData.value }) }
+            }
+          }
+        }
+        // How the other side sees it.
+        Rectangle {
+          objectName: "signaturePreview"
+          visible: String(signatureName.text || "").trim() !== ""
+          width: Math.min(signatureColumn.width, Style.space(320))
+          height: signaturePreviewColumn.implicitHeight + Style.space(14)
+          radius: Style.cornerRadius + 2
+          color: Qt.rgba(settings.accent.r, settings.accent.g, settings.accent.b, 0.14)
+          Column {
+            id: signaturePreviewColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+            readonly property bool atTop: String(signatureCard.current.position || "top") !== "bottom"
+            Text {
+              textFormat: Text.PlainText
+              visible: signaturePreviewColumn.atTop
+              text: String(signatureName.text || "").trim() + ":"
+              color: settings.foreground
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.weight: Font.Bold
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: "Chego às 10h."
+              color: settings.foreground
+              font.family: settings.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+            Row {
+              visible: !signaturePreviewColumn.atTop
+              topPadding: Style.space(6)
+              Text {
+                textFormat: Text.PlainText
+                text: "— "
+                color: settings.foreground
+                font.family: settings.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: String(signatureName.text || "").trim()
+                color: settings.foreground
+                font.family: settings.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.weight: Font.Bold
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -121,6 +121,9 @@ PREFERENCES_VERSION = 4
 MAX_NOTIFY_BURST = 5
 MAX_NOTIFY_SUMMARY = 96
 MAX_NOTIFY_SENDER = 48
+# A name to sign messages with, per account: one line, no formatting marks.
+MAX_SIGNATURE_NAME = 40
+SIGNATURE_POSITIONS = ("top", "bottom")
 MAX_NOTIFY_BODY = 180
 MAX_NOTIFY_WATERMARKS = 500
 NOTIFY_EXPIRE_MS = 8000
@@ -1294,6 +1297,20 @@ class Backend:
             }
         return snapshots
 
+    @staticmethod
+    def _signature(value: Any) -> dict[str, Any]:
+        """The account's signature: off unless there is a name to sign with."""
+        item = value if isinstance(value, dict) else {}
+        name = " ".join("".join(
+            char for char in str(item.get("name") or "")
+            if char.isprintable() and char not in "*\n\r").split())[:MAX_SIGNATURE_NAME]
+        position = item.get("position")
+        return {
+            "enabled": item.get("enabled") is True and name != "",
+            "name": name,
+            "position": position if position in SIGNATURE_POSITIONS else "top",
+        }
+
     @classmethod
     def _store_state(cls, value: Any) -> dict[str, Any]:
         """Normalize the per-account half of the preferences file."""
@@ -1301,6 +1318,7 @@ class Backend:
         return {
             "online": item.get("online") is not False,
             "send_read_receipts": item.get("send_read_receipts") is not False,
+            "signature": cls._signature(item.get("signature")),
             "acknowledged_unread": cls._chat_snapshots(item.get("acknowledged_unread")),
             "notified": cls._chat_snapshots(item.get("notified")),
         }
@@ -1414,6 +1432,7 @@ class Backend:
                 raise OmaWhatsAppError("Settings must be a JSON object.")
             allowed = {
                 "send_read_receipts",
+                "signature",
                 "show_unread_count",
                 "dropdown_rows",
                 "check_updates_on_launch",
@@ -1425,6 +1444,22 @@ class Backend:
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
             if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
                 raise OmaWhatsAppError("Read receipts must be on or off.")
+            if "signature" in update:
+                wanted = update["signature"]
+                if not isinstance(wanted, dict) or any(
+                        key not in {"enabled", "name", "position"} for key in wanted):
+                    raise OmaWhatsAppError("The signature setting has an unsupported value.")
+                if "enabled" in wanted and not isinstance(wanted["enabled"], bool):
+                    raise OmaWhatsAppError("The signature must be on or off.")
+                if "position" in wanted and wanted["position"] not in SIGNATURE_POSITIONS:
+                    raise OmaWhatsAppError("The signature goes at the top or the bottom.")
+                raw_name = wanted.get("name", "")
+                if not isinstance(raw_name, str) or len(raw_name) > MAX_SIGNATURE_NAME \
+                        or "*" in raw_name or "\n" in raw_name:
+                    raise OmaWhatsAppError(
+                        f"Sign with a name of up to {MAX_SIGNATURE_NAME} characters, without *.")
+                if wanted.get("enabled") is True and not raw_name.strip():
+                    raise OmaWhatsAppError("Type the name to sign messages with.")
             if "show_unread_count" in update and not isinstance(update["show_unread_count"], bool):
                 raise OmaWhatsAppError("The unread badge must be on or off.")
             if "check_updates_on_launch" in update and not isinstance(update["check_updates_on_launch"], bool):
@@ -1446,12 +1481,15 @@ class Backend:
 
             def apply(value: dict[str, Any]) -> None:
                 for name, setting in update.items():
-                    if name == "send_read_receipts":
+                    if name in {"send_read_receipts", "signature"}:
                         state = value["stores"].get(key)
                         if state is None:
                             state = self._store_state({})
                             value["stores"][key] = state
-                        state["send_read_receipts"] = bool(setting)
+                        if name == "signature":
+                            state["signature"] = self._signature(dict(state["signature"], **setting))
+                        else:
+                            state["send_read_receipts"] = bool(setting)
                     else:
                         value[name] = setting
 
@@ -1462,6 +1500,7 @@ class Backend:
             "kind": "settings",
             "account": self.active.name,
             "send_read_receipts": state.get("send_read_receipts") is True,
+            "signature": self._signature(state.get("signature")),
             "show_unread_count": value.get("show_unread_count") is not False,
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "dropdown_rows": value.get("dropdown_rows", 7),
@@ -2197,6 +2236,7 @@ class Backend:
                 "online": online,
                 "offline_mode": not online,
                 "send_read_receipts": state.get("send_read_receipts") is True,
+                "signature": self._signature(state.get("signature")),
                 "fts_enabled": doctor.get("fts_enabled") is True,
                 "database_ready": self._database(doctor, account).is_file(),
                 "error": doctor_error or (
@@ -2240,6 +2280,7 @@ class Backend:
             "notifications": preferences["notifications"],
             "notify_available": self._notify_send_ready(),
             "send_read_receipts": current["send_read_receipts"],
+            "signature": current["signature"],
             "show_unread_count": preferences.get("show_unread_count") is not False,
             "check_updates_on_launch": preferences.get("check_updates_on_launch") is True,
             "dropdown_rows": preferences.get("dropdown_rows", 7),

@@ -40,6 +40,13 @@ Panel {
   property string demoPlaybackId: ""
   property int composerMaxLines: service ? service.composerMaxLines : 6
   property string demoTimeFormat: "auto"
+  // The account's signature on outgoing texts and captions, skippable once.
+  property var demoSignature: ({ enabled: false, name: "", position: "top" })
+  property bool signatureSkipped: false
+  readonly property var composerSignature: demoMode ? demoSignature
+    : (service && typeof service.signatureFor === "function"
+      ? service.signatureFor(currentAccount()) : ({ enabled: false, name: "", position: "top" }))
+  readonly property bool signatureActive: composerSignature.enabled === true
   readonly property string timeFormat: demoMode ? demoTimeFormat
     : (service ? service.timeFormat : "auto")
 
@@ -356,6 +363,7 @@ Panel {
   function openConversation(chat) {
     if (sending) return
     if (!chat || !chat.jid) return
+    signatureSkipped = false
     unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0),
       anchor: "", resolved: Number(chat.unread || 0) <= 0 }
     if (!demoMode && service) service.discardStages(pendingAttachments)
@@ -626,10 +634,11 @@ Panel {
     pendingWriteIntent = intent
     var started = pendingAttachments.length > 0
       ? service.sendFilesReply(currentChatRef(), request.paths, request.caption,
-          request.reply_id, "dropdown")
+          request.reply_id, "dropdown", !signatureSkipped)
       : service.sendText(currentChatRef(), text,
-          request.reply_id, request.mentions, "dropdown")
+          request.reply_id, request.mentions, "dropdown", !signatureSkipped)
     if (started) {
+      signatureSkipped = false
       var consumed = ComposerModel.startedIntentState(intent)
       composer.text = String(consumed.text || "")
       pendingAttachments = consumed.attachments
@@ -1872,6 +1881,37 @@ Panel {
                       PanelToolTip { visible: removeFileHover.hovered; text: "Remove attachment" }
                     }
                   }
+                }
+              }
+              Item {
+                objectName: "dropdownSignature"
+                visible: root.signatureActive && !root.voiceForCurrentChat
+                width: parent.width
+                height: visible ? Style.space(18) : 0
+                Text {
+                  textFormat: Text.PlainText
+                  id: dropdownSignatureLabel
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(4)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.signatureSkipped ? "󰷼  Without your signature this time"
+                    : "󰷼  Signed as " + root.composerSignature.name
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption - 1
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  objectName: "dropdownSignatureToggle"
+                  anchors.left: dropdownSignatureLabel.right
+                  anchors.leftMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.signatureSkipped ? "Sign it" : "Skip once"
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption - 1
+                  HoverHandler { cursorShape: Qt.PointingHandCursor }
+                  TapHandler { onTapped: root.signatureSkipped = !root.signatureSkipped }
                 }
               }
               Item {
