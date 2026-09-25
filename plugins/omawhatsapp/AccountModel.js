@@ -216,3 +216,45 @@ function forwardTargetsForRef(chats, ref) {
   var origin = findChat(chats, ref)
   return origin ? forwardTargets(chats, origin) : []
 }
+
+// The message the "N unread messages" divider sits above: the Nth newest
+// message from someone else when the chat opened. Anchoring to that message,
+// not to a position from the bottom, keeps your own replies and anything that
+// arrives later below the divider. Lists are newest first.
+function unreadAnchorId(messages, count) {
+  var wanted = Number(count || 0)
+  var items = messages || []
+  var anchor = ""
+  var seen = 0
+  for (var i = 0; i < items.length && seen < wanted; i++) {
+    var item = items[i]
+    if (!item || item.from_me === true || item.pending === true) continue
+    anchor = String(item.id || "")
+    seen++
+  }
+  return anchor
+}
+
+// Row of a message in a list whose albums fold several messages into one row.
+function messageIndexOf(items, id) {
+  var target = String(id || "")
+  var rows = items || []
+  if (target === "") return -1
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i]) continue
+    if (String(rows[i].id || "") === target) return i
+    var album = rows[i].album_items || []
+    for (var j = 0; j < album.length; j++)
+      if (album[j] && String(album[j].id || "") === target) return i
+  }
+  return -1
+}
+
+// Messages loaded for this chat, not counting bubbles still being sent.
+function hasStoredMessages(messages) {
+  var items = messages || []
+  for (var i = 0; i < items.length; i++)
+    if (items[i] && items[i].pending !== true) return true
+  return false
+}
+

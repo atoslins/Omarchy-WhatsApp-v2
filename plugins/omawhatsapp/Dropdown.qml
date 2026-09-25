@@ -305,15 +305,25 @@ Panel {
     openConversation(filteredChats[selectedIndex])
   }
 
-  property var unreadMarker: ({ key: "", count: 0 })
+  // Anchored to the oldest unread message, so replies never land above it.
+  property var unreadMarker: ({ key: "", count: 0, anchor: "", resolved: true })
   readonly property int unreadDividerIndex: unreadMarker.key !== ""
     && unreadMarker.key === AccountModel.refOf(currentChat).key && unreadMarker.count > 0
-    ? Math.min(unreadMarker.count, sourceMessages.length) - 1 : -1
+    ? AccountModel.messageIndexOf(sourceMessages, unreadMarker.anchor) : -1
+  function resolveUnreadAnchor() {
+    var marker = unreadMarker
+    if (marker.resolved || marker.key !== AccountModel.refOf(currentChat).key
+        || !AccountModel.hasStoredMessages(sourceMessages)) return
+    unreadMarker = Object.assign({}, marker, {
+      anchor: AccountModel.unreadAnchorId(sourceMessages, marker.count), resolved: true })
+  }
+  onSourceMessagesChanged: resolveUnreadAnchor()
 
   function openConversation(chat) {
     if (sending) return
     if (!chat || !chat.jid) return
-    unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0) }
+    unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0),
+      anchor: "", resolved: Number(chat.unread || 0) <= 0 }
     if (!demoMode && service) service.discardStages(pendingAttachments)
     stopPlayback()
     currentChat = chat
@@ -323,6 +333,7 @@ Panel {
     pendingAttachments = []
     errorText = ""
     if (!demoMode && service) service.selectChat(chat)
+    resolveUnreadAnchor()
     Qt.callLater(focusComposer)
   }
 

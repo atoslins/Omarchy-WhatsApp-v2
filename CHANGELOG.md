@@ -2,6 +2,9 @@
 
 ## Unreleased (fork)
 
+- Fix the "N unread messages" divider moving onto your own replies. It is now
+  anchored to the oldest unread message received when the chat opened, so
+  anything sent or received afterwards stays below it.
 - Show sent, delivered, read, and played ticks on your messages and before
   your last message in the chat list. The helper reads them from
   `message_status`, which wacli builds that keep receipts maintain. With

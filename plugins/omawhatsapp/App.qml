@@ -1186,12 +1186,22 @@ Item {
 
   // "N unread messages" divider: the count is captured when the chat is
   // chosen, before automatic reading clears it.
-  property var unreadMarker: ({ key: "", count: 0 })
+  // The divider stays above the message that was the oldest unread one, so
+  // replies sent from here never land above it.
+  property var unreadMarker: ({ key: "", count: 0, anchor: "", resolved: true })
   property bool unreadMarkerPositioned: true
   readonly property int unreadDividerIndex: root.unreadMarker.key !== ""
     && root.unreadMarker.key === root.currentChatKey() && root.unreadMarker.count > 0
-    ? Math.min(root.unreadMarker.count, root.visibleMessages.length) - 1 : -1
+    ? AccountModel.messageIndexOf(root.visibleMessages, root.unreadMarker.anchor) : -1
+  function resolveUnreadAnchor() {
+    var marker = root.unreadMarker
+    if (marker.resolved || marker.key !== root.currentChatKey()
+        || !AccountModel.hasStoredMessages(root.sourceItems)) return
+    root.unreadMarker = Object.assign({}, marker, {
+      anchor: AccountModel.unreadAnchorId(root.sourceItems, marker.count), resolved: true })
+  }
   onVisibleMessagesChanged: {
+    root.resolveUnreadAnchor()
     if (root.unreadMarkerPositioned || root.unreadDividerIndex < 0) return
     root.unreadMarkerPositioned = true
     var target = root.unreadDividerIndex
@@ -1200,7 +1210,8 @@ Item {
 
   function selectChat(chat, focusTarget) {
     if (!chat) return
-    root.unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0) }
+    root.unreadMarker = { key: AccountModel.refOf(chat).key, count: Number(chat.unread || 0),
+      anchor: "", resolved: Number(chat.unread || 0) <= 0 }
     root.unreadMarkerPositioned = Number(chat.unread || 0) <= 0
     saveComposerState()
     messageSearchField.text = ""
@@ -1210,6 +1221,8 @@ Item {
       demoSelectedJid = String(chat.jid)
     }
     else if (service) service.selectChat(chat)
+    // Messages may already be the ones of this chat (the same chat, or demo).
+    root.resolveUnreadAnchor()
     restoreComposerState(AccountModel.refOf(chat).key)
     if (narrow) narrowConversation = true
     if (focusTarget === "messages") root.focusMessages()

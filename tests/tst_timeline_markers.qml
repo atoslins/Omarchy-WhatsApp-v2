@@ -64,9 +64,32 @@ TestCase {
     app.opened = true
     app.selectChat(app.demoChats[1])
     compare(app.demoChats[1].unread, 3)
-    compare(app.unreadDividerIndex, 2)
+    // The demo timeline has one received message, newest, above four of
+    // yours: the divider goes above that one, never above your own.
+    compare(app.unreadDividerIndex, 0)
+    verify(app.visibleMessages[0].from_me !== true)
     app.selectChat(app.demoChats[0])
     compare(app.unreadDividerIndex, -1, "a read chat has no divider")
+  }
+
+  function test_replies_sent_after_opening_stay_below_the_unread_divider() {
+    // The owner's report: after replying in a chat opened with one unread
+    // message, the divider moved onto the reply ("1 unread message" above a
+    // message they sent).
+    var app = createTemporaryObject(appComponent, testCase)
+    app.opened = true
+    app.selectChat(app.demoChats[1])
+    var anchor = app.visibleMessages[app.unreadDividerIndex]
+    verify(anchor.from_me !== true, "the divider sits above a received message")
+    var composer = findChild(app, "composerInput")
+    composer.text = "first reply"
+    app.sendDraft()
+    composer.text = "second reply"
+    app.sendDraft()
+    compare(app.visibleMessages[0].text, "second reply")
+    compare(app.visibleMessages[app.unreadDividerIndex].id, anchor.id,
+      "the divider stays above the same received message")
+    verify(app.unreadDividerIndex >= 2, "both replies are below it")
   }
 
   // Enough older demo messages that the timeline always scrolls, whatever
@@ -149,7 +172,13 @@ TestCase {
     var dropdown = createTemporaryObject(dropdownComponent, testCase)
     var unread = dropdown.demoChats.filter(function(chat) { return Number(chat.unread || 0) > 1 })[0]
     dropdown.openConversation(unread)
-    compare(dropdown.unreadDividerIndex, Math.min(unread.unread, dropdown.sourceMessages.length) - 1)
+    verify(dropdown.unreadDividerIndex >= 0)
+    var anchor = dropdown.sourceMessages[dropdown.unreadDividerIndex]
+    verify(anchor.from_me !== true, "the divider sits above a received message")
+    var incomingAfter = dropdown.sourceMessages.slice(0, dropdown.unreadDividerIndex + 1)
+      .filter(function(item) { return item.from_me !== true })
+    compare(incomingAfter.length, Math.min(unread.unread, dropdown.sourceMessages.filter(
+      function(item) { return item.from_me !== true }).length), "N received messages from the divider down")
     verify(findChild(dropdown, "jumpToLatest") !== null)
     verify(findChild(dropdown, "dayHeader") !== null)
   }
