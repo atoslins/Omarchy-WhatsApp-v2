@@ -755,6 +755,10 @@ Panel {
       else root.focusComposer()
       Qt.callLater(root.validateServiceSelection)
     }
+    function onChatStateFailed(message, chatRef, action, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      root.errorText = String(message || "WhatsApp could not change the read state.")
+    }
     function onWriteFailed(message, chatRef, details, owner) {
       if (!ComposerModel.ownsOperation(owner, "dropdown")) return
       var intent = root.pendingWriteIntent

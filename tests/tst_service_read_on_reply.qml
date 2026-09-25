@@ -39,9 +39,11 @@ TestCase {
     verify(service.markReadAfterReply(target))
     compare(service.chats[0].unread, 0)
     compare(service.chats[0].notification_unread, 0)
-    tryCompare(service, "activeWriteKind", "chat-action")
-    compare(service.activeWriteChatJid, target.jid)
-    compare(service.activeWriteAccount, "work")
+    tryVerify(function() { return service.activeReadMark !== null })
+    compare(service.activeReadMark.ref.jid, target.jid)
+    compare(service.activeReadMark.ref.account, "work")
+    compare(service.activeReadMark.action, "read")
+    compare(service.activeWriteKind, "", "read marks stay out of the write queue")
   }
 
   function test_nothing_happens_without_unread_messages() {
@@ -49,6 +51,7 @@ TestCase {
     verify(!service.markReadAfterReply(target))
     wait(300)
     compare(service.activeWriteKind, "")
+    compare(service.activeReadMark, null)
   }
 
   function test_the_preference_turns_it_off() {
@@ -65,14 +68,49 @@ TestCase {
     compare(service.chats[0].unread, 2)
   }
 
-  function test_a_write_in_flight_delays_the_mark_read() {
+  function test_a_send_in_flight_does_not_hold_the_mark_read() {
     var service = createService(4)
+    service.syncActive = true
     service.writing = true
     verify(service.markReadAfterReply(target))
-    wait(400)
-    compare(service.activeWriteKind, "", "must wait for the running write")
+    tryVerify(function() { return service.activeReadMark !== null }, 1000,
+      "the mark has its own process")
+  }
+
+  function test_a_stuck_read_mark_never_holds_a_reply() {
+    // The owner's report: sending took ages. A read mark waiting on WhatsApp
+    // held the only write process, so every reply queued behind it.
+    var service = createService(2)
+    service.syncActive = true
+    verify(service.chatAction(target, "read", "service"))
+    var marks = findChild(service, "readMarkProcess")
+    verify(marks.running, "the mark is out, and does not answer")
+    verify(service.sendText(target, "on my way", "", [], "app"))
+    var writes = findChild(service, "writeProcess")
+    verify(writes.running, "the reply starts at once")
+    compare(JSON.parse(writes.payload).text, "on my way")
+    compare(service.sendQueue.length, 0, "nothing waits in line")
+  }
+
+  function test_without_sync_a_mark_waits_for_the_running_write() {
+    var service = createService(2)
+    service.syncActive = false
+    service.writing = true
+    verify(service.chatAction(target, "read", "service"))
+    verify(!findChild(service, "readMarkProcess").running,
+      "two wacli runs would fight over the store")
     service.writing = false
-    tryCompare(service, "activeWriteKind", "chat-action")
+    tryVerify(function() { return findChild(service, "readMarkProcess").running }, 2000)
+  }
+
+  function test_a_later_mark_for_the_same_chat_replaces_a_queued_one() {
+    var service = createService(2)
+    service.syncActive = true
+    verify(service.chatAction(target, "read", "app"))
+    verify(service.chatAction({ account: "work", jid: "other@s.whatsapp.net" }, "read", "app"))
+    verify(service.chatAction({ account: "work", jid: "other@s.whatsapp.net" }, "unread", "app"))
+    compare(service.readMarkQueue.length, 1)
+    compare(service.readMarkQueue[0].action, "unread")
   }
 
   function openService(unread) {
@@ -95,6 +133,7 @@ TestCase {
       "a paused sync holds the store lock; reading would block the write queue")
     wait(200)
     compare(service.activeWriteKind, "")
+    compare(service.activeReadMark, null)
     service.syncActive = true
     service.lastAutoReadKey = ""
     verify(service.readOpenChatIfUnread(service.chats[0]))
@@ -103,8 +142,8 @@ TestCase {
   function test_new_messages_in_the_open_chat_are_read() {
     var service = openService(2)
     verify(service.readOpenChatIfUnread(service.chats[0]))
-    tryCompare(service, "activeWriteKind", "chat-action")
-    compare(service.activeWriteChatJid, target.jid)
+    tryVerify(function() { return service.activeReadMark !== null })
+    compare(service.activeReadMark.ref.jid, target.jid)
   }
 
   function test_a_closed_window_reads_nothing() {
@@ -114,6 +153,7 @@ TestCase {
     verify(!service.readOpenChatIfUnread(service.chats[0]))
     wait(200)
     compare(service.activeWriteKind, "")
+    compare(service.activeReadMark, null)
   }
 
   function test_only_the_chat_on_screen_is_read() {
@@ -189,6 +229,7 @@ TestCase {
       "the list is on screen, not the conversation")
     wait(200)
     compare(service.activeWriteKind, "")
+    compare(service.activeReadMark, null)
     service.dropdownConversationVisible = true
     verify(service.readOpenChatIfUnread(service.chats[0]))
   }

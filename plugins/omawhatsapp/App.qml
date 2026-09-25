@@ -1930,6 +1930,11 @@ Item {
       if (sameChat && kind === "voice") root.cancelComposerContext(false)
       if (sameChat && kind !== "forward") root.focusComposer()
     }
+    function onChatStateFailed(message, chatRef, action, owner) {
+      if (!ComposerModel.ownsOperation(owner, "app")) return
+      root.showToast((action === "unread" ? "could not mark unread · " : "could not mark read · ")
+        + String(message || "WhatsApp did not answer"))
+    }
     function onForwardBatchFinished(summary) {
       if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
       var targets = summary.targets || []

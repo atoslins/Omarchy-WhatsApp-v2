@@ -2,6 +2,13 @@
 
 ## Unreleased (fork)
 
+- Sending no longer waits behind a read mark. Marking a chat read (on
+  opening it, or after a reply) can make wacli wait minutes for WhatsApp to
+  repair the account's app state, and it held the only write process, so
+  every reply queued behind it and failed after 45 seconds. Read marks now
+  have a process and queue of their own; with the matching wacli they also
+  queue apart inside sync, and a request whose caller gave up is dropped
+  instead of sent late.
 - Restyle, phase 5 (flows): Forward on a message now picks it in the
   conversation, where more can be picked (an album counts each photo), with a
   bar to forward or copy them. The dialog takes several chats as chips, an

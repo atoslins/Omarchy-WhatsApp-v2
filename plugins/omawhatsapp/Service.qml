@@ -1186,6 +1186,7 @@ Item {
     }, chatRef, owner)
   }
   function chatAction(chatRef, action, owner) {
+    if (action === "read" || action === "unread") return markChatState(chatRef, action, owner)
     var started = runWriteForChat("chat-action", {
       action: String(action || "")
     }, chatRef, owner)
@@ -1194,6 +1195,46 @@ Item {
     // the next refresh. A failure refreshes the rail back to the mirror.
     if (started) applyChatActionLocally(chatRef, action)
     return started
+  }
+  // Read and unread marks have a process of their own. Writing read state can
+  // make wacli wait for WhatsApp to repair the account's app state, for
+  // minutes; a reply typed meanwhile must still go out at once. One mark at a
+  // time, the latest one per chat.
+  property var readMarkQueue: []
+  property var activeReadMark: null
+  signal chatStateFailed(string message, var chatRef, string action, string owner)
+  function markChatState(chatRef, action, owner) {
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    if (ref.jid === "" || (action !== "read" && action !== "unread")) return false
+    var origin = writeOwner(owner)
+    var refusal = writeRefusal("chat-action", { action: action }, ref)
+    if (refusal !== "") {
+      chatStateFailed(refusal, ref, action, origin)
+      if (!statusReady || statusAccount !== ref.account) refreshStatus()
+      return false
+    }
+    readMarkQueue = readMarkQueue.filter(function(item) { return item.ref.key !== ref.key })
+      .concat([{ ref: ref, action: action, owner: origin }])
+    applyChatActionLocally(ref, action)
+    runNextReadMark()
+    return true
+  }
+  function runNextReadMark() {
+    if (readMarkProcess.running || readMarkQueue.length === 0) return false
+    // Without the sync's queue to share, two wacli runs would contend for the
+    // store: the mark waits for the running write instead.
+    if (!syncActive && (writing || writeProcess.running)) {
+      readMarkRetry.restart()
+      return false
+    }
+    var next = readMarkQueue[0]
+    readMarkQueue = readMarkQueue.slice(1)
+    activeReadMark = next
+    readMarkProcess.payload = JSON.stringify({ jid: next.ref.jid, account: next.ref.account,
+      action: next.action })
+    readMarkProcess.stdinEnabled = true
+    readMarkProcess.running = true
+    return true
   }
   function applyChatActionLocally(chatRef, action) {
     var changes = ({
@@ -1407,8 +1448,9 @@ Item {
 
   Timer {
     id: replyReadRetry
-    // A write in flight delays the mark-read; a write that keeps being refused
-    // (offline, account unavailable) is dropped after a few seconds.
+    // The mark has its own process, so a send in flight does not hold it; a
+    // mark that keeps being refused (offline, account unavailable) is dropped
+    // after a few seconds.
     property int attempts: 0
     interval: 150
     repeat: false
@@ -1416,7 +1458,7 @@ Item {
       var target = root.pendingReplyReadRef
       if (String(target.jid || "") === "") return
       attempts += 1
-      if (!root.writing && root.chatAction(target, "read")) {
+      if (root.chatAction(target, "read")) {
         root.pendingReplyReadRef = AccountModel.chatRef("", "")
         return
       }
@@ -2172,6 +2214,40 @@ Item {
       }
       root.pasteFailed((result && result.error)
         || String(pasteError.text || "The clipboard could not be read.").trim(), chatRef, owner)
+    }
+  }
+
+  Timer {
+    id: readMarkRetry
+    interval: 400
+    repeat: false
+    onTriggered: root.runNextReadMark()
+  }
+
+  Process {
+    id: readMarkProcess
+    objectName: "readMarkProcess"
+    property string payload: ""
+    command: [root.helper, "chat-action"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: readMarkOutput }
+    stderr: StdioCollector { id: readMarkError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var finished = root.activeReadMark
+      root.activeReadMark = null
+      var result = root.parseJson(readMarkOutput.text)
+      if (finished && (exitCode !== 0 || !result || result.ok !== true)) {
+        var message = (result && result.error)
+          || String(readMarkError.text || "WhatsApp could not change the read state.").trim()
+        root.chatStateFailed(message, finished.ref, finished.action, finished.owner)
+        // Back to what the mirror says.
+        root.lastChatsRaw = ""
+        refreshDelay.restart()
+      } else if (finished) {
+        refreshDelay.restart()
+      }
+      Qt.callLater(root.runNextReadMark)
     }
   }
 
