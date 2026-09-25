@@ -111,6 +111,11 @@ TestCase {
         lastForward = { ref: ref, item: item, targetJid: targetJid, owner: owner }
         return true
       }
+      function forwardMany(ref, items, targets, note, owner) {
+        lastForward = { ref: ref, item: items[0], items: items, targets: targets,
+          targetJid: targets.length > 0 ? String(targets[0].jid) : "", note: note, owner: owner }
+        return true
+      }
       function sendPoll(ref, question, options, selectable, owner) {
         lastPoll = {
           ref: ref, question: question, options: options,
@@ -228,10 +233,12 @@ TestCase {
     service.selectChat(workChat)
     app.startForward(message)
     verify(AccountModel.sameRef(app.forwardOriginRef, origin))
+    verify(app.startForwardFrom(app.forwardOriginRef, [message]))
     service.selectChat(homeChat)
     compare(app.forwardCandidates.length, 1)
     compare(app.forwardCandidates[0].account, "work")
-    verify(app.forwardTo(workTarget))
+    verify(app.toggleForwardTarget(workTarget))
+    verify(app.sendForward())
     compare(service.lastForward.ref.account, "work")
     compare(service.lastForward.targetJid, "target@example")
 
@@ -397,10 +404,27 @@ TestCase {
     var app = harness.app
     app.open(JSON.stringify({ account: "work", jid: "shared@example", conversation: true,
       forward: { id: "synthetic-message", text: "hello", media_type: "" } }))
-    tryVerify(function() { return app.forwardTarget !== null }, 1000, "the picker opens for that message")
-    compare(app.forwardTarget.id, "synthetic-message")
+    tryVerify(function() { return app.forwardItems.length === 1 }, 1000, "the picker opens for that message")
+    compare(app.forwardItems[0].id, "synthetic-message")
     verify(AccountModel.sameRef(app.forwardOriginRef, AccountModel.chatRef("work", "shared@example")))
-    verify(app.forwardTo(workTarget))
+    verify(app.toggleForwardTarget(workTarget))
+    verify(app.sendForward())
     compare(harness.service.lastForward.targetJid, "target@example")
+  }
+
+  function test_a_contact_from_the_dropdown_opens_its_draft_here() {
+    var harness = createHarness()
+    var app = harness.app
+    app.open(JSON.stringify({ account: "work", jid: "shared@example", conversation: true,
+      contact: { name: "Carla Synthetic", phone: "+1 555 000 2222", digits: "15550002222", jid: "",
+        message_id: "card", shared_by: "Sam" } }))
+    tryVerify(function() { return app.contactDraft !== null }, 1000, "the draft opens for that person")
+    compare(app.contactDraft.digits, "15550002222")
+    compare(app.contactDraft.sharedBy, "Sam")
+    app.closeContactDraft()
+    app.open(JSON.stringify({ account: "work", jid: "shared@example", conversation: true,
+      contact: { name: "Bad", digits: "12;rm" } }))
+    wait(0)
+    compare(app.contactDraft, null, "only digits are accepted")
   }
 }

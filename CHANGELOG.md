@@ -2,6 +2,16 @@
 
 ## Unreleased (fork)
 
+- Restyle, phase 5 (flows): Forward on a message now picks it in the
+  conversation, where more can be picked (an album counts each photo), with a
+  bar to forward or copy them. The dialog takes several chats as chips, an
+  optional note that follows the messages in each chat, and Ctrl+Enter; the
+  messages go oldest first, one WhatsApp action at a time, and a toast says
+  where they went with a button to open that chat. Message on a shared
+  contact with no chat opens a draft chat for that person over the chat the
+  card came from: it says who shared it, checks the number with WhatsApp
+  once, offers Copy number and Show the card, and the first Enter starts the
+  chat. With the matching wacli, that check no longer stops sync.
 - Restyle, phase 4 (bar dropdown): the header says "Chats" and how many are
   unread (click to show only those, right-click or Clear to clear the
   badges), with new chat and full app beside it. Rows are shorter, with the

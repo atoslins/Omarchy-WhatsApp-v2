@@ -78,7 +78,11 @@ must name someone the mirror lists in that exact group.
 
 Checking a typed number for a new chat is also an explicit remote read: the
 helper runs `wacli contacts check`, which asks WhatsApp whether the number is
-registered and stores nothing in the mirror. The confirmed JID is kept for 15
+registered and stores nothing in the mirror. Pressing Message on a shared
+contact nobody here has a chat with opens a draft chat for that person and
+asks the same question once, as it opens; nothing is sent until Enter. With a
+wacli build that delegates the check, it goes through the running sync, which
+keeps running. The confirmed JID is kept for 15
 minutes in the owner-private `new-chat-checks.json` (mode `0600`, at most 32
 entries), so the first message can go to exactly that recipient; expired
 entries are ignored and dropped the next time a number is checked.

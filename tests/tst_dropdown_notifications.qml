@@ -252,9 +252,13 @@ TestCase {
     compare(composer.selectedText, "~quick~ note")
     var spy = createTemporaryObject(spyComponent, testCase,
       { target: dropdown, signalName: "fullAppRequested" })
-    verify(dropdown.openContactChat({ name: "Nobody", digits: "15550009999", jid: "" }))
+    verify(dropdown.openContactChat({ name: "Nobody", digits: "15550009999", jid: "" },
+      { id: "card", sender: "Sam", from_me: false }))
     compare(spy.count, 1)
-    compare(spy.signalArguments[0][0].newChat, true)
-    compare(spy.signalArguments[0][0].newChatQuery, "15550009999")
+    // The full app opens that person's draft chat over this one (L220).
+    var handed = spy.signalArguments[0][0]
+    compare(handed.jid, "x@s.whatsapp.net")
+    compare(handed.contact.digits, "15550009999")
+    compare(handed.contact.shared_by, "Sam")
   }
 }

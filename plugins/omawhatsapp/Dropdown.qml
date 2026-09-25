@@ -509,7 +509,9 @@ Panel {
 
   // "Message" on a shared contact: its chat here when it has one, otherwise
   // the full app's new chat dialog with the number typed in.
-  function openContactChat(card) {
+  // A known person opens here; someone with no chat yet gets the full app's
+  // draft chat, over the chat the card came from.
+  function openContactChat(card, message) {
     if (!card || demoMode) return false
     var jid = String(card.jid || "")
     var chats = service && Array.isArray(service.chats) ? service.chats : []
@@ -518,8 +520,13 @@ Panel {
       openConversation(known)
       return true
     }
-    fullAppRequested({ newChat: true, newChatQuery: String(card.digits || "") })
+    var payload = DropdownModel.fullAppPayload(currentChat)
+    payload.contact = { name: String(card.name || ""), phone: String(card.phone || ""),
+      digits: String(card.digits || ""), jid: jid,
+      message_id: message ? String(message.id || "") : "",
+      shared_by: message && message.from_me !== true ? String(message.sender || "") : "" }
     close()
+    fullAppRequested(payload)
     return true
   }
 
@@ -1673,7 +1680,7 @@ Panel {
                   if (!root.demoMode && root.service)
                     root.service.votePoll(root.currentChatRef(), modelData, options, "dropdown")
                 }
-                onContactChatRequested: function(card) { root.openContactChat(card) }
+                onContactChatRequested: function(card) { root.openContactChat(card, modelData) }
                 onOptionRequested: function(optionIndex) {
                   if (!root.demoMode && root.service)
                     root.service.selectOption(

@@ -86,6 +86,24 @@ TestCase {
       signal attachmentPasted(string path, var chatRef, string owner)
       signal writeCompleted(string kind, var chatRef, var request, string owner)
       signal writeFailed(string message, var chatRef, var details, string owner)
+      // Number checks and first messages, as the new-chat flow uses them.
+      property var numberChecks: ({})
+      property var checkedNumbers: []
+      property var startedChats: []
+      property string lastStartedChatJid: ""
+      function checkNumber(phone) {
+        var digits = String(phone || "").replace(/[^0-9]/g, "")
+        checkedNumbers = checkedNumbers.concat([digits])
+        var next = Object.assign({}, numberChecks)
+        next[digits] = { phone: digits, loading: true, registered: false, jid: "", error: "" }
+        numberChecks = next
+        return true
+      }
+      function numberCheckFor(digits) { return numberChecks[String(digits || "")] || null }
+      function startNewChat(jid, text, owner) {
+        startedChats = startedChats.concat([{ jid: jid, text: text, owner: owner }])
+        return true
+      }
       signal controlCompleted(string kind)
       signal controlFailed(string message)
       signal settingsCompleted()
@@ -650,10 +668,18 @@ TestCase {
     verify(h.app.openContactChat({ name: "Synthetic other", digits: "15550001111",
                                    jid: "other@example", has_chat: true }))
     compare(h.service.selectedChatJid, "other@example")
-    verify(h.app.openContactChat({ name: "Nobody", digits: "15550009999", jid: "", has_chat: false }))
-    var dialog = findChild(h.app, "newChatDialog")
-    tryCompare(dialog, "opened", true)
-    tryCompare(dialog, "query", "15550009999")
+    // Someone with no chat yet gets a draft chat over this one (L220), not
+    // the new-chat dialog; the number is checked once, and Esc goes back.
+    verify(h.app.openContactChat({ name: "Nobody Synthetic", digits: "15550009999", jid: "", has_chat: false },
+      { id: "card-message", sender: "Sam Rivera", from_me: false }))
+    var panel = findChild(h.app, "contactDraftPanel")
+    verify(panel.visible)
+    compare(h.app.contactDraft.digits, "15550009999")
+    compare(h.app.contactDraft.sharedBy, "Sam")
+    verify(findChild(h.app, "contactDraftExplainer").text.indexOf("Sam shared this contact") === 0)
+    verify(!findChild(h.app, "newChatDialog").opened)
+    h.app.closeContactDraft()
+    verify(!panel.visible)
   }
 
   function test_new_chat_hands_new_group_to_its_dialog() {
@@ -931,5 +957,60 @@ TestCase {
     preview.toggled()
     compare(harness.service.lastNotifications.enabled, null)
     compare(harness.service.lastNotifications.preview, false)
+  }
+
+  function test_a_shared_contact_draft_checks_once_then_sends_and_opens_the_chat() {
+    var h = createHarness()
+    verify(h.app.openContactChat({ name: "Carla Synthetic", phone: "+1 555 000 2222", digits: "15550002222",
+      jid: "", has_chat: false }, { id: "card", sender: "Sam", from_me: false }))
+    compare(h.service.checkedNumbers, ["15550002222"], "asked WhatsApp once, on opening")
+    compare(h.app.contactDraftState, "checking")
+    var status = findChild(h.app, "contactDraftStatus")
+    verify(status.text.indexOf("checking") > 0)
+    var send = findChild(h.app, "contactDraftSend")
+    var field = findChild(h.app, "contactDraftField")
+    field.text = "hello Carla"
+    verify(!send.ready, "nothing goes before WhatsApp answers")
+    verify(!h.app.sendContactDraft())
+    h.service.numberChecks = { "15550002222": { phone: "15550002222", loading: false, registered: true,
+      jid: "15550002222@s.whatsapp.net", error: "" } }
+    compare(h.app.contactDraftState, "registered")
+    verify(status.text.indexOf("on WhatsApp") > 0)
+    verify(send.ready)
+    verify(h.app.sendContactDraft())
+    compare(h.service.startedChats.length, 1)
+    compare(h.service.startedChats[0].jid, "15550002222@s.whatsapp.net")
+    compare(h.service.startedChats[0].text, "hello Carla")
+    verify(!field.enabled, "one send at a time")
+    h.service.lastStartedChatJid = "15550002222@s.whatsapp.net"
+    h.service.writeCompleted("send-new", { account: "work", jid: "15550002222@s.whatsapp.net" },
+      { target: { jid: "15550002222@s.whatsapp.net" }, text: "hello Carla" }, "app")
+    compare(h.app.contactDraft, null, "the draft gives way to the new chat")
+    compare(h.app.pendingOpenChatJid, "15550002222@s.whatsapp.net")
+  }
+
+  function test_a_contact_not_on_whatsapp_cannot_be_messaged() {
+    var h = createHarness()
+    verify(h.app.openContactChat({ name: "Nobody Synthetic", digits: "15550003333", jid: "" }))
+    h.service.numberChecks = { "15550003333": { phone: "15550003333", loading: false, registered: false,
+      responded: true, jid: "", error: "" } }
+    compare(h.app.contactDraftState, "absent")
+    verify(!findChild(h.app, "contactDraftField").enabled)
+    verify(findChild(h.app, "contactDraftExplainer").text.indexOf("is not on WhatsApp") > 0)
+  }
+
+  function test_a_failed_first_message_stays_in_the_draft() {
+    var h = createHarness()
+    verify(h.app.openContactChat({ name: "Known Synthetic", digits: "15550004444",
+      jid: "15550004444@s.whatsapp.net", has_chat: false }))
+    compare(h.app.contactDraftState, "known", "a known person needs no check")
+    compare(h.service.checkedNumbers.length, 0)
+    findChild(h.app, "contactDraftField").text = "hi"
+    verify(h.app.sendContactDraft())
+    h.service.writeFailed("WhatsApp refused it.", { account: "work", jid: "15550004444@s.whatsapp.net" },
+      { kind: "send-new", request: {} }, "app")
+    verify(h.app.contactDraft !== null)
+    compare(findChild(h.app, "contactDraftError").text, "WhatsApp refused it.")
+    verify(findChild(h.app, "contactDraftField").enabled)
   }
 }

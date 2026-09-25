@@ -85,8 +85,35 @@ Item {
   property var deleteOriginRef: AccountModel.chatRef("", "")
   property bool deleteForMe: true
   property var removeLocalTargetRef: AccountModel.chatRef("", "")
-  property var forwardTarget: null
+  // Forwarding: messages picked in the conversation (selection mode), then
+  // the chats and an optional note in the dialog.
+  property bool selectingMessages: false
+  property var selectedMessageIds: []
+  property var forwardItems: []
+  property var forwardChosen: []
   property var forwardOriginRef: AccountModel.chatRef("", "")
+  // Someone shared a contact with no chat yet: a draft chat for that person,
+  // over the conversation it came from, until the first message is sent.
+  property var contactDraft: null
+  property bool contactDraftSending: false
+  property string contactDraftError: ""
+  readonly property var contactDraftCheck: !contactDraft || demoMode || !service
+    || typeof service.numberCheckFor !== "function" ? null : service.numberCheckFor(contactDraft.digits)
+  // known: this account knows the person; else what WhatsApp answered.
+  readonly property string contactDraftState: !contactDraft ? ""
+    : contactDraft.jid !== "" ? "known"
+    : demoMode ? "registered"
+    : contactDraftCheck === null ? "idle"
+    : contactDraftCheck.loading ? "checking"
+    : contactDraftCheck.error ? "error"
+    : contactDraftCheck.registered ? "registered" : "absent"
+  readonly property string contactDraftJid: !contactDraft ? ""
+    : contactDraft.jid !== "" ? contactDraft.jid
+    : demoMode ? contactDraft.digits + "@s.whatsapp.net"
+    : contactDraftCheck && contactDraftCheck.registered ? String(contactDraftCheck.jid || "") : ""
+  // A toast can offer one action, such as opening the chat a forward went to.
+  property string toastActionLabel: ""
+  property var toastActionChat: null
   property var pollOriginRef: AccountModel.chatRef("", "")
   property var pendingAttachments: []
   property string attachmentError: ""
@@ -353,7 +380,18 @@ Item {
         && String(payload.forward.id || "") !== "" && String(payload.jid || "") !== "") {
       var forwardItem = Object.assign({}, payload.forward)
       var forwardRef = AccountModel.chatRef(String(payload.account || ""), String(payload.jid))
-      Qt.callLater(function() { root.startForwardFrom(forwardRef, forwardItem) })
+      Qt.callLater(function() { root.startForwardFrom(forwardRef, [forwardItem]) })
+    }
+    // {"contact":{…}} from the dropdown: the shared contact's draft chat
+    // opens here, over the chat the card came from.
+    if (payload.contact && typeof payload.contact === "object"
+        && /^[0-9]{7,15}$/.test(String(payload.contact.digits || ""))) {
+      var contactCard = {
+        name: String(payload.contact.name || ""), phone: String(payload.contact.phone || ""),
+        digits: String(payload.contact.digits), jid: String(payload.contact.jid || "") }
+      var contactMessage = { id: String(payload.contact.message_id || ""),
+        sender: String(payload.contact.shared_by || ""), from_me: false }
+      Qt.callLater(function() { root.openContactChat(contactCard, contactMessage) })
     }
     // {"newChat":true} opens the new chat dialog; demo captures may prefill it.
     if (payload.newChat === true) {
@@ -974,10 +1012,12 @@ Item {
 
   // "Message" on a shared contact: its chat when there is one, otherwise the
   // new chat dialog with the number already typed.
-  function openContactChat(card) {
-    if (!card || demoMode) return false
+  // "Message" on a shared contact: the chat with that person if there is
+  // one, else a draft chat that starts with the first message.
+  function openContactChat(card, message) {
+    if (!card) return false
     var jid = String(card.jid || "")
-    var chats = service && Array.isArray(service.chats) ? service.chats : []
+    var chats = root.sourceChats
     var known = jid === "" ? null : chats.find(function(chat) {
       return String(chat.jid || "") === jid
         && String(chat.account || "") === String(root.selectedAccount || chat.account || "")
@@ -986,7 +1026,67 @@ Item {
       selectChat(known)
       return true
     }
-    return openNewChat(String(card.digits || ""))
+    var digits = String(card.digits || "").replace(/[^0-9]/g, "")
+    if (digits.length < 7 || digits.length > 15) return false
+    contactDraft = {
+      name: String(card.name || "").trim() || ("+" + digits),
+      phone: String(card.phone || "").trim() || ("+" + digits),
+      digits: digits, jid: jid,
+      originRef: currentChatRef(), originName: String(root.displayGroupName || "the chat"),
+      sharedBy: message && message.from_me !== true ? String(message.sender || "").trim().split(/\s+/)[0] : "",
+      messageId: message ? String(message.id || "") : ""
+    }
+    contactDraftError = ""
+    contactDraftSending = false
+    contactDraftField.text = ""
+    // Asking WhatsApp whether the number is there happens once, here; nothing
+    // is sent until Enter.
+    if (jid === "" && !demoMode && service && typeof service.checkNumber === "function")
+      service.checkNumber("+" + digits)
+    Qt.callLater(function() { contactDraftField.forceActiveFocus() })
+    return true
+  }
+
+  function closeContactDraft() {
+    contactDraft = null
+    contactDraftSending = false
+    contactDraftError = ""
+    focusComposer()
+  }
+
+  // Back in the chat it came from, on the card itself.
+  function showContactCard() {
+    var id = contactDraft ? contactDraft.messageId : ""
+    closeContactDraft()
+    var index = AccountModel.messageIndexOf(root.visibleMessages, id)
+    if (index < 0) return false
+    cursorIndex = index
+    Qt.callLater(function() { messageList.positionViewAtIndex(index, ListView.Center) })
+    focusMessages()
+    return true
+  }
+
+  function retryContactCheck() {
+    if (!contactDraft || demoMode || !service) return false
+    return service.checkNumber("+" + contactDraft.digits)
+  }
+
+  function sendContactDraft() {
+    var text = String(contactDraftField.text || "").trim()
+    if (!contactDraft || text === "" || contactDraftSending || root.contactDraftJid === "") return false
+    contactDraftError = ""
+    if (demoMode) {
+      showToast("message sent to " + contactDraft.name)
+      closeContactDraft()
+      return true
+    }
+    if (!service || !service.startNewChat(root.contactDraftJid, text, "app")) {
+      contactDraftError = service && service.errorText ? service.errorText
+        : "WhatsApp is busy with another request. Try again in a moment."
+      return false
+    }
+    contactDraftSending = true
+    return true
   }
 
   function pasteDraft() {
@@ -1237,10 +1337,24 @@ Item {
     showToast("copied to clipboard")
   }
 
-  function showToast(message) {
+  function showToast(message, actionLabel, actionChat) {
     toastText = String(message || "")
+    toastActionLabel = actionChat ? String(actionLabel || "") : ""
+    toastActionChat = actionChat || null
+    // A toast with something to do stays long enough to do it.
+    copyToastTimer.interval = toastActionLabel !== "" ? 6000 : 1800
     copyToastVisible = true
     copyToastTimer.restart()
+  }
+
+  function runToastAction() {
+    var chat = toastActionChat
+    copyToastVisible = false
+    toastActionChat = null
+    if (!chat) return false
+    var known = AccountModel.findChat(sourceChats, AccountModel.refOf(chat))
+    if (known) selectChat(known)
+    return !!known
   }
 
   // "N unread messages" divider: the count is captured when the chat is
@@ -1458,34 +1572,133 @@ Item {
     return service.chatAction(targetRef, "remove-local", "app")
   }
 
+  // Forward from a message: the conversation enters selection mode with it
+  // picked, so more can be added before choosing where they go.
   function startForward(item) {
-    startForwardFrom(currentChatRef(), item)
+    var ids = messageIdsOf(item)
+    if (ids.length === 0 || item.pending === true) return false
+    forwardOriginRef = currentChatRef()
+    selectedMessageIds = ids
+    selectingMessages = true
+    return true
   }
 
-  function startForwardFrom(originRef, item) {
-    forwardTarget = item
+  // An album row stands for each of its photos.
+  function messageIdsOf(item) {
+    if (!item) return []
+    var parts = item.album_items && typeof item.album_items.length === "number" && item.album_items.length > 0
+      ? Array.prototype.slice.call(item.album_items) : [item]
+    return parts.map(function(part) { return String(part && part.id || "") })
+      .filter(function(id) { return id !== "" })
+  }
+
+  function isMessageSelected(item) {
+    var ids = messageIdsOf(item)
+    return ids.length > 0 && ids.every(function(id) { return selectedMessageIds.indexOf(id) >= 0 })
+  }
+
+  function toggleMessageSelection(item) {
+    var ids = messageIdsOf(item)
+    if (ids.length === 0 || item.pending === true || item.revoked === true) return false
+    selectedMessageIds = isMessageSelected(item)
+      ? selectedMessageIds.filter(function(value) { return ids.indexOf(value) < 0 })
+      : selectedMessageIds.concat(ids.filter(function(id) { return selectedMessageIds.indexOf(id) < 0 }))
+    return true
+  }
+
+  function cancelSelection() {
+    selectingMessages = false
+    selectedMessageIds = []
+  }
+
+  // The picked messages oldest first, the order they are forwarded in.
+  function selectedMessages() {
+    var picked = []
+    var ids = selectedMessageIds
+    root.visibleMessages.forEach(function(item) {
+      var parts = item && item.album_items && typeof item.album_items.length === "number"
+        ? Array.prototype.slice.call(item.album_items) : [item]
+      parts.forEach(function(part) {
+        if (part && ids.indexOf(String(part.id || "")) >= 0 && picked.indexOf(part) < 0) picked.push(part)
+      })
+    })
+    return picked.sort(function(a, b) { return Number(a.timestamp || 0) - Number(b.timestamp || 0) })
+  }
+
+  function copySelection() {
+    var text = selectedMessages().map(function(item) { return String(item.text || "").trim() })
+      .filter(function(value) { return value !== "" }).join("\n")
+    if (text === "") return false
+    copyText(text)
+    showToast("copied " + selectedMessageIds.length + (selectedMessageIds.length === 1 ? " message" : " messages"))
+    cancelSelection()
+    return true
+  }
+
+  function openForwardDialog() {
+    var items = selectedMessages()
+    if (items.length === 0) return false
+    return startForwardFrom(forwardOriginRef, items)
+  }
+
+  // Straight to the dialog, as the dropdown hands a forward over.
+  function startForwardFrom(originRef, items) {
+    var list = Array.isArray(items) ? items : [items]
+    list = list.filter(function(item) { return item && String(item.id || "") !== "" })
+    if (list.length === 0) return false
+    forwardItems = list
     forwardOriginRef = originRef
+    forwardChosen = []
     forwardSearch.text = ""
+    forwardNote.text = ""
     forwardPicker.open()
     Qt.callLater(function() { forwardSearch.forceActiveFocus() })
+    return true
   }
 
   function dismissForward() {
-    forwardTarget = null
-    forwardOriginRef = AccountModel.chatRef("", "")
+    forwardItems = []
+    forwardChosen = []
     forwardPicker.close()
   }
 
-  function forwardTo(chat) {
-    var target = AccountModel.refOf(chat)
+  function isForwardChosen(chat) {
+    var ref = AccountModel.refOf(chat)
+    return forwardChosen.some(function(item) { return AccountModel.sameRef(AccountModel.refOf(item), ref) })
+  }
+
+  function toggleForwardTarget(chat) {
+    if (!chat || String(chat.jid || "") === ""
+        || String(chat.account || "") !== String(forwardOriginRef.account || "")) return false
+    var ref = AccountModel.refOf(chat)
+    forwardChosen = isForwardChosen(chat)
+      ? forwardChosen.filter(function(item) { return !AccountModel.sameRef(AccountModel.refOf(item), ref) })
+      : forwardChosen.concat([chat])
+    return true
+  }
+
+  function forwardNames(targets) {
+    var names = (targets || []).map(function(chat) { return String(chat.name || "WhatsApp chat") })
+    if (names.length <= 2) return names.join(" and ")
+    return names.slice(0, 2).join(", ") + " and " + (names.length - 2)
+      + (names.length === 3 ? " other chat" : " other chats")
+  }
+
+  function sendForward() {
     var origin = forwardOriginRef
-    var item = forwardTarget
-    if (demoMode || !service || !item || String(origin.jid || "") === ""
-        || String(target.account || "") !== String(origin.account || "")
-        || String(target.jid || "") === "") return false
-    var started = service.forwardMessage(origin, item, target.jid, "app")
-    if (started) dismissForward()
-    return started
+    if (forwardItems.length === 0 || forwardChosen.length === 0 || String(origin.jid || "") === "") return false
+    var targets = forwardChosen.slice()
+    if (demoMode) {
+      dismissForward()
+      cancelSelection()
+      showToast("forwarded to " + forwardNames(targets), "Open " + String(targets[0].name || "chat"), targets[0])
+      return true
+    }
+    if (!service || !service.forwardMany(origin, forwardItems, targets, forwardNote.text, "app")) return false
+    dismissForward()
+    cancelSelection()
+    showToast("forwarding to " + forwardNames(targets) + "…")
+    return true
   }
 
   function startPoll() {
@@ -1675,8 +1888,19 @@ Item {
         root.showToast(Number(answer.downloaded || 0) + " downloaded"
           + (Number(answer.expired || 0) > 0 ? ", " + answer.expired + " expired on WhatsApp" : ""))
       if (kind === "contact-alias") root.showToast(String(request.alias || "") !== "" ? "alias saved" : "alias removed")
-      // Forwarding happens in another chat: say where it went.
-      if (kind === "forward") root.showToast("forwarded to " + String(answer.target || "the chat"))
+      // The first message to a shared contact: the new chat opens.
+      if (kind === "send-new" && root.contactDraftSending && root.contactDraft
+          && String(request.target && request.target.jid || "") === root.contactDraftJid) {
+        var landed = root.service ? String(root.service.lastStartedChatJid || "") : ""
+        root.contactDraft = null
+        root.contactDraftSending = false
+        root.followStartedChat(landed !== "" ? landed : String(request.target.jid))
+        return
+      }
+      // Forwarding happens in another chat: say where it went. A batch says
+      // it once, when it ends.
+      if (kind === "forward" && request.batch !== true)
+        root.showToast("forwarded to " + String(answer.target || "the chat"))
       if (kind === "contact-tag") root.showToast(request.remove ? "tag removed" : "tag added")
       var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey
@@ -1704,8 +1928,18 @@ Item {
         pollOptions.text = ""
       }
       if (sameChat && kind === "voice") root.cancelComposerContext(false)
-      if (kind === "forward") root.forwardTarget = null
-      if (sameChat) root.focusComposer()
+      if (sameChat && kind !== "forward") root.focusComposer()
+    }
+    function onForwardBatchFinished(summary) {
+      if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
+      var targets = summary.targets || []
+      if (Number(summary.failed || 0) === 0)
+        root.showToast("forwarded to " + root.forwardNames(targets),
+          targets.length > 0 ? "Open " + String(targets[0].name || "chat") : "", targets[0])
+      else
+        root.showToast(Number(summary.failed) + " of " + Number(summary.total)
+          + " could not be forwarded" + (summary.errors && summary.errors.length > 0
+            ? " · " + String(summary.errors[0]) : ""))
     }
     function onWriteFailed(message, chatRef, details, owner) {
       if (!ComposerModel.ownsOperation(owner, "app")) return
@@ -1713,6 +1947,13 @@ Item {
       var sameChat = key === root.composerChatKey
       var kind = String(details && details.kind || root.pendingWriteKind)
       var request = details && details.request ? details.request : ({})
+      // A forward batch reports its failures together when it ends.
+      if (kind === "forward" && request.batch === true) return
+      if (kind === "send-new" && root.contactDraftSending) {
+        root.contactDraftSending = false
+        root.contactDraftError = String(message || "The message could not be sent.")
+        return
+      }
       // A failed text stays as a bubble to retry; the composer keeps what
       // was typed since.
       var snapshot = key === root.pendingWriteChatKey && !(details && details.pending_kept)
@@ -1803,6 +2044,13 @@ Item {
         sequence: "Ctrl+O"
         context: Qt.WindowShortcut
         onActivated: root.openFilePicker("document")
+      }
+
+      Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        enabled: root.selectingMessages && !forwardPicker.opened
+        onActivated: root.cancelSelection()
       }
 
       Shortcut {
@@ -1937,7 +2185,9 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Style.space(98)
+        objectName: "toast"
         width: copyToastLabel.implicitWidth + Style.space(30)
+          + (toastAction.visible ? toastAction.width + Style.space(10) : 0)
         height: Style.space(42)
         radius: Style.cornerRadius
         color: root.background
@@ -1947,7 +2197,9 @@ Item {
         Text {
           textFormat: Text.PlainText
           id: copyToastLabel
-          anchors.centerIn: parent
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(15)
+          anchors.verticalCenter: parent.verticalCenter
           text: "●  " + root.toastText
           color: root.foreground
           font.family: root.fontFamily
@@ -1959,6 +2211,32 @@ Item {
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
           onClicked: root.copyToastVisible = false
+        }
+
+        // One thing to do next, such as opening the chat a forward went to.
+        Rectangle {
+          id: toastAction
+          objectName: "toastAction"
+          visible: root.toastActionLabel !== ""
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(6)
+          anchors.verticalCenter: parent.verticalCenter
+          width: toastActionText.implicitWidth + Style.space(22)
+          height: Style.space(30)
+          radius: Style.cornerRadius
+          color: toastActionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+            : Style.normalFillFor(root.foreground, root.accent)
+          Text {
+            textFormat: Text.PlainText
+            id: toastActionText
+            anchors.centerIn: parent
+            text: root.toastActionLabel
+            color: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+          HoverHandler { id: toastActionHover; cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: root.runToastAction() }
         }
       }
 
@@ -2803,6 +3081,81 @@ Item {
           anchors.right: parent.right
           height: Style.space(54)
 
+          // Picking messages: how many, and what can be done with them.
+          Rectangle {
+            id: selectionBar
+            objectName: "selectionBar"
+            visible: root.selectingMessages
+            anchors.fill: parent
+            z: 20
+            color: Qt.tint(root.background, Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12))
+            MouseArea { anchors.fill: parent }
+            PanelActionButton {
+              id: selectionCancel
+              objectName: "selectionCancel"
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(14)
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰅖"
+              tooltipText: "Cancel · Esc"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.body
+              size: Style.space(32)
+              onClicked: root.cancelSelection()
+            }
+            Text {
+              textFormat: Text.PlainText
+              objectName: "selectionCount"
+              anchors.left: selectionCancel.right
+              anchors.leftMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.selectedMessageIds.length === 0 ? "Pick messages"
+                : root.selectedMessageIds.length + " selected"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.weight: Font.Bold
+            }
+            Row {
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(16)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+              Repeater {
+                model: [{ id: "copy", label: "Copy" }, { id: "forward", label: "Forward" }]
+                delegate: Rectangle {
+                  id: selectionAction
+                  required property var modelData
+                  objectName: "selectionAction-" + modelData.id
+                  readonly property bool primary: modelData.id === "forward"
+                  readonly property bool enabledHere: root.selectedMessageIds.length > 0
+                  width: selectionActionLabel.implicitWidth + Style.space(24)
+                  height: Style.space(32)
+                  radius: Style.cornerRadius
+                  opacity: enabledHere ? 1 : 0.45
+                  color: primary ? (selectionActionHover.hovered ? Qt.lighter(root.accent, 1.1) : root.accent)
+                    : (selectionActionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+                  Text {
+                    textFormat: Text.PlainText
+                    id: selectionActionLabel
+                    anchors.centerIn: parent
+                    text: selectionAction.modelData.label
+                    color: selectionAction.primary ? root.background : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.weight: selectionAction.primary ? Font.Bold : Font.Normal
+                  }
+                  HoverHandler { id: selectionActionHover; cursorShape: Qt.PointingHandCursor }
+                  TapHandler {
+                    enabled: selectionAction.enabledHere
+                    onTapped: selectionAction.primary ? root.openForwardDialog() : root.copySelection()
+                  }
+                }
+              }
+            }
+          }
+
           Row {
             id: conversationTitleRow
             anchors.left: parent.left
@@ -3201,7 +3554,9 @@ Item {
               id: renderedMessage
               anchors.top: unreadDivider.bottom
               timeFormat: root.timeFormat
-              width: parent.width
+              // Picking messages: the bubbles make room for the check circles.
+              x: root.selectingMessages ? Style.space(40) : 0
+              width: parent.width - x
               message: modelData
               foreground: root.foreground
               background: root.background
@@ -3249,11 +3604,55 @@ Item {
                 if (!root.demoMode && root.service)
                   root.service.votePoll(root.currentChatRef(), modelData, options, "app")
               }
-              onContactChatRequested: function(card) { root.openContactChat(card) }
+              onContactChatRequested: function(card) { root.openContactChat(card, modelData) }
               onOptionRequested: function(optionIndex) {
                 if (!root.demoMode && root.service)
                   root.service.selectOption(
                     root.currentChatRef(), modelData, optionIndex, "app")
+              }
+            }
+
+            // While picking, the whole row toggles its message.
+            Item {
+              objectName: "messageSelectArea"
+              visible: root.selectingMessages
+              z: 5
+              anchors.top: renderedMessage.top
+              anchors.bottom: renderedMessage.bottom
+              width: parent.width
+              readonly property bool pickable: modelData.pending !== true && modelData.revoked !== true
+              readonly property bool picked: root.isMessageSelected(modelData)
+              Rectangle {
+                anchors.fill: parent
+                color: parent.picked ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10) : "transparent"
+              }
+              Rectangle {
+                objectName: "messageSelectCircle"
+                visible: parent.pickable
+                x: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(20)
+                height: width
+                radius: width / 2
+                color: parent.picked ? root.accent : "transparent"
+                border.width: parent.picked ? 0 : 2
+                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  visible: parent.parent.picked
+                  text: "󰄬"
+                  color: root.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Bold
+                }
+              }
+              MouseArea {
+                anchors.fill: parent
+                enabled: parent.pickable
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleMessageSelection(messageRow.modelData)
               }
             }
           }
@@ -4439,106 +4838,640 @@ Item {
         }
       }
 
+      // Forward: what goes, to which chats (several at once), and an
+      // optional note that follows the messages in each chat.
       Popup {
         id: forwardPicker
+        objectName: "forwardPicker"
         parent: Overlay.overlay
         anchors.centerIn: parent
-        width: Math.min(Style.space(430), window.width - Style.space(28))
-        height: Math.min(Style.space(520), window.height - Style.space(36))
-        padding: Style.space(14)
+        width: Math.min(Style.space(520), window.width - Style.space(28))
+        height: Math.min(Style.space(660), window.height - Style.space(36))
+        padding: 0
         modal: true
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onClosed: {
-          root.forwardTarget = null
-          root.forwardOriginRef = AccountModel.chatRef("", "")
+          root.forwardItems = []
+          root.forwardChosen = []
         }
+        readonly property var matches: root.forwardCandidates.filter(function(chat) {
+          var needle = String(forwardSearch.text || "").trim().toLowerCase()
+          return needle === "" || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
+        })
         background: Rectangle {
-          radius: Style.cornerRadius
+          radius: Style.cornerRadius + 4
           color: root.background
           border.width: 1
           border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
         }
-        contentItem: Column {
-          spacing: Style.space(10)
-          Item {
-            width: parent.width
-            height: Style.space(30)
-            Text {
-              textFormat: Text.PlainText
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              text: "Forward message"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
-            }
-            Text {
-              textFormat: Text.PlainText
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: "×"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              TapHandler { onTapped: root.dismissForward() }
-              HoverHandler { id: dismissForwardHover }
-              PanelToolTip { visible: dismissForwardHover.hovered; text: "Close · Esc" }
-            }
-          }
-          TextField {
-            id: forwardSearch
-            width: parent.width
-            placeholderText: "Search chats"
-            foreground: root.foreground
-            accent: root.accent
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            background: Rectangle {
-              radius: Style.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-              border.width: forwardSearch.activeFocus ? 1 : 0
-              border.color: root.accent
-            }
-          }
-          ListView {
-            width: parent.width
-            height: forwardPicker.height - Style.space(116)
-            clip: true
-            spacing: Style.space(3)
-            model: root.forwardCandidates
-              .filter(function(chat) {
-                var needle = String(forwardSearch.text || "").trim().toLowerCase()
-                return needle === ""
-                  || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
-              })
-            delegate: Rectangle {
-              required property var modelData
+        Shortcut {
+          sequences: ["Ctrl+Return", "Ctrl+Enter"]
+          context: Qt.WindowShortcut
+          enabled: forwardPicker.opened
+          onActivated: root.sendForward()
+        }
+        contentItem: Item {
+          Column {
+            id: forwardHeaderColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(18)
+            spacing: Style.space(12)
+
+            Item {
               width: parent.width
-              height: Style.space(48)
-              radius: Style.cornerRadius
-              color: forwardHover.hovered
-                ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+              height: Style.space(30)
               Text {
                 textFormat: Text.PlainText
+                objectName: "forwardTitle"
                 anchors.left: parent.left
-                anchors.leftMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.forwardItems.length === 1 ? "Forward message"
+                  : "Forward " + root.forwardItems.length + " messages"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.heading
+                font.weight: Font.Bold
+              }
+              PanelActionButton {
                 anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰅖"
+                tooltipText: "Close · Esc"
+                foreground: root.dim
+                hoverColor: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                size: Style.space(30)
+                onClicked: root.dismissForward()
+              }
+            }
+
+            // What goes: kind and words of each message, up to three.
+            Rectangle {
+              objectName: "forwardPreview"
+              width: parent.width
+              height: forwardPreviewColumn.implicitHeight + Style.space(16)
+              radius: Style.cornerRadius + 2
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                id: forwardPreviewColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.margins: Style.space(10)
+                spacing: Style.space(4)
+                Repeater {
+                  model: root.forwardItems.slice(0, 3)
+                  delegate: Text {
+                    required property var modelData
+                    textFormat: Text.PlainText
+                    width: forwardPreviewColumn.width
+                    readonly property var parts: AccountModel.previewParts({
+                      preview: String(modelData.text || modelData.filename || ""),
+                      last_media_type: String(modelData.media_type || "") })
+                    text: (AccountModel.previewKindGlyph(parts.kind) !== ""
+                      ? AccountModel.previewKindGlyph(parts.kind) + "  " : "")
+                      + (FormatModel.plain(parts.text) || "Message")
+                    elide: Text.ElideRight
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  visible: root.forwardItems.length > 3
+                  text: "+" + (root.forwardItems.length - 3) + " more"
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+
+            // Where it goes: each chosen chat as a chip, then the search.
+            Rectangle {
+              width: parent.width
+              height: Math.max(Style.space(40), forwardChipFlow.implicitHeight + Style.space(12))
+              radius: Style.cornerRadius + 2
+              color: Style.normalFillFor(root.foreground, root.accent)
+              border.width: 1
+              border.color: forwardSearch.activeFocus ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.7)
+                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+              Flow {
+                id: forwardChipFlow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(8)
+                anchors.rightMargin: Style.space(8)
+                spacing: Style.space(6)
+                Repeater {
+                  model: root.forwardChosen
+                  delegate: Rectangle {
+                    id: forwardChip
+                    required property var modelData
+                    objectName: "forwardChip"
+                    width: forwardChipLabel.implicitWidth + Style.space(28)
+                    height: Style.space(24)
+                    radius: height / 2
+                    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+                    Text {
+                      textFormat: Text.PlainText
+                      id: forwardChipLabel
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: String(forwardChip.modelData.name || "WhatsApp chat")
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      textFormat: Text.PlainText
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "×"
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                    }
+                    TapHandler { onTapped: root.toggleForwardTarget(forwardChip.modelData) }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                  }
+                }
+                TextField {
+                  id: forwardSearch
+                  objectName: "forwardSearch"
+                  width: Math.max(Style.space(140), forwardChipFlow.width
+                    - (root.forwardChosen.length > 0 ? Style.space(4) : 0))
+                  height: Style.space(28)
+                  placeholderText: root.forwardChosen.length > 0 ? "Add another chat" : "Search chats"
+                  foreground: root.foreground
+                  accent: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  leftPadding: Style.space(4)
+                  background: null
+                  Keys.onPressed: function(event) {
+                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                        && !(event.modifiers & Qt.ControlModifier)) {
+                      // Enter picks the only match, or the first one.
+                      if (forwardPicker.matches.length > 0) {
+                        root.toggleForwardTarget(forwardPicker.matches[0])
+                        forwardSearch.text = ""
+                      }
+                      event.accepted = true
+                    } else if (event.key === Qt.Key_Backspace && forwardSearch.text === ""
+                               && root.forwardChosen.length > 0) {
+                      root.toggleForwardTarget(root.forwardChosen[root.forwardChosen.length - 1])
+                      event.accepted = true
+                    }
+                  }
+                }
+              }
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "RECENT"
+              color: root.dimmer
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption - 1
+              font.letterSpacing: 1.4
+            }
+          }
+
+          ListView {
+            id: forwardList
+            objectName: "forwardList"
+            anchors.top: forwardHeaderColumn.bottom
+            anchors.topMargin: Style.space(4)
+            anchors.bottom: forwardFooter.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(10)
+            clip: true
+            spacing: Style.space(2)
+            model: forwardPicker.matches
+            delegate: Rectangle {
+              id: forwardRow
+              required property var modelData
+              objectName: "forwardRow"
+              readonly property bool chosen: root.isForwardChosen(modelData)
+              width: forwardList.width
+              height: Style.space(48)
+              radius: Style.cornerRadius
+              color: chosen ? Style.selectedFillFor(root.foreground, root.accent)
+                : forwardRowHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+              ChatAvatar {
+                id: forwardAvatar
+                x: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(34)
+                height: width
+                showPhoto: root.showAvatars
+                chat: forwardRow.modelData
+                foreground: root.foreground
+                background: root.background
+                accent: root.accent
+                fontFamily: root.fontFamily
+              }
+              Text {
+                textFormat: Text.PlainText
+                anchors.left: forwardAvatar.right
+                anchors.leftMargin: Style.space(12)
+                anchors.right: forwardCheck.left
                 anchors.rightMargin: Style.space(10)
                 anchors.verticalCenter: parent.verticalCenter
-                text: String(modelData.name || "WhatsApp chat")
+                text: String(forwardRow.modelData.name || "WhatsApp chat")
                 color: root.foreground
                 elide: Text.ElideRight
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
               }
-              HoverHandler { id: forwardHover }
-              TapHandler {
-                onTapped: {
-                  root.forwardTo(modelData)
+              Rectangle {
+                id: forwardCheck
+                objectName: "forwardCheck"
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(20)
+                height: width
+                radius: 5
+                color: forwardRow.chosen ? root.accent : "transparent"
+                border.width: forwardRow.chosen ? 0 : 2
+                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  visible: forwardRow.chosen
+                  text: "󰄬"
+                  color: root.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Bold
+                }
+              }
+              HoverHandler { id: forwardRowHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: root.toggleForwardTarget(forwardRow.modelData) }
+            }
+            Text {
+              textFormat: Text.PlainText
+              visible: forwardList.count === 0
+              anchors.centerIn: parent
+              text: "No chat matches"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          Column {
+            id: forwardFooter
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: Style.space(18)
+            spacing: Style.space(10)
+            Rectangle {
+              width: parent.width
+              height: 1
+              color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+            }
+            TextField {
+              id: forwardNote
+              objectName: "forwardNote"
+              width: parent.width
+              height: Style.space(38)
+              placeholderText: "Add a message (optional)"
+              foreground: root.foreground
+              accent: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              background: Rectangle {
+                radius: Style.cornerRadius + 1
+                color: Style.normalFillFor(root.foreground, root.accent)
+                border.width: 1
+                border.color: forwardNote.activeFocus ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.7)
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+              }
+            }
+            Item {
+              width: parent.width
+              height: Style.space(40)
+              Text {
+                textFormat: Text.PlainText
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Ctrl+Enter sends"
+                color: root.dimmer
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+              Rectangle {
+                id: forwardSend
+                objectName: "forwardSend"
+                readonly property bool ready: root.forwardChosen.length > 0 && root.forwardItems.length > 0
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: forwardSendLabel.implicitWidth + Style.space(36)
+                height: Style.space(40)
+                radius: Style.cornerRadius + 2
+                opacity: ready ? 1 : 0.45
+                color: forwardSendHover.hovered && ready ? Qt.lighter(root.accent, 1.1) : root.accent
+                Text {
+                  textFormat: Text.PlainText
+                  id: forwardSendLabel
+                  anchors.centerIn: parent
+                  text: root.forwardChosen.length > 1 ? "Send to " + root.forwardChosen.length + " chats"
+                    : root.forwardChosen.length === 1 ? "Send to " + String(root.forwardChosen[0].name || "chat")
+                    : "Choose a chat"
+                  color: root.background
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.weight: Font.Bold
+                }
+                HoverHandler { id: forwardSendHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { enabled: forwardSend.ready; onTapped: root.sendForward() }
+              }
+            }
+          }
+        }
+      }
+
+      // A shared contact with no chat yet (L220): the person's draft chat,
+      // over the chat the card came from, with a way back to it.
+      Rectangle {
+        id: contactDraftPanel
+        objectName: "contactDraftPanel"
+        visible: !!root.contactDraft
+        anchors.fill: conversation
+        z: 40
+        color: root.background
+        MouseArea { anchors.fill: parent }
+        Keys.onEscapePressed: root.closeContactDraft()
+
+        Item {
+          id: contactDraftHeader
+          anchors.top: parent.top
+          anchors.left: parent.left
+          anchors.right: parent.right
+          height: Style.space(64)
+
+          Rectangle {
+            id: contactDraftBack
+            objectName: "contactDraftBack"
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(contactDraftBackLabel.implicitWidth + Style.space(30), Style.space(200))
+            height: Style.space(30)
+            radius: Style.cornerRadius
+            color: contactDraftBackHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+              : Style.normalFillFor(root.foreground, root.accent)
+            Text {
+              textFormat: Text.PlainText
+              id: contactDraftBackLabel
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(8)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰅁 " + (root.contactDraft ? root.contactDraft.originName : "")
+              elide: Text.ElideRight
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            HoverHandler { id: contactDraftBackHover; cursorShape: Qt.PointingHandCursor }
+            PanelToolTip { visible: contactDraftBackHover.hovered; text: "Back · Esc" }
+            TapHandler { onTapped: root.closeContactDraft() }
+          }
+          ChatAvatar {
+            id: contactDraftAvatar
+            anchors.left: contactDraftBack.right
+            anchors.leftMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(38)
+            height: width
+            showPhoto: false
+            chat: root.contactDraft ? ({ name: root.contactDraft.name, kind: "dm",
+              jid: root.contactDraft.digits }) : ({})
+            foreground: root.foreground
+            background: root.background
+            accent: root.accent
+            fontFamily: root.fontFamily
+          }
+          Column {
+            anchors.left: contactDraftAvatar.right
+            anchors.leftMargin: Style.space(12)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(16)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+            Text {
+              textFormat: Text.PlainText
+              objectName: "contactDraftName"
+              width: parent.width
+              text: root.contactDraft ? root.contactDraft.name : ""
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.weight: Font.Bold
+            }
+            Text {
+              textFormat: Text.PlainText
+              objectName: "contactDraftStatus"
+              width: parent.width
+              text: !root.contactDraft ? "" : root.contactDraft.phone + " · " + ({
+                known: "in your contacts", registered: "on WhatsApp", checking: "checking with WhatsApp…",
+                absent: "not on WhatsApp", idle: "not checked yet",
+                error: "could not check" })[root.contactDraftState]
+              elide: Text.ElideRight
+              color: root.contactDraftState === "absent" || root.contactDraftState === "error" ? root.urgent
+                : root.contactDraftState === "known" || root.contactDraftState === "registered" ? root.accent
+                : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+          Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+          }
+        }
+
+        Column {
+          anchors.centerIn: parent
+          width: Math.min(Style.space(440), parent.width - Style.space(48))
+          spacing: Style.space(16)
+          Rectangle {
+            width: parent.width
+            height: contactDraftCardColumn.implicitHeight + Style.space(32)
+            radius: Style.cornerRadius + 4
+            color: Style.normalFillFor(root.foreground, root.accent)
+            border.width: 1
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+            Column {
+              id: contactDraftCardColumn
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.margins: Style.space(16)
+              spacing: Style.space(12)
+              Text {
+                textFormat: Text.PlainText
+                objectName: "contactDraftExplainer"
+                width: parent.width
+                wrapMode: Text.Wrap
+                readonly property string first: root.contactDraft
+                  ? root.contactDraft.name.split(/\s+/)[0] : ""
+                text: !root.contactDraft ? ""
+                  : root.contactDraftState === "absent"
+                    ? root.contactDraft.name + " is not on WhatsApp, so there is no chat to start."
+                    : (root.contactDraft.sharedBy !== "" ? root.contactDraft.sharedBy + " shared this contact. "
+                      : "") + "There is no chat with " + first + " yet: it starts with your first message."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                lineHeight: 1.3
+              }
+              Row {
+                spacing: Style.space(8)
+                Repeater {
+                  model: [{ id: "copy", label: "Copy number" }, { id: "card", label: "Show the card" },
+                    { id: "retry", label: "Check again" }]
+                  delegate: Rectangle {
+                    id: contactDraftAction
+                    required property var modelData
+                    objectName: "contactDraftAction-" + modelData.id
+                    visible: modelData.id !== "retry" || root.contactDraftState === "error"
+                    width: contactDraftActionLabel.implicitWidth + Style.space(24)
+                    height: Style.space(32)
+                    radius: Style.cornerRadius
+                    color: contactDraftActionHover.hovered ? Style.hoverFillFor(root.foreground, root.accent)
+                      : Style.selectedFillFor(root.foreground, root.accent)
+                    Text {
+                      textFormat: Text.PlainText
+                      id: contactDraftActionLabel
+                      anchors.centerIn: parent
+                      text: contactDraftAction.modelData.label
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                    HoverHandler { id: contactDraftActionHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                      onTapped: {
+                        if (contactDraftAction.modelData.id === "copy") {
+                          root.copyText(root.contactDraft.phone)
+                          root.showToast("number copied")
+                        } else if (contactDraftAction.modelData.id === "card") root.showContactCard()
+                        else root.retryContactCheck()
+                      }
+                    }
+                  }
                 }
               }
             }
+          }
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: "Checking a number asks WhatsApp once; nothing is sent until you press Enter."
+            color: root.dimmer
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        Item {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.margins: Style.space(16)
+          height: Style.space(44) + (contactDraftErrorText.visible ? contactDraftErrorText.height + Style.space(6) : 0)
+          Text {
+            textFormat: Text.PlainText
+            id: contactDraftErrorText
+            objectName: "contactDraftError"
+            visible: root.contactDraftError !== ""
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            text: root.contactDraftError
+            elide: Text.ElideRight
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          TextField {
+            id: contactDraftField
+            objectName: "contactDraftField"
+            anchors.left: parent.left
+            anchors.right: contactDraftSend.left
+            anchors.rightMargin: Style.space(8)
+            anchors.bottom: parent.bottom
+            height: Style.space(44)
+            enabled: root.contactDraftState !== "absent" && !root.contactDraftSending
+            placeholderText: root.contactDraftState === "absent" ? "Not on WhatsApp"
+              : root.contactDraft ? "Message " + root.contactDraft.name : "Message"
+            foreground: root.foreground
+            accent: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            leftPadding: Style.space(14)
+            background: Rectangle {
+              radius: Style.cornerRadius + 4
+              color: Style.normalFillFor(root.foreground, root.accent)
+              border.width: 1
+              border.color: contactDraftField.activeFocus ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.7)
+                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+            }
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.sendContactDraft()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                root.closeContactDraft()
+                event.accepted = true
+              }
+            }
+          }
+          Rectangle {
+            id: contactDraftSend
+            objectName: "contactDraftSend"
+            readonly property bool ready: root.contactDraftJid !== "" && !root.contactDraftSending
+              && String(contactDraftField.text || "").trim() !== ""
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: Style.space(44)
+            height: width
+            radius: width / 2
+            color: root.accent
+            opacity: ready ? 1 : 0.45
+            Text {
+              textFormat: Text.PlainText
+              anchors.centerIn: parent
+              text: root.contactDraftSending ? "…" : "󰒊"
+              color: root.background
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+            TapHandler { enabled: contactDraftSend.ready; onTapped: root.sendContactDraft() }
           }
         }
       }
