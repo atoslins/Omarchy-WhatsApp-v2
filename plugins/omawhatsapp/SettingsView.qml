@@ -113,6 +113,11 @@ Rectangle {
           : (notifyOn ? "Muted and archived chats stay silent. Right-click the bar icon to mute everything."
             : "Muted; the bar still counts unread chats. Right-click the bar icon to turn them back on."),
         checked: notifyOn, available: notifyAvailable || notifyOn, busy: controlBusy },
+      { kind: "toggle", key: "notify_reply", title: "Reply from the bar when clicking a notification",
+        subtitle: value("notifyReply", true)
+          ? "A small reply view opens by the bar on that chat; Esc closes it."
+          : "Clicking a notification opens the full app on that chat.",
+        checked: value("notifyReply", true), available: notifyOn, busy: busy },
       { kind: "toggle", key: "notify_preview", title: "Message text in notifications",
         subtitle: value("notificationsPreview", true)
           ? "Sender, message text and the chat photo." : "Chat names only.",

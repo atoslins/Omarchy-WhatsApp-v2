@@ -47,6 +47,14 @@ BarWidget {
     if (dropdownLoader.item) dropdownLoader.item.close()
   }
 
+  // A clicked message popup opens its chat here, ready for a reply.
+  function openChat(payload) {
+    injectDropdown()
+    if (!dropdownLoader.item) return false
+    dropdownLoader.item.open()
+    return dropdownLoader.item.openChatRef(String(payload.account || ""), String(payload.jid || ""))
+  }
+
   function closeForPopoutSwitch() {
     if (dropdownLoader.item) dropdownLoader.item.closeForPopoutSwitch()
   }
@@ -122,6 +130,7 @@ BarWidget {
     target: root.oma
     function onOpenDropdownRequested(payload) {
       if (payload && payload.demo) root.openDropdownDemo(payload.conversation === true)
+      else if (payload && String(payload.jid || "") !== "") root.openChat(payload)
       else root.open()
     }
     function onToggleDropdownRequested() {

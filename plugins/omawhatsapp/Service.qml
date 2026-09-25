@@ -51,6 +51,8 @@ Item {
   // device shown online, so the account is online while a surface looking at
   // it has focus (and the setting allows it), on a lease the sync ends itself.
   property bool showOnline: true
+  // A clicked message popup opens the reply view by the bar (else the app).
+  property bool notifyReply: true
   property bool presenceSupported: true
   property var presenceByStore: ({})
   property var presenceFocusOwners: []
@@ -1293,6 +1295,7 @@ Item {
       root.autoDownloadMedia = payload.auto_download_media !== false
     root.readOnReply = payload.read_on_reply !== false
     root.showOnline = payload.show_online !== false
+    root.notifyReply = payload.notify_reply !== false
     root.enterSends = payload.enter_sends !== false
     root.showAvatars = payload.show_avatars !== false
     root.autoRefreshAvatars = payload.auto_refresh_avatars !== false

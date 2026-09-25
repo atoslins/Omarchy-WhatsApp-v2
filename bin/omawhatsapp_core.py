@@ -260,6 +260,9 @@ UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
     # Online while the window has focus: WhatsApp only sends others' online
     # state and typing to a device that shows itself online.
     "show_online": (bool, True),
+    # Clicking a message popup opens a small reply view by the bar; off, it
+    # opens the full app on that chat.
+    "notify_reply": (bool, True),
     "enter_sends": (bool, True),
     "show_avatars": (bool, True),
     # Off by default: every photo batch pauses sync, and whatever arrives in
@@ -2837,7 +2840,11 @@ class Backend:
         return True
 
     def notify_open(self, request: Any) -> dict[str, Any]:
-        """Show one popup and open its chat in the full app when it is clicked.
+        """Show one popup and open its chat when it is clicked.
+
+        The notification service shows no reply field or extra buttons, so a
+        click opens the reply view by the bar on that chat (or, with
+        `notify_reply` off, the full app).
 
         notify-send prints the popup id first and the chosen action later, so
         the id is recorded while the popup is still on screen: the next
@@ -2899,8 +2906,9 @@ class Backend:
             return {"ok": True, "kind": "notify-open", "opened": False}
         payload = json.dumps({"account": str(target.get("account") or ""),
                               "jid": str(target["jid"])})
+        surface = "openDropdown" if ui_preference(self._preferences(), "notify_reply") else "openApp"
         try:
-            run_bounded([str(shell), PLUGIN_ID, "openApp", payload], timeout=10,
+            run_bounded([str(shell), PLUGIN_ID, surface, payload], timeout=10,
                         stdout_limit=4096, stderr_limit=4096)
         except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
             return {"ok": True, "kind": "notify-open", "opened": False}

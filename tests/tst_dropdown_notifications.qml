@@ -186,6 +186,24 @@ TestCase {
     dropdown.close()
   }
 
+  function test_a_clicked_notification_opens_its_chat_ready_for_a_reply() {
+    // The owner's report: clicking a notification opened the full app with
+    // no way to reply right there. It now opens this reply view on that chat.
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    service.chats = [{ account: "work", jid: "x@s.whatsapp.net", name: "Known X", kind: "dm" }]
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    verify(dropdown.openChatRef("work", "x@s.whatsapp.net"))
+    compare(dropdown.viewMode, "conversation")
+    compare(dropdown.currentChat.name, "Known X", "a known chat keeps its name")
+    verify(dropdown.openChatRef("work", "new@s.whatsapp.net"))
+    compare(dropdown.currentChat.jid, "new@s.whatsapp.net", "a chat not in the list still opens")
+    verify(!dropdown.openChatRef("work", ""))
+    dropdown.close()
+  }
+
   function test_forwarding_from_the_dropdown_carries_on_in_the_full_app() {
     // The owner's report: forwarding here switched to the full app, where
     // the forward had to be started again.

@@ -60,6 +60,8 @@ durable boundaries and prove the next run restores one coherent version.
 8. Confirm automatic reading is on by default: opening a chat, a new message
    arriving in the open chat, and replying mark it read on the phone, while a
    chat marked unread from the list stays unread until chosen again.
+   Clicking a message popup opens the reply view by the bar on that chat
+   (or the full app when "Reply from the bar" is off).
    Middle-clicking the bar clears only the local notification badge.
    Right-clicking it mutes notifications: the OSD confirms, a crossed bell
    shows beside the count, no popup or sound arrives, and a second right-click

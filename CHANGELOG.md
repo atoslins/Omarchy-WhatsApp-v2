@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- Clicking a message notification opens the small reply view by the bar on
+  that chat, with the composer ready, instead of the full app. Omarchy's
+  notifications show no reply field or extra buttons, so this is the direct
+  reply; Settings → Notifications can keep the full app instead.
 - Restyle, phase 1 (bubbles and text): one person's messages form a run
   with tight gaps and a tight corner on their side in place of a tail, and in
   groups the name shows once per run in a color of its own, derived from the

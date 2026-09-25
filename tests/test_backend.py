@@ -800,10 +800,20 @@ class BackendTests(unittest.TestCase):
                 {"command": command, "target": {"account": "work", "jid": "team@g.us"}})
         self.assertEqual(popen.call_args.args[0], command)
         self.assertTrue(opened["opened"])
-        self.assertEqual(calls[0][:3], [str(shell), backend_module.PLUGIN_ID, "openApp"])
+        # The owner's report: a click opened the full app with no quick reply.
+        self.assertEqual(calls[0][:3], [str(shell), backend_module.PLUGIN_ID, "openDropdown"],
+                         "a click opens the reply view by the bar")
         self.assertEqual(json.loads(calls[0][3]), {"account": "work", "jid": "team@g.us"})
         self.assertEqual(self.backend._notify_ids(), {"work\nteam@g.us": 42},
                          "the popup id is kept for the next message in that chat")
+        self.backend.settings({"notify_reply": False})
+        with mock.patch.object(backend_module.subprocess, "Popen",
+                               return_value=self._fake_notify_send(b"44\ndefault\n")), \
+                mock.patch.object(backend_module, "run_bounded", side_effect=run), \
+                mock.patch.object(backend_module, "OMARCHY_SHELL", shell):
+            self.backend.notify_open({"command": command, "target": {"account": "work", "jid": "team@g.us"}})
+        self.assertEqual(calls[1][2], "openApp", "the setting can keep the full app")
+        self.backend.settings({"notify_reply": True})
 
         with mock.patch.object(backend_module.subprocess, "Popen",
                                return_value=self._fake_notify_send(b"43\n")), \
@@ -2193,7 +2203,7 @@ class BackendTests(unittest.TestCase):
         defaults = self.backend.settings()
         self.assertEqual(
             {name: defaults[name] for name in backend_module.UI_PREFERENCES},
-            {"read_on_reply": True, "show_online": True, "enter_sends": True,
+            {"read_on_reply": True, "show_online": True, "notify_reply": True, "enter_sends": True,
              "show_avatars": True, "auto_refresh_avatars": False,
              "rail_density": "comfortable", "rail_width": 0},
         )

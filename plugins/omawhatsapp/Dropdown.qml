@@ -390,6 +390,20 @@ Panel {
     compactDayHold.restart()
   }
 
+  // Opens one chat by its account and JID, as a clicked notification asks.
+  function openChatRef(account, jid) {
+    var target = String(jid || "")
+    if (target === "") return false
+    var chats = service && Array.isArray(service.chats) ? service.chats : []
+    var known = chats.find(function(chat) {
+      return String(chat.jid || "") === target
+        && (String(account || "") === "" || String(chat.account || "") === String(account))
+    })
+    openConversation(known || { account: String(account || ""), jid: target,
+      name: "WhatsApp chat", kind: target.indexOf("@g.us") > 0 ? "group" : "dm" })
+    return true
+  }
+
   // Choosing where to forward needs the full app's picker; it opens there
   // for this message, so the forward is never started twice.
   function forwardInFullApp(item) {
