@@ -2,6 +2,9 @@
 
 ## Unreleased (fork)
 
+- The person you are writing to now sees "typing…" while you type in the app
+  or the dropdown, and "recording audio…" during a voice note, as from the
+  phone. It follows "Show me online" and only goes through the running sync.
 - Quit OmaWhatsApp (Ctrl+Q in the app, or Settings → Sync & storage): every
   account's sync stops, so no message, popup or "online" until it opens
   again from the bar icon, which shows grey meanwhile. Start with the system

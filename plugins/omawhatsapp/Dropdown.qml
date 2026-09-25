@@ -716,6 +716,18 @@ Panel {
   }
 
   // The same stamps as the full app's list.
+  // A key typed into the box shows "typing…" to the chat; an emptied box
+  // stops it (see the full app).
+  function noteComposerKey(event) {
+    if (demoMode || !service || typeof service.composerActivity !== "function") return
+    var navigation = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_Escape,
+      Qt.Key_Tab, Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right, Qt.Key_PageUp, Qt.Key_PageDown,
+      Qt.Key_Home, Qt.Key_End, Qt.Key_Return, Qt.Key_Enter]
+    if (navigation.indexOf(event.key) >= 0) return
+    var ref = currentChatRef()
+    Qt.callLater(function() { if (root.service) root.service.composerActivity(ref, composer.text) })
+  }
+
   function timeLabel(value) {
     return TimeFormat.listStamp(value, new Date(),
       TimeFormat.clockPattern(root.timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)),
@@ -2136,6 +2148,8 @@ Panel {
                     selectByMouse: true
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
+                    onTextChanged: if (text === "" && root.service && !root.demoMode)
+                      root.service.composerActivity(root.currentChatRef(), "")
                     readOnly: root.offline
                     onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
                     TapHandler {
@@ -2156,6 +2170,7 @@ Panel {
                       font.pixelSize: Style.font.body
                     }
                     Keys.onPressed: function(event) {
+                      root.noteComposerKey(event)
                       if ((event.modifiers & Qt.ControlModifier)
                           && (event.modifiers & Qt.ShiftModifier)
                           && event.key === Qt.Key_V) {

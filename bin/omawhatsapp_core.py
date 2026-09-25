@@ -4673,6 +4673,24 @@ class Backend:
         self._envelope(self._write(command, timeout=45))
         return {"ok": True, "kind": "delete"}
 
+    def chat_presence(self, jid: str, state: str) -> dict[str, Any]:
+        """Tell the chat you are typing, recording audio, or stopped.
+
+        Best effort and only through the running sync: an indicator never
+        stops sync or opens a second session, so without one it is skipped.
+        """
+        if state not in {"typing", "recording", "paused"}:
+            raise OmaWhatsAppError("Typing state must be typing, recording, or paused.")
+        chat = self._chat(jid)
+        if not self.online() or not self._sync_active():
+            return {"ok": True, "kind": "chat-presence", "state": state, "sent": False}
+        command = ["--json", "presence", "paused" if state == "paused" else "typing",
+                   "--to", chat["jid"]]
+        if state == "recording":
+            command.extend(["--media", "audio"])
+        result = self._run(command, timeout=15)
+        return {"ok": True, "kind": "chat-presence", "state": state, "sent": result.returncode == 0}
+
     def star_message(self, jid: str, message_id: str, starred: bool) -> dict[str, Any]:
         """Star or unstar a message on every linked device (a wacli build that stars)."""
         _chat, message = self._message(jid, message_id)
@@ -6284,6 +6302,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("delete")
     commands.add_parser("forward")
     commands.add_parser("star")
+    commands.add_parser("chat-presence")
     commands.add_parser("select")
     commands.add_parser("poll-vote")
     commands.add_parser("statuses")
@@ -6467,6 +6486,9 @@ def main() -> int:
             return emit(backend.delete_message(str(payload.get("jid") or ""),
                                                str(payload.get("id") or ""),
                                                bool(payload.get("for_me"))))
+        if args.command == "chat-presence":
+            return emit(backend.chat_presence(str(payload.get("jid") or ""),
+                                              str(payload.get("state") or "")))
         if args.command == "star":
             return emit(backend.star_message(str(payload.get("jid") or ""),
                                              str(payload.get("id") or ""),

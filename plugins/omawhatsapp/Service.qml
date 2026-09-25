@@ -357,7 +357,77 @@ Item {
   property var messages: []
   property var members: []
   property var discardQueue: []
+  // Typing and recording shown to the chat, as the phone does: "typing" when
+  // the box starts filling and again every 10 s while it goes on, "paused"
+  // after 5 s without a key or when the box empties. It follows "Show me
+  // online" and never runs without the sync (no second session, no pause).
+  property var typingRef: AccountModel.chatRef("", "")
+  property string typingState: ""
+  property double typingSentAt: 0
+  property var pendingChatPresence: []
+  readonly property bool typingAllowed: showOnline && !closed && !offlineMode && syncActive && ready
+  function composerActivity(chatRef, text) {
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    if (!typingAllowed || ref.jid === "") return false
+    if (typingState !== "" && !AccountModel.sameRef(ref, typingRef)) sendChatPresence(typingRef, "paused")
+    if (String(text || "").trim() === "") {
+      if (typingState === "typing" && AccountModel.sameRef(ref, typingRef)) sendChatPresence(ref, "paused")
+      typingIdle.stop()
+      return true
+    }
+    var now = Date.now()
+    if (typingState !== "typing" || !AccountModel.sameRef(ref, typingRef) || now - typingSentAt > 10000)
+      sendChatPresence(ref, "typing")
+    typingIdle.restart()
+    return true
+  }
+  function sendChatPresence(ref, state) {
+    typingRef = state === "paused" ? AccountModel.chatRef("", "") : ref
+    typingState = state === "paused" ? "" : state
+    typingSentAt = Date.now()
+    var request = { account: String(ref.account || ""), jid: String(ref.jid || ""), state: state }
+    // One waiting state per chat, the latest: a chat left mid-word still
+    // hears "paused" when the next one hears "typing".
+    if (chatPresenceProcess.running) {
+      pendingChatPresence = pendingChatPresence.filter(function(item) {
+        return item.jid !== request.jid || item.account !== request.account }).concat([request])
+      return true
+    }
+    chatPresenceProcess.payload = JSON.stringify(request)
+    chatPresenceProcess.stdinEnabled = true
+    chatPresenceProcess.running = true
+    return true
+  }
+  Timer {
+    id: typingIdle
+    interval: 5000
+    repeat: false
+    onTriggered: if (root.typingState === "typing") root.sendChatPresence(root.typingRef, "paused")
+  }
+  Process {
+    id: chatPresenceProcess
+    objectName: "chatPresenceProcess"
+    property string payload: ""
+    command: [root.helper, "chat-presence"]
+    stdinEnabled: true
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: {
+      if (root.pendingChatPresence.length === 0) return
+      var next = root.pendingChatPresence[0]
+      root.pendingChatPresence = root.pendingChatPresence.slice(1)
+      payload = JSON.stringify(next)
+      stdinEnabled = true
+      running = true
+    }
+  }
   readonly property string voiceState: voiceRecorder.state
+  // Recording a voice note shows "recording audio…" to that chat.
+  onVoiceStateChanged: {
+    var ref = AccountModel.chatRef(root.voiceDraftAccount, root.voiceDraftJid)
+    if (!root.typingAllowed || ref.jid === "") return
+    if (root.voiceState === "recording") root.sendChatPresence(ref, "recording")
+    else if (root.typingState === "recording") root.sendChatPresence(ref, "paused")
+  }
   readonly property string voiceDraftAccount: voiceRecorder.chatAccount
   readonly property string voiceDraftJid: voiceRecorder.chatJid
   readonly property string voiceDraftChatName: voiceRecorder.chatName

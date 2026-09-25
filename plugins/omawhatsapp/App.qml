@@ -1896,6 +1896,18 @@ Item {
       + String(message.sender_jid || "")] || ""
   }
 
+  // A key typed into the box (not a restored draft) shows "typing…" to the
+  // chat once the text has changed.
+  function noteComposerKey(event) {
+    if (demoMode || !service || typeof service.composerActivity !== "function") return
+    var navigation = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_Escape,
+      Qt.Key_Tab, Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right, Qt.Key_PageUp, Qt.Key_PageDown,
+      Qt.Key_Home, Qt.Key_End, Qt.Key_Return, Qt.Key_Enter]
+    if (navigation.indexOf(event.key) >= 0) return
+    var ref = currentChatRef()
+    Qt.callLater(function() { if (root.service) root.service.composerActivity(ref, composer.text) })
+  }
+
   function previewKindGlyph(kind) {
     return AccountModel.previewKindGlyph(kind)
   }
@@ -4621,6 +4633,9 @@ Item {
                 onTextChanged: {
                   root.updateMentionCompletion()
                   if (text === "") composerFlickable.contentY = 0
+                  // An emptied box (sent or deleted) stops "typing…" at once.
+                  if (text === "" && root.service && !root.demoMode)
+                    root.service.composerActivity(root.currentChatRef(), "")
                 }
                 onCursorPositionChanged: root.updateMentionCompletion()
                 onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
@@ -4638,6 +4653,7 @@ Item {
                     event.accepted = true
                 }
                 Keys.onPressed: function(event) {
+                  root.noteComposerKey(event)
                   // Page Up/Down scroll the conversation even while typing.
                   if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
                     event.accepted = root.pageConversation(event.key)

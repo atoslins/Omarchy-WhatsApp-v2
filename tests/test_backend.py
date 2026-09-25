@@ -1880,6 +1880,29 @@ class BackendTests(unittest.TestCase):
         self.assertIn("--for-me", delete)
         self.assertEqual(forward[forward.index("--to") + 1], "alex@s.whatsapp.net")
 
+    def test_typing_goes_through_the_running_sync_or_not_at_all(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_sync_active", return_value=True), \
+                mock.patch.object(self.backend, "_run", return_value=completed) as run:
+            self.assertTrue(self.backend.chat_presence("team@g.us", "typing")["sent"])
+            typing = run.call_args.args[0]
+            self.backend.chat_presence("team@g.us", "recording")
+            recording = run.call_args.args[0]
+            self.backend.chat_presence("team@g.us", "paused")
+            paused = run.call_args.args[0]
+        self.assertEqual(typing, ["--json", "presence", "typing", "--to", "team@g.us"])
+        self.assertEqual(recording[-2:], ["--media", "audio"])
+        self.assertEqual(paused[1:3], ["presence", "paused"])
+        # No sync running: skipped, never a second session or a paused sync.
+        with mock.patch.object(self.backend, "_sync_active", return_value=False), \
+                mock.patch.object(self.backend, "_run") as run, \
+                mock.patch.object(self.backend, "_mutate") as mutate:
+            self.assertFalse(self.backend.chat_presence("team@g.us", "typing")["sent"])
+        run.assert_not_called()
+        mutate.assert_not_called()
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "typing, recording, or paused"):
+            self.backend.chat_presence("team@g.us", "dancing")
+
     def test_starring_goes_through_wacli_messages_star(self) -> None:
         completed = subprocess.CompletedProcess([], 0, json.dumps(
             {"success": True, "data": {"starred": True}}), "")

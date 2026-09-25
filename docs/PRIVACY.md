@@ -36,7 +36,10 @@ sync runs: which followed contacts are online, their last seen when they share
 it, and who is typing. The app reads it directly and shows it for the open
 chat. To receive it, the account shows itself online to WhatsApp while the
 window, or the dropdown on a conversation, has focus. That is on by default
-and turned off in Settings → Reading. The sync ends that online state by
+and turned off in Settings → Reading. The same setting tells a chat that you
+are typing (as keys are pressed in its message box, stopped after a few
+seconds or when the box empties) or recording a voice note, through the
+running sync only. The sync ends that online state by
 itself about 90 seconds after the app stops renewing it, and removes the file
 when it stops.
 
