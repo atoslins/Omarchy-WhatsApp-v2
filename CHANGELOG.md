@@ -2,6 +2,10 @@
 
 ## Unreleased (fork)
 
+- Star and unstar messages from the message menu or for all picked messages
+  from the selection bar; the star reaches your phone and other linked
+  devices. It needs the wacli fork's `messages star` and is hidden on a wacli
+  that cannot star.
 - Forward to a number with no chat yet: type it in the forward dialog, check
   it with WhatsApp in one click (the check no longer stops sync), and it
   joins the other chats as a chip. The note, if any, is that chat's first

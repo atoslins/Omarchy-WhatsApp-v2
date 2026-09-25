@@ -41,6 +41,9 @@ Item {
   signal editRequested()
   signal deleteRequested(bool forMe)
   signal forwardRequested()
+  // Star or unstar on every linked device; offered where the surface can.
+  signal starRequested(bool starred)
+  property bool starEnabled: false
   signal copyRequested(string text)
   signal saveRequested()
   // Retry or discard a message that failed to send.
@@ -125,6 +128,8 @@ Item {
     { label: "Edit", action: "edit", show: root.message.from_me && !root.message.media_type },
     { label: "Save as…", action: "save", show: root.hasMedia },
     { label: "Forward", action: "forward", show: true },
+    { label: root.message.starred === true ? "Unstar" : "Star", action: "star",
+      show: root.starEnabled },
     { label: "Delete for me", action: "delete-me", show: true },
     { label: "Delete for everyone", action: "delete-all", show: root.message.from_me }
   ].filter(function(item) { return item.show })
@@ -136,6 +141,7 @@ Item {
     else if (action === "copy-link") root.copyRequested(root.links[0].url)
     else if (action === "edit") root.editRequested()
     else if (action === "forward") root.forwardRequested()
+    else if (action === "star") root.starRequested(root.message.starred !== true)
     else if (action === "save") root.saveRequested()
     else if (action === "retry-send") root.pendingSendRequested("retry")
     else if (action === "discard-send") root.pendingSendRequested("discard")

@@ -257,4 +257,66 @@ TestCase {
     compare(finished.failed, 0)
     compare(finished.targets[0].jid, "15550007777@s.whatsapp.net")
   }
+
+  // L223: star from the selection bar, one WhatsApp action at a time.
+  function test_the_service_stars_picked_messages_one_by_one() {
+    var service = createService()
+    var finished = null
+    service.starBatchFinished.connect(function(summary) { finished = summary })
+    var process = findChild(service, "writeProcess")
+    verify(service.starMany(origin, [{ id: "M1" }, { id: "M2" }], true, "app"))
+    compare(service.activeWriteKind, "star")
+    compare(JSON.parse(process.payload).id, "M1")
+    compare(JSON.parse(process.payload).starred, true)
+    process.running = true
+    finish(service, 0, { ok: true, kind: "star", starred: true })
+    compare(JSON.parse(process.payload).id, "M2")
+    process.running = true
+    finish(service, 0, { ok: true, kind: "star", starred: true })
+    verify(finished !== null)
+    compare(finished.failed, 0)
+    compare(finished.starred, true)
+  }
+
+  function test_a_wacli_that_cannot_star_hides_the_option() {
+    var service = createService()
+    verify(service.starSupported)
+    verify(service.starMany(origin, [{ id: "M1" }, { id: "M2" }], true, "app"))
+    var process = findChild(service, "writeProcess")
+    process.running = true
+    finish(service, 1, { ok: false, error: "This wacli build cannot star messages; install one that can." })
+    verify(!service.starSupported, "no more offers to star")
+    compare(service.writeBatch, null, "the rest of the batch is dropped")
+    verify(!service.starMessage(origin, { id: "M3" }, true, "app"))
+  }
+
+  function test_the_bar_stars_and_unstars_the_picked_messages() {
+    var app = createTemporaryObject(appComponent, testCase)
+    var plain = app.demoItems.filter(function(item) { return item.starred !== true && !item.album_items })[0]
+    verify(app.startForward(plain))
+    verify(!app.selectionAllStarred)
+    verify(app.starSelection(true))
+    verify(app.demoItems.filter(function(item) { return item.id === plain.id })[0].starred)
+    verify(app.startForward(app.demoItems.filter(function(item) { return item.id === plain.id })[0]))
+    verify(app.selectionAllStarred, "all starred: the bar offers Unstar")
+    verify(app.starSelection(false))
+    verify(!app.demoItems.filter(function(item) { return item.id === plain.id })[0].starred)
+  }
+
+  function test_a_star_shows_at_once_and_goes_back_if_refused() {
+    var service = createService()
+    service.messages = [{ id: "M1", text: "one", timestamp: 1, starred: false }]
+    var process = findChild(service, "writeProcess")
+    verify(service.starMessage(origin, service.messages[0], true, "app"))
+    verify(service.selectedMessages[0].starred, "shown before WhatsApp answers")
+    process.running = true
+    finish(service, 1, { ok: false, error: "WhatsApp did not answer." })
+    verify(!service.selectedMessages[0].starred, "refused: back as it was")
+    verify(service.starMessage(origin, service.messages[0], true, "app"))
+    process.running = true
+    finish(service, 0, { ok: true, kind: "star", starred: true })
+    service.messages = [{ id: "M1", text: "one", timestamp: 1, starred: true }]
+    compare(Object.keys(service.starOverrides).length, 0, "the mirror has it now")
+    verify(service.selectedMessages[0].starred)
+  }
 }

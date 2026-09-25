@@ -120,7 +120,7 @@ button must remain reachable at every supported size.
 | Forward to another indexed chat | `messages forward` | building |
 | Select interactive option | `send select` | building |
 | Copy text / selection auto-copy | local clipboard | done |
-| Star/unstar | list-only in wacli | transport gap |
+| Star/unstar | `messages star` (wacli fork only) | done | message menu and selection bar; hidden when wacli cannot star |
 | Message info / receipt detail | receipts not exposed | transport gap |
 
 Destructive actions require an in-app confirmation. All message actions verify

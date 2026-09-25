@@ -1662,6 +1662,36 @@ Item {
     return true
   }
 
+  // Star: every linked device sees it; needs a wacli build that stars.
+  readonly property bool starAvailable: root.demoMode || (!!root.service && root.service.starSupported === true)
+  readonly property bool selectionAllStarred: {
+    var picked = root.selectingMessages ? root.selectedMessages() : []
+    return picked.length > 0 && picked.every(function(item) { return item.starred === true })
+  }
+  function setDemoStarred(ids, starred) {
+    demoItems = demoItems.map(function(item) {
+      return ids.indexOf(String(item.id)) < 0 ? item : Object.assign({}, item, { starred: starred })
+    })
+  }
+  function starSelection(starred) {
+    var items = selectedMessages()
+    if (items.length === 0) return false
+    if (demoMode) {
+      setDemoStarred(items.map(function(item) { return String(item.id) }), starred)
+      cancelSelection()
+      showToast((starred ? "starred " : "unstarred ") + (items.length === 1 ? "1 message" : items.length + " messages"))
+      return true
+    }
+    if (!service || !service.starMany(forwardOriginRef, items, starred, "app")) return false
+    cancelSelection()
+    return true
+  }
+  function starOne(item, starred) {
+    if (!item) return false
+    if (demoMode) { setDemoStarred([String(item.id)], starred); return true }
+    return !!service && service.starMessage(currentChatRef(), item, starred, "app")
+  }
+
   // Delete the picked messages: for you, or for everyone when all are yours.
   readonly property bool selectionAllMine: {
     var picked = root.selectingMessages ? root.selectedMessages() : []
@@ -2022,6 +2052,8 @@ Item {
       if (kind === "forward" && request.batch !== true)
         root.showToast("forwarded to " + String(answer.target || "the chat"))
       if (kind === "contact-tag") root.showToast(request.remove ? "tag removed" : "tag added")
+      if (kind === "star" && request.batch !== true)
+        root.showToast(request.starred === false ? "unstarred" : "starred · on your other devices too")
       var key = String(chatRef && chatRef.key || root.pendingWriteChatKey)
       var sameChat = key === root.composerChatKey
       // Only operations that actually consume composer content may clear its
@@ -2055,6 +2087,17 @@ Item {
       root.showToast((action === "unread" ? "could not mark unread · " : "could not mark read · ")
         + String(message || "WhatsApp did not answer"))
     }
+    function onStarBatchFinished(summary) {
+      if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
+      var done = Number(summary.total || 0) - Number(summary.failed || 0)
+      var verb = summary.starred === false ? "unstarred " : "starred "
+      if (Number(summary.failed || 0) === 0)
+        root.showToast(verb + (done === 1 ? "1 message" : done + " messages"))
+      else
+        root.showToast(Number(summary.failed) + " of " + Number(summary.total) + " could not be "
+          + (summary.starred === false ? "unstarred" : "starred")
+          + (summary.errors && summary.errors.length > 0 ? " · " + String(summary.errors[0]) : ""))
+    }
     function onDeleteBatchFinished(summary) {
       if (!summary || !ComposerModel.ownsOperation(summary.owner, "app")) return
       var deleted = Number(summary.total || 0) - Number(summary.failed || 0)
@@ -2083,7 +2126,7 @@ Item {
       var kind = String(details && details.kind || root.pendingWriteKind)
       var request = details && details.request ? details.request : ({})
       // A batch reports its failures together when it ends.
-      if ((kind === "forward" || kind === "delete") && request.batch === true) return
+      if ((kind === "forward" || kind === "delete" || kind === "star") && request.batch === true) return
       if (kind === "send-new" && root.contactDraftSending) {
         root.contactDraftSending = false
         root.contactDraftError = String(message || "The message could not be sent.")
@@ -3258,14 +3301,16 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(6)
               Repeater {
-                model: [{ id: "delete", label: "Delete" }, { id: "copy", label: "Copy" },
-                  { id: "forward", label: "Forward" }]
+                model: [{ id: "delete", label: "Delete" },
+                  { id: "star", label: root.selectionAllStarred ? "Unstar" : "Star" },
+                  { id: "copy", label: "Copy" }, { id: "forward", label: "Forward" }]
                 delegate: Rectangle {
                   id: selectionAction
                   required property var modelData
                   objectName: "selectionAction-" + modelData.id
                   readonly property bool primary: modelData.id === "forward"
                   readonly property bool enabledHere: root.selectedMessageIds.length > 0
+                  visible: modelData.id !== "star" || root.starAvailable
                   width: selectionActionLabel.implicitWidth + Style.space(24)
                   height: Style.space(32)
                   radius: Style.cornerRadius
@@ -3288,6 +3333,7 @@ Item {
                     enabled: selectionAction.enabledHere
                     onTapped: selectionAction.primary ? root.openForwardDialog()
                       : selectionAction.modelData.id === "delete" ? root.requestDeleteSelection()
+                      : selectionAction.modelData.id === "star" ? root.starSelection(!root.selectionAllStarred)
                       : root.copySelection()
                   }
                 }
@@ -3740,6 +3786,8 @@ Item {
                 if (root.service) root.service.resolvePendingSend(modelData.id, action)
               }
               onForwardRequested: root.startForward(modelData)
+              starEnabled: root.starAvailable
+              onStarRequested: function(starred) { root.starOne(modelData, starred) }
               onCopyRequested: function(text) { root.copyText(text) }
               onSaveRequested: root.saveMediaAs(modelData)
               onPollVoteRequested: function(options) {

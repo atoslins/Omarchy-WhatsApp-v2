@@ -217,7 +217,38 @@ Item {
         pending: true, send_state: item.state }
     })
     var page = older.length > 0 ? messages.concat(older) : messages
+    // A star shows at once; WhatsApp can take seconds to accept it.
+    var stars = starOverrides
+    if (Object.keys(stars).length > 0) page = page.map(function(item) {
+      var wanted = stars[key + "\n" + String(item && item.id || "")]
+      return wanted === undefined || !!item.starred === wanted ? item : Object.assign({}, item, { starred: wanted })
+    })
     return waiting.length > 0 ? waiting.reverse().concat(page) : page
+  }
+  // Stars asked for and not yet in the mirror, by chat key and message id;
+  // each goes once the mirror shows the same.
+  property var starOverrides: ({})
+  onMessagesChanged: pruneStarOverrides()
+  function pruneStarOverrides() {
+    if (Object.keys(starOverrides).length === 0) return
+    var key = selectedChatRef().key
+    var next = Object.assign({}, starOverrides)
+    var changed = false
+    for (var i = 0; i < messages.length; i++) {
+      var slot = key + "\n" + String(messages[i].id || "")
+      if (next[slot] !== undefined && !!messages[i].starred === next[slot]) {
+        delete next[slot]
+        changed = true
+      }
+    }
+    if (changed) starOverrides = next
+  }
+  function setStarOverride(chatRef, id, starred) {
+    var ref = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    var next = Object.assign({}, starOverrides)
+    if (starred === null) delete next[ref.key + "\n" + String(id)]
+    else next[ref.key + "\n" + String(id)] = starred === true
+    starOverrides = next
   }
   function loadOlderMessages() {
     if (loadingOlder || !hasOlderMessages || query !== "" || selectedChatJid === "") return false
@@ -415,6 +446,7 @@ Item {
     case "delete": return "deleting a message"
     case "forward": return "forwarding a message"
     case "send-new": return "starting a chat"
+    case "star": return "starring a message"
     default: return ""
     }
   }
@@ -447,6 +479,7 @@ Item {
   signal forwardBatchFinished(var summary)
   // Several messages deleted together: how many went, and what failed.
   signal deleteBatchFinished(var summary)
+  signal starBatchFinished(var summary)
   signal controlCompleted(string kind)
   signal controlFailed(string message)
   signal settingsCompleted()
@@ -1074,6 +1107,32 @@ Item {
       id: String(item.id), for_me: forMe === true
     }, chatRef, owner)
   }
+  // Starring needs a wacli build that stars; the first refusal hides it.
+  property bool starSupported: true
+  function starMessage(chatRef, item, starred, owner) {
+    if (!item || !item.id || !starSupported) return false
+    var started = runWriteForChat("star", { id: String(item.id), starred: starred !== false }, chatRef, owner)
+    if (started) setStarOverride(chatRef, item.id, starred !== false)
+    return started
+  }
+  function starMany(chatRef, items, starred, owner) {
+    var origin = AccountModel.chatRef(chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    var messages = (Array.isArray(items) ? items : []).filter(function(item) {
+      return item && String(item.id || "") !== "" && item.pending !== true && item.revoked !== true })
+    if (!starSupported || origin.jid === "" || messages.length === 0 || writeBatch) return false
+    var refusal = writeRefusal("star", ({}), origin)
+    if (refusal !== "") {
+      errorText = refusal
+      writeFailed(refusal, origin, ({ kind: "star" }), writeOwner(owner))
+      return false
+    }
+    writeBatch = { kind: "star", origin: origin, owner: writeOwner(owner), starred: starred !== false,
+      total: messages.length, done: 0, failed: 0, errors: [] }
+    batchJobs = messages.map(function(item) { return { kind: "star", item: item, starred: starred !== false } })
+    messages.forEach(function(item) { setStarOverride(origin, item.id, starred !== false) })
+    runNextBatchJob()
+    return true
+  }
   function forwardMessage(chatRef, item, targetJid, owner) {
     if (!item || !item.id || String(targetJid || "") === "") return false
     return runWriteForChat("forward", {
@@ -1135,6 +1194,9 @@ Item {
         : job.kind === "delete"
         ? runWriteForChat("delete", { id: String(job.item.id), for_me: job.forMe === true,
             batch: true }, writeBatch.origin, writeBatch.owner)
+        : job.kind === "star"
+        ? runWriteForChat("star", { id: String(job.item.id), starred: job.starred === true,
+            batch: true }, writeBatch.origin, writeBatch.owner)
         : runWriteForChat("forward", { id: String(job.item.id), to_jid: String(job.target.jid || ""),
             to_phone: newNumber ? String(job.target.phone) : "", batch: true },
             writeBatch.origin, writeBatch.owner)
@@ -1166,6 +1228,7 @@ Item {
     var summary = writeBatch
     writeBatch = null
     if (summary.kind === "delete") deleteBatchFinished(summary)
+    else if (summary.kind === "star") starBatchFinished(summary)
     else forwardBatchFinished(summary)
   }
   // Several messages of one chat deleted together, for you or (all yours)
@@ -2359,7 +2422,18 @@ Item {
         // The failed text stays on screen as a bubble to retry, so surfaces
         // must not also put it back into the composer.
         if (finishedKind === "send") details.pending_kept = true
-        if (["forward", "delete", "send-new"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
+        if (finishedKind === "star") {
+          root.setStarOverride(finishedChat, finishedRequest.id, null)
+          if (String(message).indexOf("cannot star") >= 0) {
+            root.starSupported = false
+            root.batchJobs.forEach(function(job) {
+              if (job.kind === "star") root.setStarOverride(root.writeBatch ? root.writeBatch.origin : finishedChat,
+                job.item.id, null)
+            })
+            root.batchJobs = root.batchJobs.filter(function(job) { return job.kind !== "star" })
+          }
+        }
+        if (["forward", "delete", "send-new", "star"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
           root.finishBatchJob(false, message)
         root.writeFailed(message, finishedChat, details, finishedOwner)
         root.runNextQueuedSend()
@@ -2394,7 +2468,7 @@ Item {
           state: "sent", message_id: String(payload.message_id || ""), created: Date.now() })
       if (["contact-alias", "contact-tag", "download-pending"].indexOf(finishedKind) >= 0
           && root.chatDetailsWanted) Qt.callLater(root.refreshChatDetails)
-      if (["forward", "delete", "send-new"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
+      if (["forward", "delete", "send-new", "star"].indexOf(finishedKind) >= 0 && finishedRequest.batch === true)
         root.finishBatchJob(true, "")
       // What the helper answered, for surfaces that report it (exports, downloads).
       root.lastWriteResult = payload

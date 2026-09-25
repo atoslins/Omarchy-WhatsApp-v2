@@ -343,6 +343,8 @@ WACLI_LEAF_MINIMUM_VERSIONS: dict[tuple[str, ...], str] = {
 # Leaves only wacli builds that follow presence have (fork branch
 # oma-presence-receipts). Official releases lack them; either is accepted.
 WACLI_OPTIONAL_LEAVES = frozenset({
+    # Fork-only as well: starring through app state.
+    ("messages", "star"),
     ("presence", "available"),
     ("presence", "subscribe"),
     ("presence", "unavailable"),
@@ -389,6 +391,7 @@ WACLI_REQUIRED_CHAT_FLAGS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("messages", "purge"): ("--chat",),
     ("messages", "revoke"): ("--chat",),
     ("messages", "show"): ("--chat",),
+    ("messages", "star"): ("--chat",),
 }
 WACLI_OPTIONAL_CHAT_FLAGS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("calls", "list"): ("--chat",),
@@ -446,6 +449,7 @@ WACLI_MESSAGE_TARGETS: dict[tuple[str, ...], tuple[str, str]] = {
     ("messages", "purge"): ("--chat", "--id"),
     ("messages", "revoke"): ("--chat", "--id"),
     ("messages", "show"): ("--chat", "--id"),
+    ("messages", "star"): ("--chat", "--id"),
     ("poll", "show"): ("--to", "--id"),
     ("poll", "vote"): ("--to", "--id"),
     ("send", "react"): ("--to", "--id"),
@@ -537,6 +541,7 @@ WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
     ("messages", "revoke"): "destructive",
     ("messages", "search"): "local-read",
     ("messages", "show"): "local-read",
+    ("messages", "star"): "whatsapp-write",
     ("messages", "starred"): "local-read",
     ("poll", "show"): "local-read",
     ("poll", "vote"): "whatsapp-write",
@@ -4579,6 +4584,19 @@ class Backend:
         self._envelope(self._write(command, timeout=45))
         return {"ok": True, "kind": "delete"}
 
+    def star_message(self, jid: str, message_id: str, starred: bool) -> dict[str, Any]:
+        """Star or unstar a message on every linked device (a wacli build that stars)."""
+        _chat, message = self._message(jid, message_id)
+        command = ["--json", "messages", "star", "--chat", str(message["chat_jid"]),
+                   "--id", str(message["msg_id"])]
+        if not starred:
+            command.append("--unstar")
+        result = self._write(command, timeout=60)
+        if result.returncode != 0 and "unknown command" in f"{result.stdout}{result.stderr}".lower():
+            raise OmaWhatsAppError("This wacli build cannot star messages; install one that can.")
+        self._envelope(result)
+        return {"ok": True, "kind": "star", "starred": bool(starred)}
+
     def forward_message(self, jid: str, message_id: str, to_jid: str,
                         to_phone: Any = "") -> dict[str, Any]:
         source, message = self._message(jid, message_id)
@@ -6176,6 +6194,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("edit")
     commands.add_parser("delete")
     commands.add_parser("forward")
+    commands.add_parser("star")
     commands.add_parser("select")
     commands.add_parser("poll-vote")
     commands.add_parser("statuses")
@@ -6357,6 +6376,10 @@ def main() -> int:
             return emit(backend.delete_message(str(payload.get("jid") or ""),
                                                str(payload.get("id") or ""),
                                                bool(payload.get("for_me"))))
+        if args.command == "star":
+            return emit(backend.star_message(str(payload.get("jid") or ""),
+                                             str(payload.get("id") or ""),
+                                             payload.get("starred") is not False))
         if args.command == "forward":
             return emit(backend.forward_message(str(payload.get("jid") or ""),
                                                 str(payload.get("id") or ""),

@@ -1853,6 +1853,23 @@ class BackendTests(unittest.TestCase):
         self.assertIn("--for-me", delete)
         self.assertEqual(forward[forward.index("--to") + 1], "alex@s.whatsapp.net")
 
+    def test_starring_goes_through_wacli_messages_star(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, json.dumps(
+            {"success": True, "data": {"starred": True}}), "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.assertTrue(self.backend.star_message("team@g.us", "t1", True)["starred"])
+            star = write.call_args.args[0]
+            self.backend.star_message("team@g.us", "t1", False)
+            unstar = write.call_args.args[0]
+        self.assertEqual(star[1:3], ["messages", "star"])
+        self.assertEqual(star[star.index("--id") + 1], "t1")
+        self.assertNotIn("--unstar", star)
+        self.assertIn("--unstar", unstar)
+        missing = subprocess.CompletedProcess([], 1, "", 'Error: unknown command "star" for "wacli messages"')
+        with mock.patch.object(self.backend, "_write", return_value=missing):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "cannot star"):
+                self.backend.star_message("team@g.us", "t1", True)
+
     def test_forwarding_to_a_typed_number_needs_a_fresh_check(self) -> None:
         # L225: a number with no chat yet takes a forward once WhatsApp has
         # just confirmed it, as a first message does.
@@ -2337,10 +2354,11 @@ class BackendTests(unittest.TestCase):
 
     def test_wacli_parity_registry_covers_every_0183_leaf(self) -> None:
         policies = backend_module.WACLI_OPERATION_POLICIES
-        self.assertEqual(len(policies), 107)
-        # Presence leaves exist only in wacli builds that follow presence;
-        # the parity check accepts their absence on official releases.
+        self.assertEqual(len(policies), 108)
+        # Presence and starring exist only in the wacli fork's builds; the
+        # parity check accepts their absence on official releases.
         self.assertEqual(backend_module.WACLI_OPTIONAL_LEAVES, {
+            ("messages", "star"),
             ("presence", "available"), ("presence", "subscribe"), ("presence", "unavailable")})
         self.assertTrue(backend_module.WACLI_OPTIONAL_LEAVES <= set(policies))
         self.assertEqual(policies[("presence", "subscribe")], "remote-read")
