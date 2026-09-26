@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.16.0](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.15.0...v0.16.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* scripts/install and scripts/uninstall are gone. Install with `omarchy plugin add https://github.com/atoslins/Omarchy-WhatsApp-v2 --enable`. An install made by the old script moves to links on its own after `omarchy plugin remove io.github.atoslins.whatsapp` and a new `omarchy plugin add`.
+
+### Features
+
+* install with omarchy plugin add ([74b1763](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/74b1763e0e8f71cde80ffc8b878ecd109eb22831))
+
+
+### Fixes
+
+* **ci:** copy only regular files when simulating plugin add ([a4d01ee](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/a4d01eec558ef1518861eae09eb0d8459d8a514e))
+* **setup:** an older repository commit is not an update ([fa93c3b](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/fa93c3b005c1e257132453d3e09033ef8d405970))
+
+
+### Documentation
+
+* document installing with omarchy plugin add ([3008359](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/300835940f2e9abeb79001c4c94d19d7a75c8d65))
+
 ## 0.15.0 — WhatsApp for Omarchy — 2026-09-26
 
 The first release under its own name. It started as a fork of OmaWhatsApp
