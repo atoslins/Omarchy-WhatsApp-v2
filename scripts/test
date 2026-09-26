@@ -46,7 +46,9 @@ mkdir -p -- "$checkout"
 git ls-files -z --cached --others --exclude-standard \
   | grep -zv '^tests/\.generated-media/' \
   | while IFS= read -r -d '' file; do
-      [[ -e $file ]] || continue
+      # Regular files only: a nested checkout (CI keeps Omarchy's source in
+      # .omarchy/) is listed as a directory and is not part of the plugin.
+      [[ -f $file && ! -L $file ]] || continue
       install -D -m "$(stat -c %a -- "$file")" -- "$file" "$checkout/$file"
     done
 [[ ! -e $checkout/AGENTS.md ]] || {

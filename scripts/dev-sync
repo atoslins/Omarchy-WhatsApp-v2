@@ -36,8 +36,11 @@ omarchy plugin validate "$repo_root" >/dev/null
 # notes, agent instructions or generated test media.
 file_list=$(mktemp)
 trap 'rm -f -- "$file_list"' EXIT
-git -C "$repo_root" ls-files -z --cached --others --exclude-standard \
-  | grep -zv '^tests/\.generated-media/' > "$file_list"
+# Regular files only: a nested checkout is listed as a directory.
+while IFS= read -r -d '' file; do
+  if [[ -f $repo_root/$file && ! -L $repo_root/$file ]]; then printf '%s\0' "$file"; fi
+done < <(git -C "$repo_root" ls-files -z --cached --others --exclude-standard \
+  | grep -zv '^tests/\.generated-media/') > "$file_list"
 # --inplace avoids the temp-file-and-rename dance the plugin watcher would see
 # as extra events; files that left the tree are removed from the checkout.
 changed=$(rsync -rci --inplace --from0 --files-from="$file_list" \
