@@ -28,6 +28,16 @@ SPEC.loader.exec_module(backend_module)
 backend_module.SOUND_PLAYER = Path("/nonexistent/omawhatsapp-test-player")
 
 
+def installed_units(root: Path) -> Path:
+    """A private unit folder where the first-run setup already wrote the sync
+    units, so no test reads the developer's own systemd folder."""
+    units = root / "units"
+    units.mkdir(exist_ok=True)
+    for name in backend_module.SETUP_UNITS:
+        (units / name).write_text("# WhatsApp for Omarchy test unit\n", encoding="utf-8")
+    return units
+
+
 SCHEMA = """
 CREATE TABLE chats (
   jid TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT, last_message_ts INTEGER,
@@ -156,7 +166,8 @@ class BackendTests(unittest.TestCase):
                 ],
             )
         self.backend = backend_module.Backend(
-            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
+            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli,
+            unit_dir=installed_units(self.root),
         )
 
     def tearDown(self) -> None:
@@ -3178,7 +3189,7 @@ sys.exit(0)
         self.wacli.chmod(0o700)
         self.backend = backend_module.Backend(
             store_dir=self.work, state_dir=self.root / "state", wacli=self.wacli,
-            account_config=self.config,
+            account_config=self.config, unit_dir=installed_units(self.root),
         )
 
     def tearDown(self) -> None:

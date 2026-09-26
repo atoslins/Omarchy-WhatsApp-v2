@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest import mock
 
-from test_backend import SCHEMA, SCRIPT, backend_module
+from test_backend import SCHEMA, SCRIPT, backend_module, installed_units
 
 
 class BackendHardeningTests(unittest.TestCase):
@@ -71,6 +71,7 @@ class BackendHardeningTests(unittest.TestCase):
             state_dir=self.root / "state",
             wacli=self.wacli,
             account_config=self.root / "absent.yaml",
+            unit_dir=installed_units(self.root),
         )
 
     def tearDown(self) -> None:
@@ -846,6 +847,7 @@ class AccountLifecycleTests(unittest.TestCase):
             state_dir=self.root / "state",
             wacli=self.wacli,
             account_config=self.root / "absent.yaml",
+            unit_dir=installed_units(self.root),
         )
         self.backend._accounts = [self.work, self.home]
         self.backend._active = self.work
