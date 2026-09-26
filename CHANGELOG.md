@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased (fork)
+## 0.15.0 — WhatsApp for Omarchy (unreleased)
+
+The first release under its own name. It started as a fork of OmaWhatsApp
+0.14.0 and keeps its foundations: the resident service, the bar dropdown, the
+helper boundary and the installer.
+
+### Highlights
+
+- **New identity.** WhatsApp for Omarchy, plugin ID
+  `io.github.atoslins.whatsapp`. Installing over OmaWhatsApp takes its place
+  in the bar and keeps the helper, services, linked device and history;
+  keybindings that call the old ID are listed at the end of the install.
+- **Follows current wacli.** Accepts 0.17.1 or newer and is tested with
+  0.17.1, 0.18.3 and 0.19.0; newer wacli features turn on by themselves.
+- **Restyled interface.** Chat bubbles, attachments, the chat list (comfortable
+  or compact) and the bar dropdown, with a color per person and per account.
+- **Sending that never waits.** Messages appear at once and stay as a bubble
+  with Retry if they fail; replies no longer queue behind read marks.
+- **Forward, delete and star in bulk.** Pick messages, then forward them to
+  several chats or a new number with a note, delete them, or star them.
+- **Feels like the phone.** Reading marks chats read on your devices, the
+  contact sees you typing, notifications open or answer the chat, and ticks,
+  presence and `@` mentions show when wacli records them.
+- **Several accounts.** One merged list with a color per account, and each
+  account's sync, notifications and unlink in its own settings card.
+- **First run and lifecycle.** A welcome screen that links the phone from the
+  app, Quit with `Ctrl+Q`, and a choice to start with the system.
+- **For agents.** An MCP server with 46 tools next to the agent skill.
+
+### All changes
 
 - Settings → Accounts has one card per linked account: its state, its own
   background sync and, with more than one account, its own notifications, so

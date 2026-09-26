@@ -1,5 +1,10 @@
 # Architecture
 
+[← Documentation](README.md)
+
+How the resident service, the window, the bar dropdown, the helper and
+wacli fit together, and where each one's responsibility ends.
+
 ## Lifetimes
 
 - `Service.qml` is resident. It owns authentication/sync state, the chat rail,
@@ -36,7 +41,7 @@ the chat currently on screen is skipped, a burst is capped, and muted and
 archived chats stay silent.
 
 Unread state has two independent layers. wacli's `unread_count` remains the
-authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
+authoritative WhatsApp value. WhatsApp for Omarchy stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.
 The conversation on screen is read: selecting a chat, and every refresh that
 finds new messages in it while a window is open, marks that exact chat read,
@@ -84,7 +89,7 @@ capabilities through the versioned parity registry without widening the chat
 rail or its default write paths.
 
 The advanced gateway is an argument-array adapter, not an arbitrary executable
-passthrough. Every wacli 0.18.3 leaf has a fixed policy (0.17.1 is the
+passthrough. Every wacli 0.19.0 leaf has a fixed policy (0.17.1 is the
 minimum accepted release). Local reads receive
 `--read-only`; network work respects offline mode; local writes, sync,
 WhatsApp writes, destructive operations, and interactive linking require
@@ -104,7 +109,7 @@ keyed cache. CDN URLs and tokens never enter QML or persistent index data;
 normal rail refreshes consult only the local cache.
 
 wacli intentionally does not persist the original local path on outgoing
-media rows. After a successful upload, OmaWhatsApp keeps a private, bounded,
+media rows. After a successful upload, WhatsApp for Omarchy keeps a private, bounded,
 mode-`0600` message-ID-to-path handoff under its own state directory. This
 lets the just-sent image render immediately without touching wacli's database.
 For a visual batch, that index also records a random local album ID and bounded
@@ -115,7 +120,7 @@ Group mention choices come only from participants and senders already indexed
 inside that exact group. The helper rejects arbitrary mention JIDs before
 passing the verified set to wacli.
 
-Voice recordings live only in OmaWhatsApp's owner-private `voice-drafts`
+Voice recordings live only in WhatsApp for Omarchy's owner-private `voice-drafts`
 directory. The helper accepts its own random filenames, rejects links and
 paths outside that directory, requires a regular single-link file under 100
 MiB, and verifies the final OGG/Opus header. A failed send retains the draft;
@@ -134,8 +139,10 @@ no handler that stores them. Whatever arrives during the pause, including the
 read receipts from reading a chat on another device, never reaches the mirror.
 For that reason nothing yields by itself any more: automatic chat-photo refresh
 is off by default (preferences version 4 turns it off), and the remaining
-yields are user actions that wacli 0.18.3 cannot delegate: deletes, forwards,
-pin, mute and archive, photo refresh and number checks. Text, files, voice
+yields are user actions that official wacli cannot delegate: deletes, forwards,
+pin, mute and archive, photo refresh and number checks. A wacli with the
+additions listed in the README delegates deletes, forwards and number checks
+too. Text, files, voice
 notes, stickers, polls, reactions, edits and read state go through the sync
 process's socket and never pause it.
 
@@ -204,5 +211,5 @@ kind and name from the @lid, so a person's chat with messages and kind
 
 ## Extension boundary
 
-OmaWhatsApp has no special chat names, task semantics, or personal capture
+WhatsApp for Omarchy has no special chat names, task semantics, or personal capture
 configuration. Personal workflows belong in separate, user-owned extensions.

@@ -1,5 +1,10 @@
 # Testing
 
+[← Documentation](README.md)
+
+The release gate every change passes, the live checks on a real install,
+and the rules for screenshots.
+
 ## Release gate
 
 ```bash
@@ -56,7 +61,7 @@ durable boundaries and prove the next run restores one coherent version.
    send. Verify Escape also stops into review, discard removes the draft, a
    failed/offline send keeps it, and the explicit send button is the only
    action that transmits it. Repeat once in the compact dropdown.
-7. Review current-session logs for OmaWhatsApp QML errors.
+7. Review current-session logs for WhatsApp for Omarchy QML errors.
 8. Confirm automatic reading is on by default: opening a chat, a new message
    arriving in the open chat, and replying mark it read on the phone, while a
    chat marked unread from the list stays unread until chosen again.
@@ -97,13 +102,21 @@ durable boundaries and prove the next run restores one coherent version.
 ## Screenshot
 
 ```bash
-omarchy-shell io.github.moizibnyousaf.omawhatsapp closeApp
-omarchy-shell io.github.moizibnyousaf.omawhatsapp openApp '{"demo":true}'
-omarchy-shell io.github.moizibnyousaf.omawhatsapp openApp '{"demo":true,"viewer":true}'
-omarchy-shell io.github.moizibnyousaf.omawhatsapp openApp '{"demo":true,"voice":true}'
+omarchy-shell io.github.atoslins.whatsapp closeApp
+omarchy-shell io.github.atoslins.whatsapp openApp '{"demo":true}'
+omarchy-shell io.github.atoslins.whatsapp openApp '{"demo":true,"viewer":true}'
+omarchy-shell io.github.atoslins.whatsapp openApp '{"demo":true,"voice":true}'
 ```
 
 Capture only that window. Never publish a real conversation timeline.
+
+The screenshots in `docs/screenshots/` and the store banner `preview.png` are
+rendered offscreen instead, so no other window can end up in them:
+`qmltestrunner` loads `App.qml` or `Dropdown.qml` in demo mode with the stubs
+from `tests/imports`, a Tokyo Night `Color` singleton, and the app window sized
+to each layout, then saves `grabImage`. Demo chats are shown with initials,
+since the photo mask needs a GPU that offscreen rendering lacks. Every image
+comes from the repository's demo data.
 
 ## Agent server
 

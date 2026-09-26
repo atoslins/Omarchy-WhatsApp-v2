@@ -1,8 +1,13 @@
 # Technical notes
 
+[← Documentation](README.md)
+
+The runtime shape, the trust boundary, how writes coexist with live sync,
+and the paths the app uses at runtime.
+
 ## Runtime shape
 
-OmaWhatsApp is one Omarchy plugin with two shell entry points:
+WhatsApp for Omarchy is one Omarchy plugin with two shell entry points:
 
 - `Service.qml` stays resident, owns local sync/read state, and owns the one
   lazily displayed `App.qml` responsive window.
@@ -145,7 +150,7 @@ Build/test artifacts remain outside the installed plugin tree.
 
 | Path | Purpose |
 |---|---|
-| `~/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp` | installed plugin |
+| `~/.config/omarchy/plugins/io.github.atoslins.whatsapp` | installed plugin |
 | `~/.agents/skills/omawhatsapp` | shared on-device agent skill |
 | `~/.local/bin/omawhatsapp` | bounded helper (launcher) |
 | `~/.local/bin/omawhatsapp_core.py` | the helper's code, imported by the launcher |

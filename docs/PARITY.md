@@ -1,6 +1,8 @@
 # WhatsApp parity map
 
-This is the implementation contract for OmaWhatsApp. “Feature complete” means
+[← Documentation](README.md)
+
+This is the implementation contract for WhatsApp for Omarchy. “Feature complete” means
 every row is either verified end to end or has a named upstream transport gap;
 it does not mean that a button-shaped placeholder exists.
 
@@ -10,7 +12,7 @@ Evidence sources:
   private conversation content.
 - **Transport** — wacli 0.19.0 command help and the live local-store schema
   (minimum accepted release: 0.17.1).
-- **App** — the private OmaWhatsApp worktree, installed Omarchy plugin, and
+- **App** — the private WhatsApp for Omarchy worktree, installed Omarchy plugin, and
   rendered runtime checks.
 
 ## Agent transport parity

@@ -1,6 +1,8 @@
 # Privacy and local data
 
-OmaWhatsApp handles end-to-end encrypted data after it reaches your linked
+[← Documentation](README.md)
+
+WhatsApp for Omarchy handles end-to-end encrypted data after it reaches your linked
 device. Treat wacli's database and media directory as private.
 
 Never commit WhatsApp session keys, `wacli.db`, `session.db`, WAL/SHM files,
@@ -10,7 +12,7 @@ must still be reviewed before push.
 
 Runtime data remains under `~/.local/state/`. Clipboard images use a private
 runtime file, pass through wacli, and are removed in a `finally` path.
-OmaWhatsApp's mode-`0600` preferences contain the bar badge visibility, the
+WhatsApp for Omarchy's mode-`0600` preferences contain the bar badge visibility, the
 dropdown density, and the desktop-notification choice, plus one private section
 per account store holding that account's offline choice,
 automatic-reading choice, the name it signs messages with (when the signature
