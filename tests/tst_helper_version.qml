@@ -2,8 +2,9 @@ import QtQuick
 import QtTest
 import "../plugins/omawhatsapp" as Oma
 
-// An update that replaced only the plugin leaves an older helper in
-// ~/.local/bin: the app says to run the installer instead of a raw error.
+// omarchy plugin update replaces the files, but the shell keeps the QML it
+// loaded: the helper and the app disagree until the shell restarts, and the
+// app says so instead of showing a raw error.
 TestCase {
   id: testCase
   name: "HelperVersion"
@@ -28,7 +29,7 @@ TestCase {
     var service = createTemporaryObject(serviceComponent, testCase)
     status(service, ok("0.15.0"))
     verify(!service.helperOutdated)
-    verify(service.barTooltip.indexOf("update incomplete") < 0)
+    verify(service.barTooltip.indexOf("restart the shell") < 0)
   }
 
   function test_without_a_manifest_nothing_is_compared() {
@@ -37,12 +38,12 @@ TestCase {
     verify(!service.helperOutdated)
   }
 
-  function test_an_older_helper_asks_for_the_installer() {
+  function test_a_different_helper_asks_to_restart_the_shell() {
     var service = createTemporaryObject(serviceComponent, testCase)
     status(service, ok())
     verify(service.helperOutdated, "a helper without a version predates this app")
-    verify(service.helperOutdatedText.indexOf("./scripts/install") >= 0)
-    verify(service.barTooltip.indexOf("update incomplete") >= 0)
+    verify(service.helperOutdatedText.indexOf("Restart the Omarchy shell") >= 0)
+    verify(service.barTooltip.indexOf("restart the shell") >= 0)
     status(service, ok("0.14.0"))
     verify(service.helperOutdated)
     verify(service.helperOutdatedText.indexOf("0.14.0") >= 0)

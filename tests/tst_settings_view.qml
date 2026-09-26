@@ -58,6 +58,14 @@ TestCase {
       function setOnline(online, account) {
         record("setOnline", account === undefined ? [online] : [online, account]); return true }
       function unlinkAccount(name, confirm) { record("unlinkAccount", [name, confirm]); return true }
+      property bool setupAgents: true
+      property bool setupKnown: true
+      property bool setupWriting: false
+      property var lastTeardown: null
+      property string pluginId: "io.github.atoslins.whatsapp"
+      function runSetup(agents, replaceOriginal) { record("runSetup", [agents, replaceOriginal]); return true }
+      function removeFromComputer() { record("removeFromComputer", []); return true }
+      function removePlugin() { record("removePlugin", []); return true }
       property bool startAtLogin: true
       function quitApp() { record("quitApp", []); return true }
       property int aboutRequests: 0
@@ -297,5 +305,44 @@ TestCase {
     compare(h.service.accountOperations.linked, "main:primary", "the main account links with wacli auth")
     findChild(h.view, "accountLink-home").clicked()
     compare(h.service.accountOperations.linked, "home")
+  }
+
+  function test_agents_can_be_turned_off_from_settings() {
+    var h = create()
+    h.view.openSection("sync")
+    wait(0)
+    var toggle = findChild(h.view, "setting-agents")
+    verify(toggle.checked)
+    toggle.toggled()
+    compare(last(h.service).name, "runSetup")
+    compare(last(h.service).args, [false, false])
+  }
+
+  function test_removing_from_this_computer_asks_first() {
+    var h = create()
+    h.view.openSection("sync")
+    wait(0)
+    var calls = h.service.calls.length
+    verify(!h.view.runRow({ key: "remove_setup" }, true), "the first click only asks")
+    compare(h.service.calls.length, calls)
+    verify(h.view.removeConfirming)
+    verify(h.view.runRow({ key: "remove_setup" }, true))
+    compare(last(h.service).name, "removeFromComputer")
+    verify(!h.view.removeConfirming)
+    verify(findChild(h.view, "setting-remove_plugin") === null, "the app itself only after that")
+    h.service.lastTeardown = { ok: true, remove_command: "omarchy plugin remove io.github.atoslins.whatsapp" }
+    wait(0)
+    findChild(h.view, "setting-remove_plugin").clicked()
+    compare(last(h.service).name, "removePlugin")
+  }
+
+  function test_a_pending_removal_is_dropped_when_leaving() {
+    var h = create()
+    h.view.openSection("sync")
+    wait(0)
+    h.view.runRow({ key: "remove_setup" }, true)
+    verify(h.view.removeConfirming)
+    h.view.openSection("reading")
+    verify(!h.view.removeConfirming)
   }
 }

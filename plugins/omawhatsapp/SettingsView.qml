@@ -29,7 +29,9 @@ Rectangle {
   property string current: "reading"
   // The account whose Unlink waits for a second, explicit click.
   property string unlinkConfirming: ""
-  onCurrentChanged: unlinkConfirming = ""
+  // Remove from this computer waits for a second click too.
+  property bool removeConfirming: false
+  onCurrentChanged: { unlinkConfirming = ""; removeConfirming = false }
   // In the narrow layout the section list and a section page take turns.
   property bool narrowPage: false
   readonly property bool live: !demoMode && !!service
@@ -76,6 +78,7 @@ Rectangle {
   onVisibleChanged: if (visible) {
     narrowPage = false
     unlinkConfirming = ""
+    removeConfirming = false
     refreshAbout()
   }
   // Demo captures show repository-owned figures, never this machine's.
@@ -198,8 +201,25 @@ Rectangle {
           checked: value("startAtLogin", true), busy: busy },
         { kind: "action", key: "quit", title: "Quit WhatsApp for Omarchy",
           subtitle: "Stops receiving messages, popups and showing you online until you open it again. Ctrl+Q in the app.",
-          button: "Quit", available: live }
+          button: "Quit", available: live },
+        { kind: "toggle", key: "agents", title: "Let AI agents use WhatsApp",
+          subtitle: value("setupAgents", true)
+            ? "The agent skill and the MCP server are installed; agents ask before they change anything on WhatsApp."
+            : "No agent can use WhatsApp through this app.",
+          checked: value("setupAgents", true), available: live && value("setupKnown", false),
+          busy: value("setupWriting", false) },
+        { kind: "action", key: "remove_setup",
+          title: settings.removeConfirming ? "Remove it from this computer?" : "Remove from this computer",
+          subtitle: settings.removeConfirming
+            ? "Background sync stops, and the services, the command and the agent skill are removed. Your linked device, chats and settings stay."
+            : "Before removing the app: stops background sync and removes what the setup added outside the plugin folder.",
+          button: settings.removeConfirming ? "Remove" : "Remove…",
+          available: live && !value("setupWriting", false) }
       ]
+      if (live && value("lastTeardown", null))
+        rows.push({ kind: "action", key: "remove_plugin", title: "Remove the app too",
+          subtitle: "Runs omarchy plugin remove " + value("pluginId", "") + " in a terminal, which asks first.",
+          button: "Remove the app…", available: true })
       var stores = Array.isArray(about.stores) ? about.stores : []
       for (var i = 0; i < stores.length; i++) {
         var label = multi ? " · " + (stores[i].label || stores[i].account || "primary") : ""
@@ -313,6 +333,12 @@ Rectangle {
     case "auto_download_media": return service.setAutoDownloadMedia(next)
     case "online": return service.setOnline(next)
     case "refresh_avatars": return service.accountOperations.refreshAvatars()
+    case "agents": return service.runSetup(next, false)
+    case "remove_setup":
+      if (!removeConfirming) { removeConfirming = true; return false }
+      removeConfirming = false
+      return service.removeFromComputer()
+    case "remove_plugin": return service.removePlugin()
     case "quit": return settings.app && typeof settings.app.quitApp === "function"
       ? settings.app.quitApp() : service.quitApp()
     case "link": return service.accountOperations.linkAccount(next)

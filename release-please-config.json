@@ -61,11 +61,6 @@
           "jsonpath": "$.version"
         },
         {
-          "type": "json",
-          "path": "plugins/omawhatsapp/manifest.json",
-          "jsonpath": "$.version"
-        },
-        {
           "type": "generic",
           "path": "bin/omawhatsapp_core.py"
         }

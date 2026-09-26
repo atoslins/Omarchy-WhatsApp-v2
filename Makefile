@@ -9,7 +9,7 @@ validate: test manifest lint
 test:
 	python3 -m py_compile bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
 	OMAW_SCRIPT="$(CURDIR)/bin/omawhatsapp_core.py" python3 -B -m unittest discover -s tests -v
-	jq empty manifest.json plugins/omawhatsapp/manifest.json
+	jq empty manifest.json
 
 manifest:
 	omarchy plugin validate .
@@ -21,7 +21,7 @@ lint:
 release-check:
 	./scripts/test
 
-# Copy working-tree changes over an existing standalone install.
+# Copy the working tree over the plugin checkout that omarchy plugin add made.
 dev:
 	./scripts/dev-sync
 

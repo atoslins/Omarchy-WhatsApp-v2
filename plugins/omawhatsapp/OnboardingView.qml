@@ -2,9 +2,9 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// First run: nothing linked yet. What WhatsApp for Omarchy is, what stays on this
-// computer, and the three steps to link the phone, with the button that
-// opens the QR code. With no wacli, what to install first.
+// First run after `omarchy plugin add`: install wacli if it is missing, set up
+// what lives outside the plugin folder (with consent), then link the phone
+// with the QR code. What stays on this computer is said up front.
 Rectangle {
   id: root
 
@@ -16,8 +16,13 @@ Rectangle {
   property color dim: foreground
   property string fontFamily: Style.font.family
   readonly property var operations: service ? service.accountOperations : null
-  readonly property bool wacliMissing: !demoMode && !!service && service.wacliInstalled === false
+  readonly property bool wacliTooOld: !demoMode && !!service && service.wacliTooOld === true
+  readonly property bool wacliMissing: !demoMode && !!service
+    && (service.wacliInstalled === false || wacliTooOld)
+  readonly property bool setupNeeded: !demoMode && !!service && !wacliMissing
+    && service.needsSetup === true
   readonly property bool linking: !!operations && operations.linkBusy === true
+  property bool allowAgents: !service || service.setupAgents !== false
 
   function startLink() {
     if (demoMode || !service || !operations) return false
@@ -62,7 +67,8 @@ Rectangle {
           Text {
             textFormat: Text.PlainText
             objectName: "onboardingTitle"
-            text: root.wacliMissing ? "One more piece first" : "Link your WhatsApp"
+            text: root.wacliMissing ? "One more piece first"
+              : root.setupNeeded ? "Set it up on this computer" : "Link your WhatsApp"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading + 4
@@ -97,16 +103,55 @@ Rectangle {
             textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.Wrap
-            text: "WhatsApp for Omarchy talks to WhatsApp through wacli, which is not installed yet."
+            text: root.wacliTooOld
+              ? "Your wacli " + String(root.service.wacliVersion || "") + " is older than this app supports. Update it with Omarchy's package manager:"
+              : "WhatsApp for Omarchy talks to WhatsApp through wacli, which is not installed yet. Install it with Omarchy's package manager:"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
+          }
+          Rectangle {
+            width: parent.width
+            height: wacliCommand.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+            Text {
+              textFormat: Text.PlainText
+              id: wacliCommand
+              objectName: "onboardingWacliCommand"
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "omarchy pkg aur add wacli-bin"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+          Rectangle {
+            objectName: "onboardingInstallWacli"
+            width: installWacliLabel.implicitWidth + Style.space(36)
+            height: Style.space(40)
+            radius: Style.cornerRadius + 2
+            color: installWacliHover.hovered ? Qt.lighter(root.accent, 1.1) : root.accent
+            Text {
+              textFormat: Text.PlainText
+              id: installWacliLabel
+              anchors.centerIn: parent
+              text: "Install in a terminal"
+              color: root.background
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.weight: Font.Bold
+            }
+            HoverHandler { id: installWacliHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: if (root.service) root.service.installWacli() }
           }
           Text {
             textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Install wacli at ~/.local/bin/wacli, then open WhatsApp for Omarchy again: this screen continues from there."
+            text: "This screen goes on by itself once wacli is installed. A wacli of your own at ~/.local/bin/wacli is used first."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -114,10 +159,139 @@ Rectangle {
         }
       }
 
+      // What the setup writes outside the plugin folder, asked once.
+      Rectangle {
+        objectName: "onboardingSetup"
+        visible: root.setupNeeded
+        width: parent.width
+        height: setupColumn.implicitHeight + Style.space(32)
+        radius: Style.cornerRadius + 4
+        color: Style.normalFillFor(root.foreground, root.accent)
+        Column {
+          id: setupColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.margins: Style.space(18)
+          spacing: Style.space(12)
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Setting up adds, in your home folder only:"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          Repeater {
+            model: [
+              "Background sync: a user service keeps your chats current while the app is closed. It runs sandboxed and needs no password.",
+              "The omawhatsapp command, linked in ~/.local/bin."
+            ]
+            delegate: Row {
+              required property var modelData
+              width: setupColumn.width
+              spacing: Style.space(10)
+              Text {
+                textFormat: Text.PlainText
+                text: "󰄬"
+                color: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width - Style.space(24)
+                wrapMode: Text.Wrap
+                text: modelData
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+          }
+          Item {
+            width: parent.width
+            height: Math.max(agentsSwitch.height, agentsText.implicitHeight)
+            Column {
+              id: agentsText
+              anchors.left: parent.left
+              anchors.right: agentsSwitch.left
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                text: "Let AI agents use WhatsApp"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "Adds the agent skill and the MCP server. Agents ask before they change anything on WhatsApp. You can turn this off later in Settings."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+            ToggleSwitch {
+              id: agentsSwitch
+              objectName: "onboardingAgents"
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.allowAgents
+              foreground: root.foreground
+              accent: root.accent
+              onToggled: root.allowAgents = !checked
+            }
+          }
+          Text {
+            textFormat: Text.PlainText
+            objectName: "onboardingReplaceOriginal"
+            visible: !!root.service && root.service.originalPluginEnabled === true
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "OmaWhatsApp is installed and turned on. Setting up turns it off (it is not deleted), since only one of the two can run."
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+          Rectangle {
+            objectName: "onboardingSetUp"
+            width: setUpLabel.implicitWidth + Style.space(36)
+            height: Style.space(40)
+            radius: Style.cornerRadius + 2
+            readonly property bool busy: !!root.service && root.service.setupWriting === true
+            opacity: busy ? 0.6 : 1
+            color: setUpHover.hovered && !busy ? Qt.lighter(root.accent, 1.1) : root.accent
+            Text {
+              textFormat: Text.PlainText
+              id: setUpLabel
+              anchors.centerIn: parent
+              text: parent.busy ? "Setting up…" : "Set up"
+              color: root.background
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.weight: Font.Bold
+            }
+            HoverHandler { id: setUpHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler {
+              enabled: !parent.busy
+              onTapped: if (root.service)
+                root.service.runSetup(root.allowAgents, root.service.originalPluginEnabled === true)
+            }
+          }
+        }
+      }
+
       // The three steps, and the button that shows the QR code.
       Rectangle {
         objectName: "onboardingSteps"
-        visible: !root.wacliMissing
+        visible: !root.wacliMissing && !root.setupNeeded
         width: parent.width
         height: stepsColumn.implicitHeight + Style.space(32)
         radius: Style.cornerRadius + 4

@@ -2423,14 +2423,15 @@ class BackendTests(unittest.TestCase):
         plugin = self.root / "plugin"
         plugin.mkdir()
         (plugin / "manifest.json").write_text('{"version": "0.14.0"}', encoding="utf-8")
-        (plugin / "install-mode").write_text("standalone\n", encoding="utf-8")
+        # omarchy plugin add leaves a git checkout.
+        (plugin / ".git").mkdir()
         media = self.store / "media" / "chat" / "message"
         media.mkdir(parents=True)
         (media / "photo.jpg").write_bytes(b"x" * 1000)
         (self.store / "media" / "loop").symlink_to(self.store)
         about = self.backend.about(plugin_dir=plugin)
         self.assertEqual(about["app_version"], "0.14.0")
-        self.assertEqual(about["install_mode"], "standalone")
+        self.assertEqual(about["install_mode"], "git")
         self.assertEqual(about["wacli_version"], "0.18.3")
         self.assertEqual(about["wacli_minimum_version"], "0.17.1")
         store = about["stores"][0]

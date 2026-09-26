@@ -15,7 +15,6 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "bin/omawhatsapp_core.py"
-WACLI = Path(os.environ.get("WACLI_BIN", Path.home() / ".local/bin/wacli"))
 
 
 def load_helper():
@@ -27,6 +26,10 @@ def load_helper():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# The same wacli the app would use: WACLI_BIN, ~/.local/bin, then the system.
+WACLI = load_helper().locate_wacli()
 
 
 @lru_cache(maxsize=None)

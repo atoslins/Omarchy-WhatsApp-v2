@@ -37,11 +37,12 @@ Item {
 
   UpdateController {
     id: appUpdates
+    helper: root.helper
     active: root.opened && !root.demoMode
     online: !!root.service && root.service.statusReady && !root.service.offlineMode
     checkOnLaunch: !!root.service && root.service.checkUpdatesOnLaunch === true
     onUpdateAvailable: function(version) {
-      root.showToast("WhatsApp for Omarchy " + version + " available · open settings to update")
+      root.showToast("A new version of WhatsApp for Omarchy is available · open settings to update")
     }
   }
   property alias cursorIndex: keyboardNavigation.messageIndex
@@ -184,7 +185,9 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.atoslins.whatsapp"
-  readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  // The helper ships in this checkout, at bin/ two levels above this file.
+  readonly property string helper: decodeURIComponent(
+    String(Qt.resolvedUrl("../../bin/omawhatsapp")).replace(/^file:\/\//, ""))
   readonly property bool showAvatars: root.demoMode || !root.service || root.service.showAvatars !== false
   readonly property string syncPauseReason: !root.demoMode && root.service
     && typeof root.service.syncPauseReason === "string" ? root.service.syncPauseReason : ""
@@ -1309,9 +1312,18 @@ Item {
       .map(function(part) { return encodeURIComponent(part) }).join("/")
   }
 
+  // File dialogs are zenity's; on a stock Omarchy it is not installed yet.
+  function zenityReady() {
+    if (root.demoMode || !root.service || root.service.zenityAvailable !== false) return true
+    root.showToast("Choosing files needs zenity. Paste or drag files in meanwhile.",
+      "Install", function() { root.service.installZenity() })
+    return false
+  }
+
   function openFilePicker(kind) {
     var origin = currentChatRef()
     if (filePickerProcess.running || origin.jid === "") return
+    if (!zenityReady()) return
     var title = "Add documents"
     var command = ["/usr/bin/zenity", "--file-selection", "--multiple",
       "--separator=\n", "--title=" + title]
@@ -1344,6 +1356,7 @@ Item {
     if (!item || !item.id || savePickerProcess.running) return false
     var origin = currentChatRef()
     if (origin.jid === "" || root.demoMode || !root.service) return false
+    if (!zenityReady()) return false
     var name = String(item.filename || "").split("/").pop()
     if (name === "") name = String(item.local_path || "").split("/").pop()
     if (name === "") name = "attachment"
@@ -1360,6 +1373,7 @@ Item {
   function exportChat() {
     var origin = currentChatRef()
     if (origin.jid === "" || root.demoMode || !root.service || exportPickerProcess.running) return false
+    if (!zenityReady()) return false
     var name = String(root.displayGroupName || "chat").replace(/[\/\\:*?"<>|]+/g, " ").trim() || "chat"
     exportPickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     exportPickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
@@ -1396,6 +1410,8 @@ Item {
     copyToastVisible = false
     toastActionChat = null
     if (!chat) return false
+    // An action that is not a chat, such as installing a missing tool.
+    if (typeof chat === "function") { chat(); return true }
     var ref = String(chat.jid || "") === "" && String(chat.phone || "") !== ""
       ? AccountModel.chatRef(String(chat.account || ""), String(chat.phone) + "@s.whatsapp.net")
       : AccountModel.refOf(chat)

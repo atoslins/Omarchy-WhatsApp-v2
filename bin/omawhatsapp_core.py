@@ -60,14 +60,58 @@ def absolute_environment_path(name: str, fallback: Path) -> Path:
 STATE_HOME = absolute_environment_path("XDG_STATE_HOME", HOME / ".local/state")
 STATE_DIR = STATE_HOME / "omawhatsapp"
 STORE_DIR = absolute_environment_path("WACLI_STORE_DIR", STATE_HOME / "wacli")
-WACLI = absolute_environment_path("WACLI_BIN", HOME / ".local/bin/wacli")
+# The checkout this helper runs from. `omarchy plugin add` clones the whole
+# repository into the plugins folder, so the helper, the QML, the unit
+# templates and the agent skill always come from the same commit.
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+LOCAL_BIN = HOME / ".local" / "bin"
+# wacli is looked up in fixed places, never on PATH: ~/.local/bin first (a build
+# the user placed there, such as one with extra features), then a system
+# package (AUR wacli-bin installs /usr/bin/wacli).
+WACLI_CANDIDATES = (LOCAL_BIN / "wacli", Path("/usr/local/bin/wacli"), Path("/usr/bin/wacli"))
+
+
+def locate_wacli() -> Path:
+    raw = os.environ.get("WACLI_BIN", "").strip()
+    if raw:
+        chosen = Path(raw).expanduser()
+        if chosen.is_absolute():
+            return chosen
+    for candidate in WACLI_CANDIDATES:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return WACLI_CANDIDATES[0]
+
+
+WACLI = locate_wacli()
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"[0-9]+", text)[:3])
 # wacli keeps the account config in the XDG state directory even when
 # --store or WACLI_STORE_DIR points somewhere else.
 ACCOUNT_CONFIG = STATE_HOME / "wacli" / "config.yaml"
 SYSTEMCTL = Path("/usr/bin/systemctl")
 PLUGIN_ID = "io.github.atoslins.whatsapp"
-PLUGIN_DIR = absolute_environment_path(
-    "XDG_CONFIG_HOME", HOME / ".config") / "omarchy" / "plugins" / PLUGIN_ID
+PLUGINS_DIR = absolute_environment_path(
+    "XDG_CONFIG_HOME", HOME / ".config") / "omarchy" / "plugins"
+PLUGIN_DIR = PLUGINS_DIR / PLUGIN_ID
+SHELL_CONFIG = absolute_environment_path(
+    "XDG_CONFIG_HOME", HOME / ".config") / "omarchy" / "shell.json"
+# What the first run sets up, with the user's consent: the background sync
+# units, the `omawhatsapp` command, and the agent skill with the MCP server.
+SETUP_UNITS = ("wacli-sync.service", "wacli-sync@.service")
+UNIT_WACLI = "%h/.local/bin/wacli"
+UNIT_MARKERS = ("WhatsApp for Omarchy", "OmaWhatsApp")
+SKILL_LINK = HOME / ".agents" / "skills" / "omawhatsapp"
+# Copies the old installer left beside the helper in ~/.local/bin.
+LEGACY_HELPER_COPIES = ("omawhatsapp_core.py", "omawhatsapp_assets.py")
+# The original OmaWhatsApp shares the helper name, the units and the state, so
+# only one of the two can run.
+ORIGINAL_PLUGIN_ID = "io.github.moizibnyousaf.omawhatsapp"
+OMARCHY = Path("/usr/bin/omarchy")
+GIT = Path("/usr/bin/git")
+ZENITY = Path("/usr/bin/zenity")
 MAX_ABOUT_FILES = 200_000
 USER_UNIT_DIR = absolute_environment_path(
     "XDG_CONFIG_HOME", HOME / ".config") / "systemd" / "user"
@@ -769,8 +813,18 @@ class Backend:
         wacli: Path = WACLI,
         account_config: Path | None = None,
         unit_dir: Path | None = None,
+        plugin_root: Path = PLUGIN_ROOT,
+        local_bin: Path = LOCAL_BIN,
+        skill_link: Path = SKILL_LINK,
+        plugins_dir: Path = PLUGINS_DIR,
+        shell_config: Path = SHELL_CONFIG,
     ) -> None:
         self.unit_dir = unit_dir or USER_UNIT_DIR
+        self.plugin_root = plugin_root
+        self.local_bin = local_bin
+        self.skill_link = skill_link
+        self.plugins_dir = plugins_dir
+        self.shell_config = shell_config
         self.store_dir = store_dir
         self.state_dir = state_dir
         self.wacli = wacli
@@ -930,7 +984,8 @@ class Backend:
                     "The link command completed, but no linked session was created."
                 )
             return result
-        if account.unit and self.online(account):
+        # Before the first-run setup there is no unit to start; the setup starts it.
+        if account.unit and self.online(account) and self._units_state() != "missing":
             try:
                 # It starts now; at login only if WhatsApp for Omarchy starts with the system.
                 if self._preferences().get("start_at_login") is not False:
@@ -1396,6 +1451,13 @@ class Backend:
                 "preview": notifications.get("preview") is not False,
                 "sound": notifications.get("sound") is not False,
             },
+            # Consent to what the first run writes outside the plugin folder.
+            "setup": {
+                "consented": isinstance(value.get("setup"), dict)
+                and value["setup"].get("consented") is True,
+                "agents": not isinstance(value.get("setup"), dict)
+                or value["setup"].get("agents") is not False,
+            },
             "stores": stores,
         }
 
@@ -1705,18 +1767,12 @@ class Backend:
                         return total, files, True
         return total, files, False
 
-    def about(self, plugin_dir: Path = PLUGIN_DIR) -> dict[str, Any]:
+    def about(self, plugin_dir: Path | None = None) -> dict[str, Any]:
         """Versions, install mode and local disk use. Local reads only."""
-        app_version = ""
-        try:
-            manifest = json.loads((plugin_dir / "manifest.json").read_text(encoding="utf-8"))
-            app_version = str(manifest.get("version") or "")[:32]
-        except (OSError, ValueError):
-            pass
-        try:
-            install_mode = (plugin_dir / "install-mode").read_text(encoding="utf-8").strip()[:32]
-        except OSError:
-            install_mode = ""
+        plugin_dir = plugin_dir or self.plugin_root
+        app_version = self._app_version(plugin_dir)
+        # A git checkout is what `omarchy plugin add` makes and updates.
+        install_mode = "git" if (plugin_dir / ".git").exists() else "copy"
         wacli_version = ""
         try:
             result = run_bounded([str(self.wacli), "--version"], timeout=5,
@@ -1793,6 +1849,395 @@ class Backend:
             "auto_download_media": self.auto_download_media(),
             "restarted": restarted,
         }
+
+    # ------------------------------------------------------------------ setup
+    #
+    # `omarchy plugin add` only clones the repository, so the first run sets up
+    # what lives outside the plugin folder, once the user agrees: the sync
+    # units, a link that puts `omawhatsapp` on the command line, and, when
+    # agents are allowed, the MCP server link and the agent skill. Links point
+    # into the checkout, so `omarchy plugin update` updates them all at once.
+
+    def _wacli_version(self) -> str:
+        """wacli's version, cached until the binary changes (status runs often)."""
+        try:
+            info = self.wacli.stat()
+        except OSError:
+            return ""
+        key = [str(self.wacli), info.st_mtime_ns, info.st_size]
+        cached = self._read_state_json("wacli-version.json", 4096, {})
+        if isinstance(cached, dict) and cached.get("key") == key:
+            return str(cached.get("version") or "")
+        version = ""
+        try:
+            result = run_bounded([str(self.wacli), "--version"], timeout=5,
+                                 stdout_limit=4096, stderr_limit=4096)
+            match = re.search(r"wacli\s+v?([0-9]+(?:\.[0-9]+)+)", result.stdout or result.stderr)
+            version = match.group(1) if match else ""
+        except (OSError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
+            return ""
+        try:
+            self._write_state_json("wacli-version.json", {"key": key, "version": version}, 4096)
+        except (OSError, OmaWhatsAppError):
+            pass
+        return version
+
+    @staticmethod
+    def _wacli_too_old(version: str) -> bool:
+        return bool(version) and version_tuple(version) < version_tuple(WACLI_MINIMUM_VERSION)
+
+    @staticmethod
+    def _app_version(plugin_dir: Path) -> str:
+        try:
+            manifest = json.loads((plugin_dir / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        return str(manifest.get("version") or "")[:32] if isinstance(manifest, dict) else ""
+
+    def _setup_links(self, agents: bool) -> dict[Path, Path]:
+        links = {self.local_bin / "omawhatsapp": self.plugin_root / "bin" / "omawhatsapp"}
+        if agents:
+            links[self.local_bin / "omawhatsapp-mcp"] = self.plugin_root / "bin" / "omawhatsapp-mcp"
+            links[self.skill_link] = self.plugin_root / "skills" / "omawhatsapp"
+        return links
+
+    @staticmethod
+    def _link_state(link: Path, target: Path) -> str:
+        """ok, missing, copy (a regular file or folder to replace), or other."""
+        if link.is_symlink():
+            try:
+                return "ok" if link.resolve(strict=True) == target.resolve(strict=True) else "other"
+            except OSError:
+                return "other"
+        if link.is_file():
+            return "copy"
+        if link.is_dir():
+            return "copy" if (link / "SKILL.md").is_file() else "blocked"
+        return "missing"
+
+    def _points_into_checkout(self, link: Path) -> bool:
+        if not link.is_symlink():
+            return False
+        try:
+            target = Path(os.readlink(link))
+        except OSError:
+            return False
+        target = target if target.is_absolute() else link.parent / target
+        root = self.plugin_root.resolve(strict=False)
+        try:
+            return os.path.commonpath([str(root), os.path.normpath(target)]) == str(root)
+        except ValueError:
+            return False
+
+    def _back_up(self, path: Path) -> None:
+        """Move something a link replaces aside instead of deleting it."""
+        folder = self.state_dir / "setup-backup"
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.move(str(path), str(folder / f"{path.name}.{stamp}.{secrets.token_hex(3)}"))
+
+    def _place_link(self, link: Path, target: Path) -> bool:
+        state = self._link_state(link, target)
+        if state == "ok":
+            return False
+        if state == "blocked":
+            raise OmaWhatsAppError(f"{link} is a folder this app did not create; move it away first.")
+        if not target.exists():
+            raise OmaWhatsAppError(f"This copy of the app is missing {target.name}; reinstall it.")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if state == "copy":
+            self._back_up(link)
+        temporary = link.with_name(f".{link.name}.{secrets.token_hex(6)}.tmp")
+        os.symlink(target, temporary)
+        os.replace(temporary, link)
+        return True
+
+    def _render_unit(self, name: str) -> str:
+        text = (self.plugin_root / "systemd" / "user" / name).read_text(encoding="utf-8")
+        if self.wacli != self.local_bin / "wacli":
+            path = str(self.wacli)
+            if not re.fullmatch(r"/[A-Za-z0-9._/+-]+", path):
+                raise OmaWhatsAppError("The wacli path cannot be used in a service unit.")
+            text = text.replace(UNIT_WACLI, path)
+        return text
+
+    def _units_state(self) -> str:
+        """ok, missing, stale (ours, but not this version), or foreign."""
+        states = []
+        for name in SETUP_UNITS:
+            installed = self.unit_dir / name
+            if installed.is_symlink():
+                return "foreign"
+            if not installed.is_file():
+                states.append("missing")
+                continue
+            try:
+                current = installed.read_text(encoding="utf-8", errors="replace")
+                rendered = self._render_unit(name)
+            except (OSError, OmaWhatsAppError):
+                states.append("stale")
+                continue
+            if current == rendered:
+                states.append("ok")
+            elif any(marker in current for marker in UNIT_MARKERS):
+                states.append("stale")
+            else:
+                return "foreign"
+        if all(state == "ok" for state in states):
+            return "ok"
+        return "missing" if "missing" in states else "stale"
+
+    def _write_unit(self, name: str, text: str) -> None:
+        self.unit_dir.mkdir(parents=True, exist_ok=True)
+        target = self.unit_dir / name
+        if target.is_symlink():
+            raise OmaWhatsAppError("A sync unit path is a symlink; refusing to write it.")
+        if target.is_file():
+            current = target.read_text(encoding="utf-8", errors="replace")
+            if not any(marker in current for marker in UNIT_MARKERS):
+                raise OmaWhatsAppError(f"{name} belongs to something else; refusing to replace it.")
+        temporary = self.unit_dir / f".{name}.{secrets.token_hex(8)}.tmp"
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
+        try:
+            os.write(descriptor, text.encode("utf-8"))
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, target)
+
+    def _original_plugin(self) -> dict[str, bool]:
+        installed = (self.plugins_dir / ORIGINAL_PLUGIN_ID).exists()
+        enabled = False
+        try:
+            shell = json.loads(self.shell_config.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            shell = {}
+        if isinstance(shell, dict):
+            layout = shell.get("bar", {}).get("layout", {}) if isinstance(shell.get("bar"), dict) else {}
+            entries = list(shell.get("plugins") or []) if isinstance(shell.get("plugins"), list) else []
+            if isinstance(layout, dict):
+                for section in ("left", "center", "right"):
+                    if isinstance(layout.get(section), list):
+                        entries.extend(layout[section])
+            enabled = any(isinstance(item, dict) and item.get("id") == ORIGINAL_PLUGIN_ID
+                          for item in entries)
+        return {"installed": installed, "enabled": enabled}
+
+    def _setup_state(self, preferences: dict[str, Any] | None = None) -> dict[str, Any]:
+        value = preferences if preferences is not None else self._preferences()
+        consent = value.get("setup") or {}
+        agents = consent.get("agents") is not False
+        links = {
+            str(link): self._link_state(link, target)
+            for link, target in self._setup_links(agents).items()
+        }
+        units = self._units_state()
+        wacli_found = self.wacli.is_file() and os.access(self.wacli, os.X_OK)
+        legacy = any((self.local_bin / name).is_file() and not (self.local_bin / name).is_symlink()
+                     for name in LEGACY_HELPER_COPIES)
+        original = self._original_plugin()
+        consented = consent.get("consented") is True
+        # An install made with the old script already had the user's consent;
+        # it moves to links without asking again.
+        previous_install = not consented and units in {"ok", "stale"} and (
+            legacy or links.get(str(self.local_bin / "omawhatsapp")) == "copy")
+        return {
+            "consented": consented,
+            "agents": agents,
+            "previous_install": previous_install,
+            "complete": consented and units == "ok" and not legacy
+            and all(state == "ok" for state in links.values()) and not original["enabled"],
+            "units": units,
+            "links": links,
+            "legacy_copies": legacy,
+            "wacli": {"path": str(self.wacli), "found": wacli_found},
+            "zenity": ZENITY.is_file(),
+            "original_plugin": original,
+            "managed": (self.plugin_root / ".git").exists(),
+            "plugin_root": str(self.plugin_root),
+        }
+
+    def _sync_instances(self) -> set[str]:
+        """Every wacli-sync instance systemd knows about, loaded or only enabled."""
+        names: set[str] = set()
+        for arguments in (["list-units", "--all", "--no-legend", "--no-pager", "--plain",
+                           "wacli-sync@*.service"],
+                          ["list-unit-files", "--no-legend", "--no-pager", "--plain"]):
+            result = self._systemctl_user(arguments, require_success=False)
+            for line in (result.stdout or "").splitlines():
+                fields = line.split()
+                if fields and fields[0] == "●" and len(fields) > 1:
+                    fields = fields[1:]
+                if fields and SYNC_UNIT_NAME.fullmatch(fields[0]) and "@" in fields[0] \
+                        and fields[0] != "wacli-sync@.service":
+                    names.add(fields[0])
+        return names
+
+    def _apply_units(self, changed: bool, start_inactive: bool) -> None:
+        """Enable, start and restart each account's unit as its settings say."""
+        start_at_login = self._preferences().get("start_at_login") is not False
+        closed = self._session_marker("closed").exists()
+        accounts = self.accounts()
+        desired = {account.unit for account in accounts if account.unit}
+        if changed:
+            for unit in sorted(self._sync_instances() - desired):
+                self._systemctl_user(["disable", "--now", unit], require_success=False)
+        for account in accounts:
+            if not account.unit:
+                continue
+            with self._state_lock(self._lifecycle_lock_name(account)):
+                if not self.online(account):
+                    self._systemctl_user(["disable", "--now", account.unit], require_success=False)
+                    continue
+                self._systemctl_user(["enable" if start_at_login else "disable", account.unit],
+                                     require_success=False)
+                if self._unit_active(account.unit):
+                    if changed:
+                        # enable --now would not restart it; the new unit needs one.
+                        self._systemctl_user(["restart", account.unit], require_success=False)
+                elif start_inactive and not closed:
+                    self._systemctl_user(["start", account.unit], require_success=False)
+
+    def setup(self, agents: Any = None, replace_original: Any = False) -> dict[str, Any]:
+        if agents is not None and not isinstance(agents, bool):
+            raise OmaWhatsAppError("Letting agents use WhatsApp must be on or off.")
+        if not isinstance(replace_original, bool):
+            raise OmaWhatsAppError("Replacing OmaWhatsApp must be yes or no.")
+        if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
+            raise OmaWhatsAppError("Install wacli first: omarchy pkg aur add wacli-bin")
+        if self._wacli_too_old(self._wacli_version()):
+            raise OmaWhatsAppError(
+                f"wacli is older than {WACLI_MINIMUM_VERSION}; update it: omarchy pkg aur add wacli-bin")
+        with self._state_lock("setup.lock"):
+            before = self._preferences()["setup"]
+            want_agents = before["agents"] if agents is None else agents
+            original = self._original_plugin()
+            if original["enabled"] and not replace_original:
+                raise OmaWhatsAppError(
+                    "OmaWhatsApp is still turned on. Let this app replace it, then try again.")
+            for link, target in self._setup_links(want_agents).items():
+                self._place_link(link, target)
+            if not want_agents:
+                for link in (self.local_bin / "omawhatsapp-mcp", self.skill_link):
+                    if self._points_into_checkout(link) or self._link_state(link, link) == "copy":
+                        if link.is_symlink():
+                            link.unlink()
+                        else:
+                            self._back_up(link)
+            for name in LEGACY_HELPER_COPIES:
+                copy = self.local_bin / name
+                if copy.is_file() and not copy.is_symlink():
+                    self._back_up(copy)
+            changed = False
+            for name in SETUP_UNITS:
+                rendered = self._render_unit(name)
+                installed = self.unit_dir / name
+                current = installed.read_text(encoding="utf-8", errors="replace") \
+                    if installed.is_file() and not installed.is_symlink() else None
+                if current != rendered:
+                    self._write_unit(name, rendered)
+                    changed = True
+            if changed:
+                self._systemctl_user(["daemon-reload"])
+
+            def consent(value: dict[str, Any]) -> None:
+                value["setup"] = {"consented": True, "agents": want_agents}
+
+            self._update_preferences(consent)
+            self._apply_units(changed=changed, start_inactive=not before["consented"])
+            if original["enabled"] and replace_original:
+                self._run_omarchy(["plugin", "disable", ORIGINAL_PLUGIN_ID])
+        return {"ok": True, "kind": "setup", "changed": changed, "setup": self._setup_state()}
+
+    def teardown(self, confirm: Any) -> dict[str, Any]:
+        """Undo the setup; the linked device, the archive and the settings stay."""
+        if confirm != "remove":
+            raise OmaWhatsAppError('Confirm by sending "remove".')
+        removed: list[str] = []
+        with self._state_lock("setup.lock"):
+            units = {account.unit for account in self.accounts() if account.unit}
+            units |= self._sync_instances() | {SYNC_UNIT}
+            for unit in sorted(units):
+                self._systemctl_user(["disable", "--now", unit], require_success=False)
+            for name in SETUP_UNITS:
+                installed = self.unit_dir / name
+                if installed.is_file() and not installed.is_symlink() and any(
+                        marker in installed.read_text(encoding="utf-8", errors="replace")
+                        for marker in UNIT_MARKERS):
+                    installed.unlink()
+                    removed.append(str(installed))
+                folder = self.unit_dir / f"{name}.d"
+                dropin = folder / MEDIA_DROPIN
+                if dropin.is_file() and not dropin.is_symlink():
+                    dropin.unlink()
+                    removed.append(str(dropin))
+                if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
+                    folder.rmdir()
+            self._systemctl_user(["daemon-reload"], require_success=False)
+            for link in (self.local_bin / "omawhatsapp", self.local_bin / "omawhatsapp-mcp",
+                         self.skill_link):
+                if self._points_into_checkout(link) or (
+                        link.is_symlink() and not link.exists()):
+                    link.unlink()
+                    removed.append(str(link))
+
+            def withdraw(value: dict[str, Any]) -> None:
+                value["setup"] = dict(value["setup"], consented=False)
+
+            self._update_preferences(withdraw)
+        return {"ok": True, "kind": "teardown", "removed": removed,
+                "remove_command": f"omarchy plugin remove {PLUGIN_ID}"}
+
+    def _run_omarchy(self, arguments: list[str]) -> None:
+        if not OMARCHY.is_file():
+            raise OmaWhatsAppError("The omarchy command was not found.")
+        result = run_bounded([str(OMARCHY), *arguments], timeout=60,
+                             stdout_limit=MAX_PROCESS_ERROR)
+        if result.returncode != 0:
+            raise OmaWhatsAppError(clean_error(result.stderr or result.stdout,
+                                               "The omarchy command failed."))
+
+    def _git(self, arguments: list[str], timeout: float) -> str:
+        environment = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
+        result = subprocess.run([str(GIT), "-C", str(self.plugin_root), *arguments],
+                                capture_output=True, text=True, timeout=timeout,
+                                env=environment, check=False)
+        if result.returncode != 0:
+            raise OmaWhatsAppError(clean_error(result.stderr, "git could not read this copy."))
+        return result.stdout.strip()
+
+    def update_check(self) -> dict[str, Any]:
+        """Whether the repository has a newer commit. Contacts GitHub only."""
+        current = self._app_version(self.plugin_root)
+        if not (self.plugin_root / ".git").exists() or not GIT.is_file():
+            return {"ok": True, "kind": "update-check", "managed": False,
+                    "current": current, "available": False}
+        try:
+            local = self._git(["rev-parse", "HEAD"], 10)
+            remote = self._git(["ls-remote", "origin", "HEAD"], 30).split()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OmaWhatsAppError("Could not reach the repository to check for updates.") from exc
+        remote_commit = remote[0] if remote and re.fullmatch(r"[0-9a-f]{40}", remote[0]) else ""
+        if not re.fullmatch(r"[0-9a-f]{40}", local) or not remote_commit:
+            raise OmaWhatsAppError("The repository answered in an unexpected way.")
+        return {"ok": True, "kind": "update-check", "managed": True, "current": current,
+                "commit": local, "remote_commit": remote_commit,
+                "available": remote_commit != local}
+
+    def self_update(self) -> int:
+        """Run in a terminal: omarchy plugin update, then restart the shell."""
+        if not (self.plugin_root / ".git").exists():
+            print("This copy was not installed with omarchy plugin add; update it from its source.")
+            return 1
+        before = self._git(["rev-parse", "HEAD"], 10)
+        result = subprocess.run([str(OMARCHY), "plugin", "update", PLUGIN_ID], check=False)
+        if result.returncode != 0:
+            return result.returncode
+        if self._git(["rev-parse", "HEAD"], 10) == before:
+            return 0
+        print("Restarting the Omarchy shell to load the new version…")
+        return subprocess.run([str(OMARCHY), "restart", "shell"], check=False).returncode
 
     def _sync_active(self, account: Account | None = None) -> bool:
         unit = (account or self.active).unit
@@ -2232,7 +2677,18 @@ class Backend:
     def status(self) -> dict[str, Any]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             return {"ok": False, "installed": False, "authenticated": False,
-                    "sync_active": False, "error": "wacli is not installed."}
+                    "sync_active": False, "helper_version": HELPER_VERSION,
+                    "setup": self._setup_state(),
+                    "error": "wacli is not installed."}
+        # Nothing installs wacli with the app, so its minimum is checked here.
+        wacli_version = self._wacli_version()
+        if self._wacli_too_old(wacli_version):
+            return {"ok": False, "installed": True, "wacli_too_old": True,
+                    "wacli_version": wacli_version, "authenticated": False,
+                    "sync_active": False, "helper_version": HELPER_VERSION,
+                    "setup": self._setup_state(),
+                    "error": f"wacli {wacli_version} is older than {WACLI_MINIMUM_VERSION}; "
+                             "update it: omarchy pkg aur add wacli-bin"}
         preferences = self._preferences()
         active = self.active
         accounts = self.accounts()
@@ -2287,6 +2743,8 @@ class Backend:
             "ok": True,
             "installed": True,
             "helper_version": HELPER_VERSION,
+            "wacli_version": wacli_version,
+            "setup": self._setup_state(preferences),
             # The rail is unified, but writes and receipts belong to the
             # selected account. Expose both invariants explicitly instead of
             # letting one account's readiness authorize another account.
@@ -6374,6 +6832,10 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("quit")
     commands.add_parser("unlink-account")
     commands.add_parser("launch")
+    commands.add_parser("setup")
+    commands.add_parser("teardown")
+    commands.add_parser("update-check")
+    commands.add_parser("self-update")
     commands.add_parser("settings")
     commands.add_parser("avatars")
     commands.add_parser("capabilities")
@@ -6410,6 +6872,13 @@ def main() -> int:
             print(clean_error(exc, "WhatsApp for Omarchy could not link that account."),
                   file=sys.stderr)
             return 1
+    if args.command == "self-update":
+        # Interactive, in a terminal: no JSON request on stdin.
+        try:
+            return backend.self_update()
+        except OmaWhatsAppError as exc:
+            print(clean_error(exc, "WhatsApp for Omarchy could not update."), file=sys.stderr)
+            return 1
     if args.command == "wacli" and args.interactive:
         try:
             return backend.transport_interactive(
@@ -6432,6 +6901,8 @@ def main() -> int:
             return emit(backend.status())
         if args.command == "capabilities":
             return emit(backend.capabilities())
+        if args.command == "update-check":
+            return emit(backend.update_check())
         payload = request()
         # Every request may name the account it belongs to. Empty keeps a
         # preserved root session stable, then falls back to wacli's default.
@@ -6598,6 +7069,10 @@ def main() -> int:
             return emit(backend.media_mode(payload.get("auto_download_media")))
         if args.command == "unlink-account":
             return emit(backend.unlink_account(payload.get("name"), payload.get("confirm")))
+        if args.command == "setup":
+            return emit(backend.setup(payload.get("agents"), payload.get("replace_original", False)))
+        if args.command == "teardown":
+            return emit(backend.teardown(payload.get("confirm")))
         if args.command == "quit":
             return emit(backend.quit_app())
         if args.command == "launch":

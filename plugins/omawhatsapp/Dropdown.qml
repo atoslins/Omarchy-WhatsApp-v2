@@ -594,6 +594,10 @@ Panel {
   function openFilePicker() {
     var origin = currentChatRef()
     if (filePickerProcess.running || sending || origin.jid === "") return
+    if (!demoMode && service && service.zenityAvailable === false) {
+      errorText = "Choosing files needs zenity (omarchy pkg add zenity). Paste or drag files in meanwhile."
+      return
+    }
     filePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     filePickerProcess.command = ["/usr/bin/zenity", "--file-selection",
       "--multiple", "--separator=\n", "--title=Add WhatsApp attachments"]

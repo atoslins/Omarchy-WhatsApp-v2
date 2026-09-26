@@ -465,9 +465,15 @@ Item {
   property bool helperRefusedCommand: false
   readonly property bool helperOutdated: appVersion !== ""
     && (helperRefusedCommand || (helperAnswered && helperVersion !== appVersion))
-  readonly property string helperOutdatedText: "Update incomplete: the helper is "
-    + (helperVersion !== "" ? helperVersion : "older") + " and the app " + appVersion
-    + ". Run ./scripts/install from the repository to update both together."
+  // omarchy plugin update replaces the files but the shell keeps the QML it
+  // loaded, so the helper runs ahead until the shell restarts.
+  readonly property string helperOutdatedText: "Update not finished: the app is " + appVersion
+    + " and its helper " + (helperVersion !== "" ? helperVersion : "another version")
+    + ". Restart the Omarchy shell to finish."
+  function restartShell() {
+    Quickshell.execDetached(["/usr/bin/omarchy", "restart", "shell"])
+    return true
+  }
   function noteHelperRefusal(text) {
     if (/invalid choice|unrecognized arguments/.test(String(text || ""))) helperRefusedCommand = true
   }
@@ -514,7 +520,10 @@ Item {
     running: root.autoRefreshAvatars
     onTriggered: root.maybeAutoRefreshAvatars()
   }
-  readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  // The helper ships in this checkout, at bin/ two levels above this file:
+  // the helper and the QML always come from the same commit.
+  readonly property string helper: decodeURIComponent(
+    String(Qt.resolvedUrl("../../bin/omawhatsapp")).replace(/^file:\/\//, ""))
   readonly property string storeDirectory: AccountModel.defaultStoreDirectory(
     Quickshell.env("WACLI_STORE_DIR"), Quickshell.env("XDG_STATE_HOME"),
     Quickshell.env("HOME"))
@@ -549,7 +558,7 @@ Item {
   readonly property int notificationMessageCount: chats.reduce(function(total, chat) {
     return total + Number(chat.notification_unread || 0)
   }, 0)
-  readonly property string barTooltip: helperOutdated ? "WhatsApp for Omarchy · update incomplete, run ./scripts/install"
+  readonly property string barTooltip: helperOutdated ? "WhatsApp for Omarchy · restart the shell to finish updating"
     : closed ? "WhatsApp for Omarchy is closed · click to open"
     : !railReady ? "WhatsApp for Omarchy · reconnecting"
     : offlineMode ? "WhatsApp for Omarchy · offline archive"
@@ -1605,7 +1614,76 @@ Item {
   property bool wacliInstalled: true
   property bool anyAuthenticated: true
   property string defaultAccountName: "primary"
-  readonly property bool needsOnboarding: !wacliInstalled || (statusReady && !anyAuthenticated)
+  // What the first run sets up outside the plugin folder (sync units, the
+  // command link, the agent skill), as the helper reports it.
+  property var setupState: ({})
+  readonly property bool setupKnown: setupState.units !== undefined
+  readonly property bool setupComplete: setupState.complete === true
+  readonly property bool setupAgents: setupState.agents !== false
+  readonly property bool zenityAvailable: setupState.zenity !== false
+  readonly property bool originalPluginEnabled: !!setupState.original_plugin
+    && setupState.original_plugin.enabled === true
+  // Consent already given (or an install by the old script) is applied without
+  // asking again; replacing the original OmaWhatsApp always asks.
+  readonly property bool setupAutomatic: (setupState.consented === true
+    || setupState.previous_install === true) && !originalPluginEnabled
+  readonly property bool needsSetup: setupKnown && !setupComplete && !setupAutomatic
+  // wacli is installed but older than the helper's minimum.
+  property bool wacliTooOld: false
+  property string wacliVersion: ""
+  readonly property bool needsOnboarding: !wacliInstalled || wacliTooOld || needsSetup
+    || (statusReady && !anyAuthenticated)
+  property bool setupWriting: false
+  property bool autoSetupTried: false
+  property var lastTeardown: null
+  signal setupCompleted(string kind)
+  function acceptSetupState(value) {
+    if (!value || typeof value !== "object") return
+    setupState = value
+    if (!setupComplete && setupAutomatic && !autoSetupTried && !setupWriting
+        && value.wacli && value.wacli.found === true) {
+      autoSetupTried = true
+      runSetup(null, false)
+    }
+  }
+  function runSetup(agents, replaceOriginal) {
+    if (setupProcess.running) return false
+    setupWriting = true
+    setupProcess.kind = "setup"
+    setupProcess.stdinEnabled = true
+    setupProcess.payload = JSON.stringify({
+      agents: agents === true ? true : (agents === false ? false : null),
+      replace_original: replaceOriginal === true
+    })
+    setupProcess.running = true
+    return true
+  }
+  // Undo the setup; the linked device, the archive and the settings stay.
+  function removeFromComputer() {
+    if (setupProcess.running) return false
+    setupWriting = true
+    setupProcess.kind = "teardown"
+    setupProcess.stdinEnabled = true
+    setupProcess.payload = JSON.stringify({ confirm: "remove" })
+    setupProcess.running = true
+    return true
+  }
+  // Commands the user runs and confirms in a terminal (packages, updates).
+  function runInTerminal(title, command) {
+    Quickshell.execDetached(["/usr/bin/xdg-terminal-exec", "--title=" + title, "--hold", "--"]
+      .concat(command))
+    return true
+  }
+  function installWacli() {
+    return runInTerminal("Install wacli", ["/usr/bin/omarchy", "pkg", "aur", "add", "wacli-bin"])
+  }
+  function installZenity() {
+    return runInTerminal("Install zenity", ["/usr/bin/omarchy", "pkg", "add", "zenity"])
+  }
+  function removePlugin() {
+    return runInTerminal("Remove WhatsApp for Omarchy",
+      ["/usr/bin/omarchy", "plugin", "remove", root.pluginId])
+  }
   function quitApp() {
     if (controlProcess.running || writing) return false
     return runControl("quit", ({}))
@@ -1916,9 +1994,12 @@ Item {
       var selectedAccount = String(root.selectedChatAccount || "")
       var applies = selectedAccount === "" || responseAccount === selectedAccount
       root.noteHelperRefusal(statusError.text)
+      if (payload && payload.setup) root.acceptSetupState(payload.setup)
       if (!payload || payload.ok !== true) {
-        // wacli missing: onboarding says how to install it.
+        // wacli missing or too old: onboarding says how to install it.
         root.wacliInstalled = !(payload && payload.installed === false)
+        root.wacliTooOld = !!payload && payload.wacli_too_old === true
+        root.wacliVersion = payload && payload.wacli_version ? String(payload.wacli_version) : ""
         if (applies) {
           root.statusReady = false
           root.ready = false
@@ -1937,6 +2018,8 @@ Item {
         root.railReady = readiness.railReady
         root.syncActive = payload.sync_active === true
         root.wacliInstalled = true
+        root.wacliTooOld = false
+        root.wacliVersion = String(payload.wacli_version || "")
         root.anyAuthenticated = payload.any_authenticated === true
         root.defaultAccountName = String((Array.isArray(payload.accounts)
           ? (payload.accounts.filter(function(item) { return item && item["default"] === true })[0] || {})
@@ -1972,6 +2055,33 @@ Item {
       var shouldRefresh = root.statusPending
       root.statusPending = false
       if (shouldRefresh) statusRefreshDelay.restart()
+    }
+  }
+
+  Process {
+    id: setupProcess
+    objectName: "setupProcess"
+    property string kind: "setup"
+    property string payload: ""
+    command: [root.helper, kind]
+    stdinEnabled: true
+    stdout: StdioCollector { id: setupOutput }
+    stderr: StdioCollector { id: setupError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.setupWriting = false
+      var result = root.parseJson(setupOutput.text)
+      if (exitCode !== 0 || !result || result.ok !== true) {
+        root.errorText = (result && result.error)
+          || root.helperErrorText(setupError.text, "WhatsApp for Omarchy could not finish setting up.")
+        root.refreshStatus()
+        return
+      }
+      if (kind === "teardown") root.lastTeardown = result
+      if (result.setup) root.setupState = result.setup
+      root.errorText = ""
+      root.setupCompleted(kind)
+      root.refreshStatus()
     }
   }
 

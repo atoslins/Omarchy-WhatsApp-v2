@@ -793,18 +793,30 @@ class BackendHardeningTests(unittest.TestCase):
         )
         self.assertEqual(len(hints), 40)
 
-    def test_release_scripts_pin_version_and_reconcile_stale_instances(self) -> None:
-        source = SCRIPT.parent.parent
-        installer = (source / "scripts" / "install").read_text(encoding="utf-8")
-        parity = (source / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
-        self.assertIn("wacli_minimum_version=0.17.1", installer)
-        self.assertIn("wacli_tested_version=0.19.0", installer)
-        self.assertIn("wacli_operation_count=108", installer)
-        self.assertIn("sort -V", installer)
-        self.assertIn("list-unit-files", installer)
-        self.assertIn("list-units --all", installer)
+    def test_an_old_wacli_is_refused_at_runtime(self) -> None:
+        # Nothing installs wacli with the app, so the helper checks the minimum.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            wacli = root / "wacli"
+            wacli.write_text("#!/bin/sh\necho 'wacli 0.16.9'\n", encoding="utf-8")
+            wacli.chmod(0o700)
+            (root / "store").mkdir()
+            backend = backend_module.Backend(store_dir=root / "store", state_dir=root / "state",
+                                             wacli=wacli, account_config=root / "absent.yaml")
+            status = backend.status()
+            self.assertFalse(status["ok"])
+            self.assertTrue(status["wacli_too_old"])
+            self.assertIn("older than 0.17.1", status["error"])
+            self.assertIn("omarchy pkg aur add wacli-bin", status["error"])
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "older than 0.17.1"):
+                backend.setup(True, False)
+            # The version is cached until the binary changes.
+            wacli.write_text("#!/bin/sh\necho 'wacli 0.19.0'\n", encoding="utf-8")
+            os.utime(wacli, ns=(wacli.stat().st_atime_ns, wacli.stat().st_mtime_ns + 1_000_000))
+            self.assertEqual(backend._wacli_version(), "0.19.0")
+        parity = (SCRIPT.parent.parent / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
         self.assertIn("WACLI_MINIMUM_VERSION", parity)
-        self.assertIn("or newer", parity)
+        self.assertIn("locate_wacli()", parity, "the parity check uses the app's own wacli")
 
 
 class AccountLifecycleTests(unittest.TestCase):
