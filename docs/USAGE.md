@@ -150,9 +150,9 @@ them keeps the chat list warm in the resident service.
 | Notifications | Desktop notifications, reply from the notification, message text, sound, unread badge, dropdown size |
 | Chats | Signature, Enter sends, chat photos, list density, time format, message box height |
 | Media | Automatic downloads, chat photo refresh |
-| Sync & storage | Background sync, start with the system, Quit, storage used |
+| Sync & storage | Background sync, start with the system, Quit, letting AI agents use WhatsApp, removing it from this computer, storage used |
 | Accounts | One card per account, link another |
-| Updates | Check for a new release, update in a terminal |
+| Updates | Check for a newer version, update in a terminal, restart the shell after an update |
 
 ## Keyboard
 

@@ -19,14 +19,14 @@ invoking `wacli` directly.
 
 - For a runtime WhatsApp operation, follow the guarded workflow below.
 - For source, test, deployment, release, or submission work, follow the
-  checkout's `AGENTS.md` and repository workflow. Never edit an installed
+  repository's `CONTRIBUTING.md` and workflow. Never edit an installed
   helper, plugin, or skill as source; use only synthetic/demo data for public
   evidence. Runtime authorization does not authorize repository writes,
   pushes, deployments, releases, or submissions.
   In-app release checks are opt-in and contact GitHub, not WhatsApp. App settings
   include `check_updates_on_launch`; changing it is a local preference write.
-  Standalone upgrades require separate installation approval and a confirmation
-  terminal. Managed copies must use their repository/plugin-manager workflow.
+  Updates run `omarchy plugin update` in a terminal the user confirms; they
+  need separate approval and are never started by the skill.
 
 ## Safety boundary
 

@@ -72,69 +72,51 @@ conversation is included in this repository.
 
 ## Install
 
-**Requirements**
-
-- Omarchy 4 (Quattro), whose shell runs plugins
-- [`wacli`](https://github.com/openclaw/wacli) 0.17.1 or newer at
-  `~/.local/bin/wacli` (tested with 0.17.1, 0.18.3 and 0.19.0)
-- Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`,
-  `inotify-tools`, `jq`, Python 3 and systemd user services
-- Optional: `libnotify` for desktop notifications
-
-**Install**
-
 ```bash
-git clone https://github.com/atoslins/Omarchy-WhatsApp-v2.git
-cd Omarchy-WhatsApp-v2
-./scripts/install
+omarchy pkg aur add wacli-bin
+omarchy plugin add https://github.com/atoslins/Omarchy-WhatsApp-v2 --enable
 ```
 
-The app needs its helper and background sync, so it installs with its own
-script rather than `omarchy plugin add`. `./scripts/install --check` runs
-the same checks without changing anything.
-No sudo or pkexec is required; the installer only writes to your home directory:
+That is all on the command line. The first time the app opens it walks you
+through the rest:
 
-| What | Where |
-|---|---|
-| The plugin, added to the right of your bar | `~/.config/omarchy/plugins/io.github.atoslins.whatsapp`, `~/.config/omarchy/shell.json` |
-| The helper and the MCP server | `~/.local/bin/omawhatsapp`, `~/.local/bin/omawhatsapp-mcp` |
-| Background sync, one user service per account | `~/.config/systemd/user/wacli-sync*.service` |
-| The agent skill | `~/.agents/skills/omawhatsapp` |
+1. **Set it up on this computer.** One click adds, in your home folder only,
+   the background sync (a sandboxed user service), the `omawhatsapp` command,
+   and, if you allow it, the agent skill and the MCP server. No sudo or pkexec is required.
+2. **Link your phone.** Show QR code opens the code in a terminal; scan it
+   from WhatsApp → Linked devices on the phone.
 
-It stages everything first, replaces it as one set, and rolls back an
-interrupted install. It never copies a WhatsApp session anywhere.
-
-**Link your phone.** On first run the app offers a Show QR code button. From
-a terminal instead:
-
-```bash
-~/.local/bin/omawhatsapp wacli --interactive --authorize interactive -- auth
-```
+**Requirements.** Omarchy 4 (Quattro) and
+[wacli](https://github.com/openclaw/wacli) 0.17.1 or newer (tested with
+0.17.1, 0.18.3 and 0.19.0). The AUR `wacli-bin` package installs the official
+release, byte for byte the one the tests run against; a wacli of your own at
+`~/.local/bin/wacli` is used first. Choosing files to attach needs `zenity`,
+which the app offers to install the first time it is missing. Everything else
+comes with Omarchy.
 
 **Add the shortcut.** Copy the `Super+Shift+W` line from
 [`omarchy/bindings.lua.example`](omarchy/bindings.lua.example) into
 `~/.config/hypr/bindings.lua`.
 
-**Coming from OmaWhatsApp?** Install over it. This app takes its place in the
-bar and keeps the same helper, services, linked device and history, so nothing
-needs to be linked again. Keybindings that call the old plugin ID are listed
-at the end of the install so you can update them.
+**Coming from OmaWhatsApp?** Add this app; its setup offers to turn
+OmaWhatsApp off (it is not deleted, and only one of the two can run) and keeps
+the same linked device and history, so nothing is linked again.
 
 ## Update and remove
 
-**Update.** Settings → Updates checks this repository for a new release and
-can install it in a terminal after you confirm. By hand: `git pull`, then run
-`./scripts/install` again. Always run the installer: it updates the plugin,
-the helper and the services together.
-
-**Remove.**
+**Update.** Settings → Updates checks the repository and runs
+`omarchy plugin update` in a terminal, which shows the changes and asks
+first; the shell then restarts to load them. From a terminal:
 
 ```bash
-./scripts/uninstall
+omarchy plugin update io.github.atoslins.whatsapp && omarchy restart shell
 ```
 
-This keeps the linked device and wacli's message store. Add
-`--purge-runtime` to also remove this app's own disposable state.
+**Remove.** Settings → Sync & storage → **Remove from this computer** stops
+background sync and removes what the setup added; then **Remove the app too**
+runs `omarchy plugin remove io.github.atoslins.whatsapp`. Your linked device
+and wacli's message store stay, so adding the app again picks up where you
+left off.
 
 ## wacli: official and richer builds
 
@@ -154,10 +136,10 @@ turns each one on by itself:
 
 ## Let your agent use WhatsApp
 
-The installer places an agent skill at `~/.agents/skills/omawhatsapp`, so
-compatible agents can use `$omawhatsapp` to search, summarize and, when you
-ask, act on your chats. For Claude Code and other MCP clients, register the
-server once:
+When you allow it during the setup (or later in Settings), the app links an
+agent skill at `~/.agents/skills/omawhatsapp`, so compatible agents can use
+`$omawhatsapp` to search, summarize and, when you ask, act on your chats. For
+Claude Code and other MCP clients, register the server once:
 
 ```bash
 claude mcp add --scope user whatsapp -- ~/.local/bin/omawhatsapp-mcp
@@ -196,17 +178,17 @@ through. Details in the
 ./scripts/test
 ```
 
-The release gate runs 339 helper, installer and agent tests, 533 offscreen
-QML tests in 58 suites, an isolated installer preflight, manifest validation,
-QML lint and shell checks. CI runs it against wacli 0.17.1, 0.18.3 and
-0.19.0.
+The release gate runs 325 helper, setup and agent tests, 557 offscreen QML
+tests in 60 suites, a simulated `omarchy plugin add` into an empty home,
+manifest validation, QML lint and shell checks. CI runs it against wacli
+0.17.1, 0.18.3 and 0.19.0.
 
 ## Credits
 
 WhatsApp for Omarchy began as a fork of
 [OmaWhatsApp](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp) by
 MoizIbnYousaf, which built the resident service, the bar dropdown, the helper
-boundary and the installer this app stands on. Its model was informed by
+boundary and much of the interface this app stands on. Its model was informed by
 [Omamail](https://github.com/huacnlee/omamail), and WhatsApp itself is reached
 through [wacli](https://github.com/openclaw/wacli). See the
 [third-party notices](THIRD_PARTY_NOTICES.md).

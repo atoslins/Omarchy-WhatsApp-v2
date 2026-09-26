@@ -5,6 +5,19 @@ the helper reads the local mirror, and `wacli` owns every WhatsApp/network
 write. Changes should preserve that split and avoid browser or Electron
 runtimes.
 
+## Develop
+
+Install the app the way users do, then try changes on top of it:
+
+```bash
+omarchy plugin add https://github.com/atoslins/Omarchy-WhatsApp-v2 --enable
+make dev                    # copy the working tree over the plugin checkout
+./scripts/dev-sync --reset  # back to its commit before omarchy plugin update
+```
+
+`make dev` restarts the shell when QML changed, since the shell keeps QML it
+already compiled; the helper and the skill are read fresh on every call.
+
 ## Before opening a pull request
 
 ```bash
@@ -23,6 +36,28 @@ runtimes.
   of scope.
 
 The full verification contract is in [docs/TESTING.md](docs/TESTING.md).
+
+## Rules for every change
+
+WhatsApp data is private, and this repository must never hold any of it:
+
+- Never commit or attach session keys, databases (`wacli.db`, `session.db` and
+  their WAL files), media, exports, JIDs, message IDs, phone numbers, message
+  text, or screenshots of real conversations. Tests and screenshots use the
+  repository's synthetic demo data only.
+- Never read `session.db` or write directly to `wacli.db`; every WhatsApp change
+  goes through wacli.
+- Develop against a test account or a contact who agreed to it. Never send a
+  test message or media to anyone else.
+- A send must resolve to an exact chat already in the local `chats` table before
+  wacli is called.
+- Long history or media maintenance stays apart from the interactive send path
+  and always restarts background sync when it ends, even on failure.
+- Keep `skills/omawhatsapp` in step with the helper's public JSON commands; the
+  skill must never widen what an agent may change on WhatsApp.
+
+The paths the app uses at runtime are listed in
+[docs/TECHNICAL.md](docs/TECHNICAL.md#runtime-paths).
 
 ## Commit and pull request titles
 
@@ -49,7 +84,7 @@ docs: explain the richer wacli builds
 
 Mark a breaking change with `!` after the type (`feat!: …`) or a
 `BREAKING CHANGE:` footer. Scopes are optional; the usual ones are `app`,
-`dropdown`, `bar`, `settings`, `accounts`, `helper`, `installer`, `mcp` and
+`dropdown`, `bar`, `settings`, `accounts`, `helper`, `setup`, `mcp` and
 `skill`. Write titles and commit messages in English.
 
 ## Versions and releases
@@ -57,7 +92,7 @@ Mark a breaking change with `!` after the type (`feat!: …`) or a
 Versions follow [Semantic Versioning](https://semver.org):
 `MAJOR.MINOR.PATCH`.
 
-- **MAJOR**: an update that needs more than running the installer, such as
+- **MAJOR**: an update that needs more than `omarchy plugin update`, such as
   a raised wacli minimum, a manual migration, or removing a setting, command or
   IPC call that users rely on. While the version is below 1.0, these raise the
   minor number instead.

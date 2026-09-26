@@ -24,6 +24,12 @@ owner-checked, and no-follow; atomic replacement never follows a predictable
 state-file symlink. They never leave the machine and are never written into
 wacli's database.
 
+The first-run setup writes only in your home folder and only after you agree:
+the sync units in `~/.config/systemd/user`, links in `~/.local/bin` and, when
+agents are allowed, `~/.agents/skills`. Files it replaces there are moved to
+`~/.local/state/omawhatsapp/setup-backup`, never deleted. Checking for updates
+asks the repository's git remote for its latest commit; no chat data is sent.
+
 Marking a chat read, automatically or from the chat list, sends WhatsApp an
 app-state change that syncs the read state to the user's own devices. wacli
 has no path that sends a read receipt, so the other side is not told.

@@ -125,38 +125,51 @@ account, chat, message, and surface at a time. Opening the gallery, switching
 chats, or starting media in the other window revokes the previous lease; the
 old player stops immediately and paused video retains its decoded frame.
 
-## Plugin reload safety
+## Installation and first-run setup
 
-Quickshell watches installed plugins recursively. Copying QML files one at a
-time can expose a half-installed tree and trigger repeated reloads. The local
-installer therefore:
+`omarchy plugin add` clones the whole repository into the plugins folder and
+validates it; it runs no script. The helper, the QML, the unit templates and
+the agent skill therefore always come from one commit, and the app runs the
+helper from `bin/` in that checkout, never from a copy.
 
-1. validates and stages a complete plugin tree;
-2. prepares the new shell configuration;
-3. records a mode-`0600`, fsynced transaction journal and the exact prior
-   service states;
-4. stops the shell and atomically swaps each target beside its destination;
-5. verifies the installed helper, manifests, and service lifecycle;
-6. restarts the shell once and removes backups only after commit.
+What has to live outside the plugin folder is set up by the app on first run,
+after the user agrees (`omawhatsapp setup`, idempotent):
 
-If the process or machine stops mid-upgrade, the next install or uninstall
-finishes a committed cleanup or rolls every target and service back from the
-journal before doing new work. The journal contains only installation paths
-and public service names—never WhatsApp data.
+1. **Sync units.** `systemd/user/*.service` are written to
+   `~/.config/systemd/user` with the same sandbox, pointing at the wacli the
+   helper found (`~/.local/bin/wacli` first, then `/usr/local/bin` and
+   `/usr/bin`, never `PATH`). A unit that does not carry this app's marker is
+   never replaced. The units are enabled and started per account as its
+   settings say; an unchanged setup restarts nothing.
+2. **Links, not copies.** `~/.local/bin/omawhatsapp` links to the checkout's
+   helper, which the units and the command line use; when agents are allowed,
+   `~/.local/bin/omawhatsapp-mcp` and `~/.agents/skills/omawhatsapp` link to
+   the MCP server and the skill. `omarchy plugin update` moves them all at
+   once. Files the old installer copied there are moved to
+   `~/.local/state/omawhatsapp/setup-backup`, not deleted.
+3. **Consent.** Stored in the preferences; an install made by the old script
+   counts as consent. Turning off the original OmaWhatsApp, which shares the
+   helper name, units and state, always asks.
 
-Build/test artifacts remain outside the installed plugin tree.
+`omawhatsapp teardown` undoes it (Settings → Sync & storage → Remove from this
+computer) and keeps the linked device, the archive and the settings.
+
+After `omarchy plugin update` the shell keeps the QML it loaded until it
+restarts, while the helper is already new: the app compares the helper's
+`HELPER_VERSION` with its manifest and asks for a shell restart.
+`scripts/test` fails when the two versions differ in the repository.
 
 ## Runtime paths
 
 | Path | Purpose |
 |---|---|
-| `~/.config/omarchy/plugins/io.github.atoslins.whatsapp` | installed plugin |
-| `~/.agents/skills/omawhatsapp` | shared on-device agent skill |
-| `~/.local/bin/omawhatsapp` | bounded helper (launcher) |
-| `~/.local/bin/omawhatsapp_core.py` | the helper's code, imported by the launcher |
+| `~/.config/omarchy/plugins/io.github.atoslins.whatsapp` | the plugin: a git checkout of this repository |
+| `…/bin/omawhatsapp`, `…/bin/omawhatsapp_core.py` | bounded helper (launcher and code), run from the checkout |
+| `~/.local/bin/omawhatsapp` | link to the checkout's helper (units and command line) |
+| `~/.local/bin/omawhatsapp-mcp` | link to the MCP server, when agents are allowed |
+| `~/.agents/skills/omawhatsapp` | link to the agent skill, when agents are allowed |
 | `~/.cache/omawhatsapp/pycache` | the helper's compiled bytecode (disposable) |
-| `~/.local/bin/omawhatsapp_assets.py` | private bounded avatar-cache module |
-| `~/.config/systemd/user/wacli-sync.service` | background sync unit |
+| `~/.config/systemd/user/wacli-sync.service`, `wacli-sync@.service` | background sync units, written by the setup |
 | `~/.local/state/wacli` | linked-device store owned by wacli |
 | `~/.local/state/omawhatsapp` | helper lock/disposable app state |
 | `~/.local/state/omawhatsapp/voice-drafts` | private reviewed voice drafts |
@@ -165,7 +178,7 @@ Build/test artifacts remain outside the installed plugin tree.
 
 `scripts/test` runs backend unit tests, root manifest validation, QML lint,
 real synthetic MP4/GIF/WebP decode tests, cross-surface playback and deferred
-intent tests, account/avatar boundary tests, interrupted-install recovery tests, shell syntax checks, diff
+intent tests, account/avatar boundary tests, first-run setup tests, a simulated `omarchy plugin add`, shell syntax checks, diff
 hygiene, and a guard against browser/Electron runtime dependencies. Live
 verification also checks service health, picker cancellation, window
 breakpoints, shell logs, and coredump count without sending test messages.

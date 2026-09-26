@@ -31,13 +31,19 @@ skill safety contract—and compares the shipped registry with the installed
 wacli help tree. Offscreen QML coverage uses generated MP4, GIF, and WebP
 fixtures and exercises cross-window playback leasing, account-identical JIDs,
 account-filter purity, private local avatars, missing-video transitions, and
-file-picker/action interleavings. Installer tests kill transactions at
-durable boundaries and prove the next run restores one coherent version.
+file-picker/action interleavings. Setup tests run the first-run setup in an
+isolated home: links into the checkout, rendered units with the found wacli,
+copies from the old installer moved aside, units that are not this app's left
+alone, and the teardown. The gate also copies only the distributed files into
+an empty home's plugins folder, as `omarchy plugin add` would, validates it,
+and checks that its helper finds itself there.
 
 ## Live local verification
 
-1. Install/restart the shell and confirm the combined `omawhatsapp`
-   resident-service/bar plugin is loaded.
+1. `omarchy plugin add` the repository (or `make dev` over an existing
+   checkout), open the app, run the setup, and confirm the combined
+   resident-service/bar plugin is loaded, `~/.local/bin/omawhatsapp` links
+   into the checkout and `systemctl --user status wacli-sync.service` runs.
 2. Confirm Settings → Background sync toggles online → offline → online, the
    rail status line appears only while offline or reconnecting, the service follows,
    and the local archive remains readable while offline.
@@ -94,10 +100,10 @@ durable boundaries and prove the next run restores one coherent version.
 12. Only with explicit permission, send a meaningful text/image/voice note to a
    known chat. Never create a throwaway WhatsApp test message.
 13. In demo mode, open settings and verify maintenance actions are disabled.
-    The offline update harness covers version ordering, opt-in launch checks,
-    cancellation, managed-install refusal, malformed results, pinned full-app
-    installer handoff, and unsafe archives. Never run an actual downgrade or
-    install just to test the update button on a managed machine.
+    The update tests cover the helper's `update-check` against a local git
+    remote, opt-in launch checks, cancellation, copies that are not a checkout,
+    and malformed results. Never run an actual downgrade just to test the
+    update button.
 
 ## Screenshot
 

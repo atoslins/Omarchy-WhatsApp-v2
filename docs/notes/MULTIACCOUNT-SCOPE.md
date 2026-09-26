@@ -95,7 +95,7 @@ since changed `_preferences` (`send_read_receipts`, `show_unread_count`,
   `download_media`, `send`, `send_file`, `send_files`, `send_sticker`,
   `send_poll`, `react`, `edit_message`, `delete_message`, `forward_message`,
   `select_option`, `chat_action`, `paste`. This is the exact-chat boundary from
-  `AGENTS.md`; resolving against the wrong store would silently widen it.
+  `CONTRIBUTING.md`; resolving against the wrong store would silently widen it.
 - `chats()` becomes N bounded queries plus an in-memory merge on
   `pinned DESC, timestamp DESC, name`, re-limited after the merge, with
   `account` and `account_label` on every row.
