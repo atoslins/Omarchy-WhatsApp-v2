@@ -2221,9 +2221,17 @@ class Backend:
         remote_commit = remote[0] if remote and re.fullmatch(r"[0-9a-f]{40}", remote[0]) else ""
         if not re.fullmatch(r"[0-9a-f]{40}", local) or not remote_commit:
             raise OmaWhatsAppError("The repository answered in an unexpected way.")
+        # A commit this copy already contains (the repository is behind it,
+        # or this is a development checkout) is not an update.
+        available = remote_commit != local
+        if available:
+            try:
+                self._git(["merge-base", "--is-ancestor", remote_commit, local], 10)
+                available = False
+            except OmaWhatsAppError:
+                pass
         return {"ok": True, "kind": "update-check", "managed": True, "current": current,
-                "commit": local, "remote_commit": remote_commit,
-                "available": remote_commit != local}
+                "commit": local, "remote_commit": remote_commit, "available": available}
 
     def self_update(self) -> int:
         """Run in a terminal: omarchy plugin update, then restart the shell."""

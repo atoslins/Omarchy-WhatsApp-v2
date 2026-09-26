@@ -297,6 +297,12 @@ class UpdateCheckTests(unittest.TestCase):
             (upstream / "manifest.json").write_text('{"version": "1.1.0"}', encoding="utf-8")
             self.git("commit", "-q", "-am", "second", cwd=upstream)
             self.assertTrue(backend.update_check()["available"])
+            # A copy ahead of the repository (a development checkout) has
+            # nothing to update.
+            self.git("pull", "-q", cwd=root / "checkout")
+            (root / "checkout" / "manifest.json").write_text('{"version": "1.2.0"}', encoding="utf-8")
+            self.git("commit", "-q", "-am", "local", cwd=root / "checkout")
+            self.assertFalse(backend.update_check()["available"])
 
     def test_a_copy_that_is_not_a_checkout_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
