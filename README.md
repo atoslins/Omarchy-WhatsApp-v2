@@ -91,8 +91,8 @@ cd Omarchy-WhatsApp-v2
 
 The app needs its helper and background sync, so it installs with its own
 script rather than `omarchy plugin add`. `./scripts/install --check` runs
-the same checks without changing anything. The installer needs no `sudo` and
-only writes to your home directory:
+the same checks without changing anything.
+No sudo or pkexec is required; the installer only writes to your home directory:
 
 | What | Where |
 |---|---|
