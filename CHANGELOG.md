@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0 — WhatsApp for Omarchy (unreleased)
+## 0.15.0 — WhatsApp for Omarchy — 2026-09-26
 
 The first release under its own name. It started as a fork of OmaWhatsApp
 0.14.0 and keeps its foundations: the resident service, the bar dropdown, the
