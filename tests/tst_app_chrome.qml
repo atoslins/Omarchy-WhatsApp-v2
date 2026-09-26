@@ -206,6 +206,9 @@ TestCase {
         lastPreference = { key: key, value: value }
         return true
       }
+      property bool zenityAvailable: true
+      property int zenityInstalls: 0
+      function installZenity() { zenityInstalls += 1; return true }
     }
   }
 
@@ -1030,5 +1033,23 @@ TestCase {
     compare(h.service.launches, 1, "opening a closed WhatsApp for Omarchy starts it")
     h.app.open(JSON.stringify({}))
     compare(h.service.launches, 1, "an open one is not started twice")
+  }
+
+  // A stock Omarchy has no zenity: picking a file says so and offers to
+  // install it instead of failing silently.
+  function test_without_zenity_the_file_picker_offers_to_install_it() {
+    var harness = createHarness({ zenityAvailable: false })
+    var picker = findChild(harness.app, "filePickerProcess")
+    harness.app.openFilePicker("document")
+    verify(!picker.running, "no dialog without zenity")
+    verify(harness.app.copyToastVisible)
+    verify(harness.app.toastText.indexOf("zenity") >= 0)
+    compare(harness.app.toastActionLabel, "Install")
+    verify(harness.app.runToastAction())
+    compare(harness.service.zenityInstalls, 1)
+    harness.service.zenityAvailable = true
+    harness.app.openFilePicker("document")
+    verify(picker.running, "with zenity the dialog opens")
+    compare(picker.command[0], "/usr/bin/zenity")
   }
 }

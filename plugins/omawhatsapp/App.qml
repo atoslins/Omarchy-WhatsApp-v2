@@ -2323,6 +2323,7 @@ Item {
 
       Process {
         id: filePickerProcess
+        objectName: "filePickerProcess"
         property string kind: "document"
         property var originRef: AccountModel.chatRef("", "")
         command: []
