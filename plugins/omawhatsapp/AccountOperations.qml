@@ -28,14 +28,14 @@ Item {
 
   function linkCommand(name) {
     return ["/usr/bin/xdg-terminal-exec",
-      "--title=OmaWhatsApp · Link " + String(name || ""), "--hold", "--",
+      "--title=WhatsApp for Omarchy · Link " + String(name || ""), "--hold", "--",
       helper, "link-account", String(name || ""), "--authorize", "interactive"]
   }
 
   // The main account links with wacli's own auth: a terminal shows the QR
   // code, and the sync starts once the phone has scanned it.
   function mainLinkCommand() {
-    return ["/usr/bin/xdg-terminal-exec", "--title=OmaWhatsApp · Link WhatsApp", "--hold", "--",
+    return ["/usr/bin/xdg-terminal-exec", "--title=WhatsApp for Omarchy · Link WhatsApp", "--hold", "--",
       helper, "wacli", "--interactive", "--authorize", "interactive", "--", "auth"]
   }
 

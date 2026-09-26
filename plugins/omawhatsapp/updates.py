@@ -38,7 +38,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def download(url, limit):
     # All callers construct fixed-host URLs from validated versions/SHAs.
-    request = urllib.request.Request(url, headers={"User-Agent": "OmaWhatsApp-updates"})
+    request = urllib.request.Request(url, headers={"User-Agent": "WhatsApp for Omarchy-updates"})
     deadline = time.monotonic() + 30
     with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
         chunks = []
@@ -123,7 +123,7 @@ def install(directory, tag, commit):
         raise ValueError("Use your plugin manager to update this managed installation.")
     if version(tag) <= version(json.loads((directory / "manifest.json").read_text())["version"]):
         raise ValueError("This release is already installed or older.")
-    print(f"Install OmaWhatsApp {tag} ({commit})?\n"
+    print(f"Install WhatsApp for Omarchy {tag} ({commit})?\n"
           "This installs upstream release code, not a marketplace verification.\n"
           "The full app will be upgraded and the Omarchy shell restarted.\n"
           "Finish any voice recording and save your drafts first.")
@@ -134,11 +134,11 @@ def install(directory, tag, commit):
         root = extract(download("https://codeload.github.com/" + REPOSITORY
                                 + "/zip/" + commit, 32 * 1024 * 1024), Path(temporary))
         manifest = json.loads((root / "manifest.json").read_text())
-        if (manifest.get("id") != "io.github.moizibnyousaf.omawhatsapp"
+        if (manifest.get("id") != "io.github.atoslins.whatsapp"
                 or version(manifest.get("version")) != version(tag)):
             raise ValueError("The pinned release manifest does not match the update.")
         subprocess.run(["bash", str(root / "scripts/install")], check=True, timeout=600)
-    print("OmaWhatsApp updated. You can close this terminal.")
+    print("WhatsApp for Omarchy updated. You can close this terminal.")
 
 
 def main():

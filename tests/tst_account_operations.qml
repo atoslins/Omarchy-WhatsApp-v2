@@ -18,7 +18,7 @@ TestCase {
     var operations = createTemporaryObject(operationsComponent, testCase)
     verify(operations !== null)
     compare(operations.linkCommand("work"), [
-      "/usr/bin/xdg-terminal-exec", "--title=OmaWhatsApp · Link work",
+      "/usr/bin/xdg-terminal-exec", "--title=WhatsApp for Omarchy · Link work",
       "--hold", "--", "/synthetic/omawhatsapp", "link-account", "work",
       "--authorize", "interactive"
     ])

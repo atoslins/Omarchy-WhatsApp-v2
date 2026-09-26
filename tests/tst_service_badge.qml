@@ -39,13 +39,13 @@ TestCase {
     compare(service.notificationUnreadCount, 2)
     compare(service.notificationMessageCount, 7)
     compare(service.barTooltip,
-      "OmaWhatsApp · 2 unread chats · 7 messages · middle-click to dismiss")
+      "WhatsApp for Omarchy · 2 unread chats · 7 messages · middle-click to dismiss")
     service.chats = [{ account: "work", jid: "a@s.whatsapp.net", notification_unread: 1 }]
     compare(service.barTooltip,
-      "OmaWhatsApp · 1 unread chat · 1 message · middle-click to dismiss")
+      "WhatsApp for Omarchy · 1 unread chat · 1 message · middle-click to dismiss")
     service.chats = []
     compare(service.notificationUnreadCount, 0)
-    compare(service.barTooltip, "OmaWhatsApp · no unread chats")
+    compare(service.barTooltip, "WhatsApp for Omarchy · no unread chats")
   }
 
   function test_an_identical_rail_answer_keeps_the_current_model() {

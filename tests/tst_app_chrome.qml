@@ -1027,7 +1027,7 @@ TestCase {
     var status = findChild(h.app, "railSyncStatus")
     verify(status.label.indexOf("Closed") === 0, "the list says it is closed")
     h.app.open(JSON.stringify({}))
-    compare(h.service.launches, 1, "opening a closed OmaWhatsApp starts it")
+    compare(h.service.launches, 1, "opening a closed WhatsApp for Omarchy starts it")
     h.app.open(JSON.stringify({}))
     compare(h.service.launches, 1, "an open one is not started twice")
   }

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible OmaWhatsApp problem without private chat data.
+description: Report a reproducible WhatsApp for Omarchy problem without private chat data.
 title: "bug: "
 labels: [bug]
 body:
@@ -26,7 +26,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: OmaWhatsApp commit, Omarchy version, and wacli version.
+      description: WhatsApp for Omarchy commit, Omarchy version, and wacli version.
     validations:
       required: true
   - type: checkboxes

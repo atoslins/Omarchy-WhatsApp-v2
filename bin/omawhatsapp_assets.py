@@ -124,7 +124,7 @@ def fetch_https_image(url: str, timeout: float = 20) -> bytes:
             try:
                 candidate.request("GET", target, headers={
                     "Accept": "image/jpeg,image/png,image/webp",
-                    "User-Agent": "OmaWhatsApp/1",
+                    "User-Agent": "WhatsApp for Omarchy/1",
                 })
                 response = candidate.getresponse()
                 connection = candidate

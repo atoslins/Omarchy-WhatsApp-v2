@@ -87,7 +87,7 @@ class UpdateTests(unittest.TestCase):
     def test_confirmed_update_uses_pinned_full_installer(self):
         (self.root / "install-mode").write_text("standalone\n")
         archive = self.archive([
-            ("release/manifest.json", json.dumps({"id": "io.github.moizibnyousaf.omawhatsapp", "version": "0.12.0"})),
+            ("release/manifest.json", json.dumps({"id": "io.github.atoslins.whatsapp", "version": "0.12.0"})),
             ("release/scripts/install", "#!/bin/bash\nexit 0\n")])
         with patch("builtins.input", return_value="INSTALL"), patch.object(updates, "download", return_value=archive) as download, patch.object(updates.subprocess, "run") as run:
             updates.install(self.root, "v0.12.0", SHA)
@@ -121,7 +121,7 @@ class UpdateTests(unittest.TestCase):
         (self.root / "install-mode").write_text("standalone\n")
         proof = self.root / "proof"
         archive = self.archive([
-            ("release/manifest.json", json.dumps({"id": "io.github.moizibnyousaf.omawhatsapp", "version": "0.12.0"})),
+            ("release/manifest.json", json.dumps({"id": "io.github.atoslins.whatsapp", "version": "0.12.0"})),
             ("release/scripts/install", '#!/bin/bash\nprintf installed > "$OMAW_TEST_PROOF"\n')])
         with patch("builtins.input", return_value="INSTALL"), patch.object(updates, "download", return_value=archive), patch.dict(os.environ, {"OMAW_TEST_PROOF": str(proof)}):
             updates.install(self.root, "v0.12.0", SHA)

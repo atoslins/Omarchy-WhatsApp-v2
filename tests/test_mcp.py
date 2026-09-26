@@ -1,4 +1,4 @@
-"""The MCP server that lets an agent such as Claude Code use OmaWhatsApp.
+"""The MCP server that lets an agent such as Claude Code use WhatsApp for Omarchy.
 
 Unit tests replace the helper with a recorder, so every tool's request is
 checked without wacli. The end-to-end class runs the real server and the real

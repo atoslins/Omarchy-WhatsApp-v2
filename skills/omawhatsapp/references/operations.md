@@ -1,4 +1,4 @@
-# Focused OmaWhatsApp operations
+# Focused WhatsApp for Omarchy operations
 
 All commands use the installed helper and emit one JSON object. Build requests
 with `jq` so user content is data, not shell syntax.
@@ -94,7 +94,7 @@ The other bounded message commands accept these objects:
 | `forward` | `jid`, `id`, `to_jid` |
 | `media` | `jid`, `id` |
 | `sticker` | `jid`, `path`, optional `reply_id` |
-| `voice` | `jid`, private OmaWhatsApp voice-draft `path`, optional `reply_id` |
+| `voice` | `jid`, private WhatsApp for Omarchy voice-draft `path`, optional `reply_id` |
 | `poll` | `jid`, `question`, `options`, `multi` |
 | `select` | `jid`, `id`, `index` |
 

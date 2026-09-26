@@ -50,13 +50,18 @@ python3 -m py_compile bin/omawhatsapp_assets.py \
 python3 -m py_compile tests/test_install_transaction.py tests/write_media_fixtures.py
 git diff --check
 
-jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
+jq -e '.id == "io.github.atoslins.whatsapp"' \
   manifest.json plugins/omawhatsapp/manifest.json >/dev/null || {
   echo "test: public plugin ID must remain globally namespaced" >&2
   exit 1
 }
 [[ $(jq -r '.version' manifest.json) == $(jq -r '.version' plugins/omawhatsapp/manifest.json) ]] || {
   echo "test: root and plugin manifest versions must match" >&2
+  exit 1
+}
+helper_version=$(sed -nE 's/^HELPER_VERSION = "([^"]+)".*/\1/p' bin/omawhatsapp_core.py)
+[[ $helper_version == $(jq -r '.version' manifest.json) ]] || {
+  echo "test: HELPER_VERSION in bin/omawhatsapp_core.py must match manifest.json" >&2
   exit 1
 }
 

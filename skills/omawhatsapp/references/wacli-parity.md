@@ -23,7 +23,7 @@ in. Before an advanced operation, inspect its flags without changing state:
 wacli <command> <subcommand> --help
 ```
 
-Unknown future command leaves fail closed until OmaWhatsApp classifies them.
+Unknown future command leaves fail closed until WhatsApp for Omarchy classifies them.
 
 ## Non-interactive contract
 
@@ -56,7 +56,7 @@ jq -nc --argjson args '["messages","starred","--limit","50"]' \
 
 Pass `--account`, `--store`, `--timeout`, `--lock-wait`, `--events`, and
 `--full` through the matching JSON fields, not inside `args`. Never pass
-`--read-only` or `--json`; OmaWhatsApp adds JSON output and read-only
+`--read-only` or `--json`; WhatsApp for Omarchy adds JSON output and read-only
 enforcement itself. Prefer a named `account`; a one-off `store` must be an
 absolute path inside the user's home directory.
 
@@ -132,7 +132,7 @@ Use it only when the user explicitly requests linking or a foreground sync:
 ```
 
 The helper pauses the resident default sync service when necessary and
-restores it afterward. It never overrides OmaWhatsApp's explicit offline mode.
+restores it afterward. It never overrides WhatsApp for Omarchy's explicit offline mode.
 
 ## High-impact boundaries
 

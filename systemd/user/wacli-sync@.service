@@ -1,5 +1,5 @@
 [Unit]
-Description=Keep the local OmaWhatsApp index and new media in sync for account %I
+Description=Keep the local WhatsApp for Omarchy index and new media in sync for account %I
 Documentation=https://wacli.sh
 PartOf=graphical-session.target
 After=graphical-session.target network-online.target

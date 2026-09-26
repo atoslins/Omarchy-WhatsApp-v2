@@ -2,7 +2,7 @@ import QtQuick
 import QtTest
 import "../plugins/omawhatsapp" as Oma
 
-// L233/L234: Quit stops receiving until OmaWhatsApp opens again; starting
+// L233/L234: Quit stops receiving until WhatsApp for Omarchy opens again; starting
 // with the system is a setting of its own.
 TestCase {
   id: testCase
@@ -30,7 +30,7 @@ TestCase {
     verify(service.closed)
     verify(!service.syncActive)
     verify(!service.presenceActive, "not shown online while closed")
-    compare(service.barTooltip, "OmaWhatsApp is closed · click to open")
+    compare(service.barTooltip, "WhatsApp for Omarchy is closed · click to open")
     verify(service.launchApp())
     compare(process.command[process.command.length - 1], "launch")
     finish(service, { ok: true, kind: "launch", closed: false })

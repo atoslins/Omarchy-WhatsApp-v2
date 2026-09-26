@@ -1,6 +1,6 @@
 # Security and privacy
 
-OmaWhatsApp handles a private local message mirror. Please do not include a
+WhatsApp for Omarchy handles a private local message mirror. Please do not include a
 WhatsApp session, database, JID, phone number, message content, media file, or
 real conversation screenshot in an issue, pull request, or reproduction.
 

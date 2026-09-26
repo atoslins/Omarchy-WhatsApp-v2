@@ -2,7 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// First run: nothing linked yet. What OmaWhatsApp is, what stays on this
+// First run: nothing linked yet. What WhatsApp for Omarchy is, what stays on this
 // computer, and the three steps to link the phone, with the button that
 // opens the QR code. With no wacli, what to install first.
 Rectangle {
@@ -97,7 +97,7 @@ Rectangle {
             textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.Wrap
-            text: "OmaWhatsApp talks to WhatsApp through wacli, which is not installed yet."
+            text: "WhatsApp for Omarchy talks to WhatsApp through wacli, which is not installed yet."
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -106,7 +106,7 @@ Rectangle {
             textFormat: Text.PlainText
             width: parent.width
             wrapMode: Text.Wrap
-            text: "Install wacli at ~/.local/bin/wacli, then open OmaWhatsApp again: this screen continues from there."
+            text: "Install wacli at ~/.local/bin/wacli, then open WhatsApp for Omarchy again: this screen continues from there."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -219,7 +219,7 @@ Rectangle {
         Repeater {
           model: [
             "Your chats and media are kept in a local copy, readable even offline.",
-            "Messages go only to WhatsApp itself: there is no OmaWhatsApp server or account.",
+            "Messages go only to WhatsApp itself: there is no WhatsApp for Omarchy server or account.",
             "It is a linked device, like WhatsApp Web: your phone stays the main one."
           ]
           delegate: Row {

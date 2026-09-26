@@ -13,7 +13,7 @@ import "FormatModel.js" as FormatModel
 import "PresenceModel.js" as PresenceModel
 import "Tint.js" as Tint
 
-// OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
+// WhatsApp for Omarchy keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
 Item {
   id: root
@@ -41,7 +41,7 @@ Item {
     online: !!root.service && root.service.statusReady && !root.service.offlineMode
     checkOnLaunch: !!root.service && root.service.checkUpdatesOnLaunch === true
     onUpdateAvailable: function(version) {
-      root.showToast("OmaWhatsApp " + version + " available · open settings to update")
+      root.showToast("WhatsApp for Omarchy " + version + " available · open settings to update")
     }
   }
   property alias cursorIndex: keyboardNavigation.messageIndex
@@ -162,18 +162,18 @@ Item {
     return views
   }
   property var demoChats: [
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
+    { jid: "demo-lab", name: "Omarchy Lab", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "Instant and native", timestamp: 1787539920, unread: 0, pinned: true },
     { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
     { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", avatar_path: "__demo_avatar__", preview: "Looks perfect — ship it", timestamp: 1787538200, unread: 1, pinned: false }
   ]
   property var demoItems: [
     { id: "demo-5", text: "Yep — shipped.", sender: "Sam Rivera", sender_jid: "sam@s.whatsapp.net", timestamp: 1787540100, from_me: false, done: false, media_type: "", mime_type: "", local_path: "", tags: [] },
-    { id: "demo-1", text: "OmaWhatsApp is instant, native, and private #design", sender: "You", sender_jid: "", timestamp: 1787539920, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["design"], reactions: [{ emoji: "🔥", from_me: false }, { emoji: "🔥", from_me: true }], starred: true, status: "read" },
+    { id: "demo-1", text: "Instant, native, and private #design", sender: "You", sender_jid: "", timestamp: 1787539920, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["design"], reactions: [{ emoji: "🔥", from_me: false }, { emoji: "🔥", from_me: true }], starred: true, status: "read" },
     { id: "demo-2a", text: "Two photos, one smooth send #capture", sender: "You", sender_jid: "", timestamp: 1787539200, from_me: true, done: false, media_type: "album", mime_type: "image/svg+xml", local_path: "__demo__", album_id: "demo-album", album_count: 2, tags: ["capture"], album_items: [
       { id: "demo-2a", text: "Two photos, one smooth send #capture", sender: "You", sender_jid: "", timestamp: 1787539200, from_me: true, media_type: "image", mime_type: "image/svg+xml", local_path: "__demo__", album_id: "demo-album", album_index: 0, album_count: 2 },
       { id: "demo-2b", text: "", sender: "You", sender_jid: "", timestamp: 1787539199, from_me: true, media_type: "image", mime_type: "image/svg+xml", local_path: "__demo_photo__", album_id: "demo-album", album_index: 1, album_count: 2 }
     ] },
-    { id: "demo-3", text: "Review the private repo README and release checklist #ship", sender: "You", sender_jid: "", timestamp: 1787538000, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["ship"], quoted_id: "demo-1", quoted_sender: "You", quoted_text: "OmaWhatsApp is instant, native, and private #design", status: "delivered" },
+    { id: "demo-3", text: "Review the private repo README and release checklist #ship", sender: "You", sender_jid: "", timestamp: 1787538000, from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: ["ship"], quoted_id: "demo-1", quoted_sender: "You", quoted_text: "Instant, native, and private #design", status: "delivered" },
     { id: "demo-4", text: "https://github.com/openclaw/wacli #reference", sender: "You", sender_jid: "", timestamp: 1787536800, from_me: true, done: true, media_type: "", mime_type: "", local_path: "", tags: ["reference"], status: "sent" }
   ]
   property var demoMembers: [
@@ -183,7 +183,7 @@ Item {
   ]
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
+    ? String(manifest.id) : "io.github.atoslins.whatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
   readonly property bool showAvatars: root.demoMode || !root.service || root.service.showAvatars !== false
   readonly property string syncPauseReason: !root.demoMode && root.service
@@ -383,7 +383,7 @@ Item {
     var previousDemo = demoMode
     closingFromHost = false
     demoMode = payload.demo === true
-    // Opening a closed OmaWhatsApp starts it again.
+    // Opening a closed WhatsApp for Omarchy starts it again.
     if (!demoMode && service && service.closed === true) service.launchApp()
     demoRailDensity = demoMode && payload.density === "compact" ? "compact" : ""
     demoOnboarding = demoMode && payload.onboarding === true
@@ -524,7 +524,7 @@ Item {
     mediaViewer.openAt(index >= 0 ? index : 0)
   }
   property var demoDetails: ({
-    ok: true, kind: "chat-details", chat: { kind: "group", name: "OmaWhatsApp Lab" },
+    ok: true, kind: "chat-details", chat: { kind: "group", name: "Omarchy Lab" },
     since: 1780000000, counts: { total: 1284, media: 42, documents: 7, links: 19, starred: 3 },
     group: { created_ts: 1760000000, owner_name: "Sam Rivera", participant_count: 3, left: false },
     participants: [
@@ -696,7 +696,7 @@ Item {
   }
 
   // Quit: the window closes and every account's sync stops until
-  // OmaWhatsApp opens again; it still starts with the system if set to.
+  // WhatsApp for Omarchy opens again; it still starts with the system if set to.
   function quitApp() {
     if (demoMode) { close(); return true }
     if (!service || !service.quitApp()) return false
@@ -2237,7 +2237,7 @@ Item {
     id: window
     objectName: "omawhatsappWindow"
     visible: root.opened
-    title: "OmaWhatsApp"
+    title: "WhatsApp for Omarchy"
     color: root.background
     implicitWidth: Style.space(1080)
     implicitHeight: Style.space(720)
@@ -3343,7 +3343,7 @@ Item {
             PanelToolTip {
               visible: railSyncStatusMouse.containsMouse
               text: railSyncStatus.closedApp
-                ? "OmaWhatsApp is closed: nothing arrives until it opens again. Click to open it."
+                ? "WhatsApp for Omarchy is closed: nothing arrives until it opens again. Click to open it."
                 : root.offlineForSelectedAccount
                 ? "Background sync is paused. Click to resume it."
                 : (railSyncStatus.label === "Loading…"
@@ -5069,7 +5069,7 @@ Item {
           Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: "This only deletes the local chat history from this device, not from Meta's WhatsApp servers. The chat will disappear from OmaWhatsApp and will only reappear if a new message is received."
+            text: "This only deletes the local chat history from this device, not from Meta's WhatsApp servers. The chat will disappear from WhatsApp for Omarchy and will only reappear if a new message is received."
             color: root.dim
             wrapMode: Text.Wrap
             font.family: root.fontFamily

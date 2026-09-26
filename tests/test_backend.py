@@ -906,7 +906,7 @@ class BackendTests(unittest.TestCase):
         result, sent = self._notify()
         self.assertEqual(result["pending"], arrivals)
         self.assertEqual(len(sent), backend_module.MAX_NOTIFY_BURST + 1)
-        self.assertEqual(sent[-1][0], "OmaWhatsApp")
+        self.assertEqual(sent[-1][0], "WhatsApp for Omarchy")
         self.assertEqual(sent[-1][1], "2 more chats have new messages")
 
     def test_mute_deadlines_support_seconds_milliseconds_and_forever(self) -> None:
@@ -3556,6 +3556,11 @@ sys.exit(0)
         self.assertTrue(reports["home"]["notifications_muted"])
         self.assertFalse(reports["work"]["notifications_muted"])
         self.assertFalse(reports["home"]["main"], "a named account is removed on unlink")
+
+    def test_status_reports_the_helper_version_of_the_manifest(self) -> None:
+        manifest = json.loads((Path(__file__).resolve().parents[1] / "manifest.json").read_text())
+        self.assertEqual(self.backend.status()["helper_version"], manifest["version"],
+                         "the app compares the two to catch an update that replaced only the plugin")
 
         def arrive(message_id: str, ts: int) -> None:
             with closing(sqlite3.connect(self.home / "wacli.db")) as connection, connection:

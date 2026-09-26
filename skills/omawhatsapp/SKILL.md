@@ -1,9 +1,9 @@
 ---
 name: omawhatsapp
-description: Inspect, search, summarize, sync, and operate WhatsApp through OmaWhatsApp, including complete guarded wacli parity for messages, media, chats, groups, channels, calls, contacts, history, profiles, accounts, and maintenance.
+description: Inspect, search, summarize, sync, and operate WhatsApp through WhatsApp for Omarchy, including complete guarded wacli parity for messages, media, chats, groups, channels, calls, contacts, history, profiles, accounts, and maintenance.
 ---
 
-# OmaWhatsApp
+# WhatsApp for Omarchy
 
 When the `whatsapp` MCP server (`~/.local/bin/omawhatsapp-mcp`) is connected,
 prefer its tools: they call this helper with the right authorization classes

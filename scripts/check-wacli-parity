@@ -23,7 +23,7 @@ def load_helper():
         "omawhatsapp_parity", SourceFileLoader("omawhatsapp_parity", str(HELPER))
     )
     if spec is None or spec.loader is None:
-        raise RuntimeError("could not load OmaWhatsApp helper")
+        raise RuntimeError("could not load WhatsApp for Omarchy helper")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -171,7 +171,7 @@ def main() -> int:
             )
             return 1
     print(
-        f"OmaWhatsApp covers all {len(registered)} wacli "
+        f"WhatsApp for Omarchy covers all {len(registered)} wacli "
         f"{helper.WACLI_PARITY_VERSION} command leaves"
         + ("." if strict else f" ({len(expected_absent)} not yet in installed {installed}).")
     )

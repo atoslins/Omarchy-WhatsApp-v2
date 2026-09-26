@@ -16,7 +16,7 @@ import "Tint.js" as Tint
 // source of truth; this surface only owns transient navigation and draft state.
 Panel {
   id: root
-  moduleName: "io.github.moizibnyousaf.omawhatsapp"
+  moduleName: "io.github.atoslins.whatsapp"
   manageIpc: false
 
   property var anchorItem: null
@@ -94,7 +94,7 @@ Panel {
   property var demoChats: [
     { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "The compact client can send now", timestamp: 1787540400, unread: 3, notification_unread: 3, pinned: true },
     { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", avatar_path: "__demo_avatar__", preview: "Looks perfect — ship it", timestamp: 1787539800, unread: 1, notification_unread: 1, pinned: false },
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
+    { jid: "demo-lab", name: "Omarchy Lab", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
   ]
   readonly property bool multiAccount: demoMode
     || (!!service && service.multiAccount === true)
@@ -954,7 +954,7 @@ Panel {
             width: parent.width
             height: Style.space(40)
 
-            // The brand mark stays on every OmaWhatsApp surface.
+            // The brand mark stays on every WhatsApp for Omarchy surface.
             Text {
               textFormat: Text.PlainText
               id: whatsappMark
@@ -1461,7 +1461,7 @@ Panel {
                 objectName: "dropdownEmptyTitle"
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: parent.firstRun ? "Link your WhatsApp to start"
-                  : root.ready ? "No matching chats" : "OmaWhatsApp is reconnecting"
+                  : root.ready ? "No matching chats" : "WhatsApp for Omarchy is reconnecting"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body

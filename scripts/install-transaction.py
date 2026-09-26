@@ -26,7 +26,7 @@ from typing import Any, NoReturn
 
 
 SCHEMA = 1
-KIND = "io.github.moizibnyousaf.omawhatsapp.install-transaction"
+KIND = "io.github.atoslins.whatsapp.install-transaction"
 UNIT_RE = re.compile(r"^wacli-sync(?:@[A-Za-z0-9._-]{1,64})?\.service$")
 RENAME_NOREPLACE = 1
 AT_FDCWD = -100

@@ -19,7 +19,7 @@ SOURCE = Path(__file__).resolve().parent.parent
 HELPER = SOURCE / "scripts" / "install-transaction.py"
 INSTALL = SOURCE / "scripts" / "install"
 UNINSTALL = SOURCE / "scripts" / "uninstall"
-PLUGIN_ID = "io.github.moizibnyousaf.omawhatsapp"
+PLUGIN_ID = "io.github.atoslins.whatsapp"
 
 
 def load_transaction_module() -> object:

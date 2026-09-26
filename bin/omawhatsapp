@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Entry point of the local bridge between OmaWhatsApp and wacli.
+"""Entry point of the local bridge between WhatsApp for Omarchy and wacli.
 
 The bridge lives in omawhatsapp_core.py beside this file. Imported as a
 module, its bytecode is cached, so a call no longer recompiles six thousand

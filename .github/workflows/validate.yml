@@ -68,7 +68,9 @@ jobs:
           export OMARCHY_SHELL_DIR="$GITHUB_WORKSPACE/.omarchy/shell"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           install -d "$HOME/.config/omarchy"
+          # Seeded with the original OmaWhatsApp in the bar: the preflight
+          # proves this install takes its place instead of running beside it.
           printf '%s\n' \
-            '{"plugins":[],"bar":{"layout":{"left":[],"center":[],"right":[]}}}' \
+            '{"plugins":[{"id":"io.github.moizibnyousaf.omawhatsapp"}],"bar":{"layout":{"left":[],"center":[],"right":[{"id":"omarchy.clock"},{"id":"io.github.moizibnyousaf.omawhatsapp"}]}}}' \
             > "$HOME/.config/omarchy/shell.json"
           ./scripts/test

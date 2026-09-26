@@ -456,8 +456,29 @@ Item {
   function selectedChatRef() {
     return AccountModel.chatRef(selectedChatAccount, selectedChatJid)
   }
+  // The helper in ~/.local/bin and this plugin are installed together; an
+  // update that replaced only the plugin (omarchy plugin update) leaves them
+  // apart, and the helper may lack what the plugin asks for.
+  readonly property string appVersion: manifest && manifest.version ? String(manifest.version) : ""
+  property string helperVersion: ""
+  property bool helperAnswered: false
+  property bool helperRefusedCommand: false
+  readonly property bool helperOutdated: appVersion !== ""
+    && (helperRefusedCommand || (helperAnswered && helperVersion !== appVersion))
+  readonly property string helperOutdatedText: "Update incomplete: the helper is "
+    + (helperVersion !== "" ? helperVersion : "older") + " and the app " + appVersion
+    + ". Run ./scripts/install from the repository to update both together."
+  function noteHelperRefusal(text) {
+    if (/invalid choice|unrecognized arguments/.test(String(text || ""))) helperRefusedCommand = true
+  }
+  // The helper's own stderr, unless it only says the helper is too old.
+  function helperErrorText(stderrText, fallback) {
+    noteHelperRefusal(stderrText)
+    if (helperOutdated) return helperOutdatedText
+    return String(stderrText || fallback).trim()
+  }
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
+    ? String(manifest.id) : "io.github.atoslins.whatsapp"
   property string pendingAppPayload: ""
   signal openDropdownRequested(var payload)
   signal toggleDropdownRequested(var payload)
@@ -528,11 +549,12 @@ Item {
   readonly property int notificationMessageCount: chats.reduce(function(total, chat) {
     return total + Number(chat.notification_unread || 0)
   }, 0)
-  readonly property string barTooltip: closed ? "OmaWhatsApp is closed · click to open"
-    : !railReady ? "OmaWhatsApp · reconnecting"
-    : offlineMode ? "OmaWhatsApp · offline archive"
-    : notificationUnreadCount === 0 ? "OmaWhatsApp · no unread chats"
-    : "OmaWhatsApp · " + notificationUnreadCount
+  readonly property string barTooltip: helperOutdated ? "WhatsApp for Omarchy · update incomplete, run ./scripts/install"
+    : closed ? "WhatsApp for Omarchy is closed · click to open"
+    : !railReady ? "WhatsApp for Omarchy · reconnecting"
+    : offlineMode ? "WhatsApp for Omarchy · offline archive"
+    : notificationUnreadCount === 0 ? "WhatsApp for Omarchy · no unread chats"
+    : "WhatsApp for Omarchy · " + notificationUnreadCount
       + (notificationUnreadCount === 1 ? " unread chat" : " unread chats")
       + " · " + notificationMessageCount
       + (notificationMessageCount === 1 ? " message" : " messages")
@@ -1575,7 +1597,7 @@ Item {
     return true
   }
 
-  // Quit: every account's sync stops until OmaWhatsApp opens again (this
+  // Quit: every account's sync stops until WhatsApp for Omarchy opens again (this
   // login session); nothing arrives, no popup, not shown online.
   property bool closed: false
   property bool startAtLogin: true
@@ -1594,7 +1616,7 @@ Item {
     if (controlProcess.running || writing) return false
     return runControl("unlink-account", { name: String(name || ""), confirm: String(confirm || "") })
   }
-  // Opening a closed OmaWhatsApp starts its sync again.
+  // Opening a closed WhatsApp for Omarchy starts its sync again.
   function launchApp() {
     if (controlProcess.running) return false
     return runControl("launch", ({}))
@@ -1893,6 +1915,7 @@ Item {
         ? String(payload.account || "") : requestedAccount
       var selectedAccount = String(root.selectedChatAccount || "")
       var applies = selectedAccount === "" || responseAccount === selectedAccount
+      root.noteHelperRefusal(statusError.text)
       if (!payload || payload.ok !== true) {
         // wacli missing: onboarding says how to install it.
         root.wacliInstalled = !(payload && payload.installed === false)
@@ -1900,10 +1923,13 @@ Item {
           root.statusReady = false
           root.ready = false
           root.railReady = false
-          root.errorText = (payload && payload.error)
-            || String(statusError.text || "OmaWhatsApp could not connect.").trim()
+          root.errorText = root.helperOutdated ? root.helperOutdatedText
+            : (payload && payload.error)
+            || root.helperErrorText(statusError.text, "WhatsApp for Omarchy could not connect.")
         }
       } else if (applies) {
+        root.helperAnswered = true
+        root.helperVersion = String(payload.helper_version || "")
         var readiness = AccountModel.statusReadiness(payload)
         root.statusAccount = responseAccount
         root.statusReady = true
@@ -1937,7 +1963,7 @@ Item {
           ? payload.time_format : "auto"
         root.applyInterfacePreferences(payload)
         root.ready = readiness.accountReady
-        if (root.ready) root.errorText = ""
+        if (root.ready) root.errorText = root.helperOutdated ? root.helperOutdatedText : ""
         root.maybeSendAutomaticReceipt()
       }
       // Only an event that arrived while this request was running earns one
@@ -1981,7 +2007,7 @@ Item {
       if (raw !== "" && raw === root.lastChatsRaw && exitCode === 0) return
       var payload = root.parseJson(raw)
       if (!payload || payload.ok !== true) {
-        root.errorText = (payload && payload.error) || String(chatsError.text || "Chats could not be read.").trim()
+        root.errorText = (payload && payload.error) || root.helperErrorText(chatsError.text, "Chats could not be read.")
         return
       }
       root.lastChatsRaw = raw
@@ -2037,7 +2063,7 @@ Item {
       var payload = root.parseJson(controlOutput.text)
       if (exitCode !== 0 || !payload || payload.ok !== true) {
         var message = (payload && payload.error)
-          || String(controlError.text || "OmaWhatsApp could not change that setting.").trim()
+          || root.helperErrorText(controlError.text, "WhatsApp for Omarchy could not change that setting.")
         root.errorText = message
         root.controlFailed(message)
         root.refreshStatus()
@@ -2118,7 +2144,7 @@ Item {
       if (!AccountModel.sameRef(chatRef, root.selectedChatRef())) return
       if (exitCode === 0 && payload && payload.ok === true) root.groupSettings = payload
       else root.groupSettingsError = (payload && payload.error)
-        || String(groupInfoError.text || "WhatsApp could not read the group settings.").trim()
+        || root.helperErrorText(groupInfoError.text, "WhatsApp could not read the group settings.")
     }
   }
 
@@ -2234,7 +2260,7 @@ Item {
         result.name = String(payload.name || "")
       } else {
         result.error = (payload && payload.error)
-          || String(checkNumberError.text || "WhatsApp could not check that number.").trim()
+          || root.helperErrorText(checkNumberError.text, "WhatsApp could not check that number.")
       }
       root.numberCheck = result
     }
@@ -2258,7 +2284,7 @@ Item {
       else
         root.contactProfile = { jid: person, loading: false, about: "", business: ({}),
           error: (result && result.error)
-            || String(contactProfileError.text || "WhatsApp did not answer.").trim() }
+            || root.helperErrorText(contactProfileError.text, "WhatsApp did not answer.") }
     }
   }
 
@@ -2281,7 +2307,7 @@ Item {
       } else {
         root.groupRequest = { kind: kind, loading: false, jid: "",
           error: (result && result.error)
-            || String(groupRequestError.text || "WhatsApp could not do that.").trim() }
+            || root.helperErrorText(groupRequestError.text, "WhatsApp could not do that.") }
       }
     }
   }
@@ -2316,7 +2342,7 @@ Item {
       var payload = root.parseJson(settingsOutput.text)
       if (exitCode !== 0 || !payload || payload.ok !== true) {
         var message = (payload && payload.error)
-          || String(settingsError.text || "OmaWhatsApp settings could not be saved.").trim()
+          || root.helperErrorText(settingsError.text, "WhatsApp for Omarchy settings could not be saved.")
         root.errorText = message
         root.settingsFailed(message)
         root.refreshStatus()
@@ -2397,7 +2423,7 @@ Item {
       var responseIsCurrent = requestIsCurrent && AccountModel.responseMatches(
         payload ? payload.chat : null, chatRef, root.selectedChatRef())
       if ((!payload || payload.ok !== true) && requestIsCurrent) {
-        root.errorText = (payload && payload.error) || String(messagesError.text || "Messages could not be read.").trim()
+        root.errorText = (payload && payload.error) || root.helperErrorText(messagesError.text, "Messages could not be read.")
       } else if (payload && payload.ok === true && responseIsCurrent) {
         var key = chatRef.key + "\n" + requestedQuery
         var rawMessages = String(messagesOutput.text || "")
@@ -2434,7 +2460,7 @@ Item {
         payload ? payload.chat : null, chatRef, root.selectedChatRef())
       if ((!payload || payload.ok !== true) && requestIsCurrent) {
         root.errorText = (payload && payload.error)
-          || String(membersError.text || "Group members could not be read.").trim()
+          || root.helperErrorText(membersError.text, "Group members could not be read.")
       } else if (payload && payload.ok === true && responseIsCurrent) {
         root.members = Array.isArray(payload.members) ? payload.members : []
       }
@@ -2468,7 +2494,7 @@ Item {
         return
       }
       root.pasteFailed((result && result.error)
-        || String(pasteError.text || "The clipboard could not be read.").trim(), chatRef, owner)
+        || root.helperErrorText(pasteError.text, "The clipboard could not be read."), chatRef, owner)
     }
   }
 
@@ -2494,7 +2520,7 @@ Item {
       var result = root.parseJson(readMarkOutput.text)
       if (finished && (exitCode !== 0 || !result || result.ok !== true)) {
         var message = (result && result.error)
-          || String(readMarkError.text || "WhatsApp could not change the read state.").trim()
+          || root.helperErrorText(readMarkError.text, "WhatsApp could not change the read state.")
         root.chatStateFailed(message, finished.ref, finished.action, finished.owner)
         // Back to what the mirror says.
         root.lastChatsRaw = ""
@@ -2535,7 +2561,7 @@ Item {
       root.activeWriteOwner = ""
       var payload = root.parseJson(writeOutput.text)
       if (exitCode !== 0 || !payload || payload.ok !== true) {
-        var message = (payload && payload.error) || String(writeError.text || "WhatsApp could not complete that request.").trim()
+        var message = (payload && payload.error) || root.helperErrorText(writeError.text, "WhatsApp could not complete that request.")
         if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
           root.errorText = message
         if (finishedKind === "media") root.mediaDownloadId = ""

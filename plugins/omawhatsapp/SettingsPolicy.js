@@ -1,7 +1,7 @@
 .pragma library
 
 // Keep receipt decisions small, explicit, and independently testable. Merely
-// reading OmaWhatsApp's local mirror must never become a WhatsApp write.
+// reading WhatsApp for Omarchy's local mirror must never become a WhatsApp write.
 function shouldSendAutomaticReceipt(enabled, offline, writing) {
   return enabled === true && offline !== true && writing !== true
 }

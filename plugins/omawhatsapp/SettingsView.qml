@@ -112,11 +112,11 @@ Rectangle {
         subtitle: "Replying clears the unread count, as it does on the phone.",
         checked: value("readOnReply", true), busy: busy },
       { kind: "toggle", key: "show_online",
-        title: "Show me online while OmaWhatsApp has focus",
+        title: "Show me online while WhatsApp for Omarchy has focus",
         subtitle: "Needed to see who is online, their last seen, and who is typing: WhatsApp only sends them to a device shown online. It also shows the chat when you are typing or recording a voice note. Needs a wacli build that follows presence.",
         checked: value("showOnline", true), busy: busy },
       { kind: "note",
-        text: "Marking a chat read only syncs your phone and linked devices. OmaWhatsApp never sends read receipts, so contacts are not told." }
+        text: "Marking a chat read only syncs your phone and linked devices. WhatsApp for Omarchy never sends read receipts, so contacts are not told." }
     ]
     if (section === "notifications") return [
       { kind: "toggle", key: "notify", title: "Desktop notifications",
@@ -194,9 +194,9 @@ Rectangle {
         { kind: "toggle", key: "start_at_login", title: "Start with the system",
           subtitle: value("startAtLogin", true)
             ? "Messages and popups arrive as soon as you log in."
-            : "At login OmaWhatsApp stays closed until you open it from the bar or with Super+Shift+W.",
+            : "At login WhatsApp for Omarchy stays closed until you open it from the bar or with Super+Shift+W.",
           checked: value("startAtLogin", true), busy: busy },
-        { kind: "action", key: "quit", title: "Quit OmaWhatsApp",
+        { kind: "action", key: "quit", title: "Quit WhatsApp for Omarchy",
           subtitle: "Stops receiving messages, popups and showing you online until you open it again. Ctrl+Q in the app.",
           button: "Quit", available: live }
       ]
@@ -228,7 +228,7 @@ Rectangle {
     }
     if (section === "updates") return [ { kind: "updates" } ]
     if (section === "shortcuts") return [
-      { kind: "info", title: "Super+Shift+W", value: "Open or close OmaWhatsApp" },
+      { kind: "info", title: "Super+Shift+W", value: "Open or close WhatsApp for Omarchy" },
       { kind: "info", title: "Ctrl+F", value: "Find in this conversation" },
       { kind: "info", title: "Ctrl+B", value: "Hide or show the chat list" },
       { kind: "info", title: "Ctrl+N", value: "Start a new chat" },
@@ -248,7 +248,7 @@ Rectangle {
       { kind: "info", title: "Esc", value: "Step back" }
     ]
     if (section === "about") return [
-      { kind: "info", title: "OmaWhatsApp", value: (about.app_version || "—") + (about.install_mode ? " · " + about.install_mode : "") },
+      { kind: "info", title: "WhatsApp for Omarchy", value: (about.app_version || "—") + (about.install_mode ? " · " + about.install_mode : "") },
       { kind: "info", title: "wacli", value: (about.wacli_version || "—") + " · supports "
           + (about.wacli_minimum_version || "0.17.1") + " and newer, tested with " + (about.wacli_tested_version || "0.18.3") },
       { kind: "info", title: "Source", value: "github.com/atoslins/Omarchy-WhatsApp-v2" },

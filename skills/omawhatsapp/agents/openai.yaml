@@ -1,4 +1,4 @@
 interface:
-  display_name: "OmaWhatsApp"
+  display_name: "WhatsApp for Omarchy"
   short_description: "Use every WhatsApp capability with guardrails"
   default_prompt: "Use $omawhatsapp to inspect my local archive or carry out one clearly requested WhatsApp operation safely."

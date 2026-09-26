@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Local, bounded bridge between OmaWhatsApp and wacli."""
+"""Local, bounded bridge between WhatsApp for Omarchy and wacli."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def absolute_environment_path(name: str, fallback: Path) -> Path:
 
     The XDG base-directory specification says relative values are invalid and
     must be ignored. Applying the rule centrally also prevents malformed launch
-    environments from writing OmaWhatsApp state into a public checkout.
+    environments from writing WhatsApp for Omarchy state into a public checkout.
     """
     raw = os.environ.get(name, "").strip()
     candidate = Path(raw).expanduser() if raw else fallback
@@ -65,7 +65,7 @@ WACLI = absolute_environment_path("WACLI_BIN", HOME / ".local/bin/wacli")
 # --store or WACLI_STORE_DIR points somewhere else.
 ACCOUNT_CONFIG = STATE_HOME / "wacli" / "config.yaml"
 SYSTEMCTL = Path("/usr/bin/systemctl")
-PLUGIN_ID = "io.github.moizibnyousaf.omawhatsapp"
+PLUGIN_ID = "io.github.atoslins.whatsapp"
 PLUGIN_DIR = absolute_environment_path(
     "XDG_CONFIG_HOME", HOME / ".config") / "omarchy" / "plugins" / PLUGIN_ID
 MAX_ABOUT_FILES = 200_000
@@ -77,7 +77,7 @@ USER_UNIT_DIR = absolute_environment_path(
 MEDIA_UNITS = ("wacli-sync.service", "wacli-sync@.service")
 MEDIA_DROPIN = "10-omawhatsapp-media.conf"
 MEDIA_DROPIN_OFF = (
-    "# Written by OmaWhatsApp: received media is downloaded only on request.\n"
+    "# Written by WhatsApp for Omarchy: received media is downloaded only on request.\n"
     "[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n"
 )
 WL_PASTE = Path("/usr/bin/wl-paste")
@@ -332,6 +332,9 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # Oldest wacli whose CLI contract the helper relies on, and the newest release
 # the registry, tests, and CI were verified against. Any version in between
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
+# Bumped with manifest.json (scripts/test checks it). The app compares it with
+# the plugin it loaded: an update that replaced only the plugin says so.
+HELPER_VERSION = "0.15.0"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -903,7 +906,7 @@ class Backend:
             )
         else:
             if len(accounts) >= MAX_ACCOUNTS:
-                raise OmaWhatsAppError("OmaWhatsApp already has the maximum number of accounts.")
+                raise OmaWhatsAppError("WhatsApp for Omarchy already has the maximum number of accounts.")
             result, _, _ = self._transport_interactive(
                 ["accounts", "add", name], authorization="interactive"
             )
@@ -929,7 +932,7 @@ class Backend:
             return result
         if account.unit and self.online(account):
             try:
-                # It starts now; at login only if OmaWhatsApp starts with the system.
+                # It starts now; at login only if WhatsApp for Omarchy starts with the system.
                 if self._preferences().get("start_at_login") is not False:
                     self._systemctl_user(["enable", "--now", account.unit])
                 else:
@@ -974,7 +977,7 @@ class Backend:
         try:
             metadata = os.fstat(descriptor)
             if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
-                raise OSError("OmaWhatsApp state directory is not privately owned")
+                raise OSError("WhatsApp for Omarchy state directory is not privately owned")
             if create:
                 os.fchmod(descriptor, 0o700)
             yield descriptor
@@ -1013,7 +1016,7 @@ class Backend:
             value, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         if len(encoded) > limit:
-            raise OmaWhatsAppError("OmaWhatsApp state exceeded its safe size limit.")
+            raise OmaWhatsAppError("WhatsApp for Omarchy state exceeded its safe size limit.")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
@@ -1029,7 +1032,7 @@ class Backend:
                     except FileExistsError:
                         continue
                 if descriptor < 0:
-                    raise OmaWhatsAppError("OmaWhatsApp could not create private state.")
+                    raise OmaWhatsAppError("WhatsApp for Omarchy could not create private state.")
                 os.fchmod(descriptor, 0o600)
                 view = memoryview(encoded)
                 while view:
@@ -1062,12 +1065,12 @@ class Backend:
                 metadata = os.fstat(descriptor)
                 if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
                         or metadata.st_nlink != 1):
-                    raise OmaWhatsAppError("OmaWhatsApp refused an unsafe state lock.")
+                    raise OmaWhatsAppError("WhatsApp for Omarchy refused an unsafe state lock.")
                 os.fchmod(descriptor, 0o600)
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
                 yield
         except OSError as exc:
-            raise OmaWhatsAppError("OmaWhatsApp refused an unsafe state path.") from exc
+            raise OmaWhatsAppError("WhatsApp for Omarchy refused an unsafe state path.") from exc
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
@@ -1110,7 +1113,7 @@ class Backend:
     def _record_lifecycle_recovery(self, account: Account) -> None:
         unit = account.unit
         if not SYNC_UNIT_NAME.fullmatch(unit):
-            raise OmaWhatsAppError("OmaWhatsApp refused an unsafe sync unit.")
+            raise OmaWhatsAppError("WhatsApp for Omarchy refused an unsafe sync unit.")
         record = {"unit": unit, "lock": self._lifecycle_lock_name(account)}
         with self._state_lock("lifecycle-recovery.lock"):
             records = self._lifecycle_recovery_records()
@@ -1177,14 +1180,14 @@ class Backend:
                 if (not stat.S_ISDIR(metadata.st_mode)
                         or metadata.st_uid != os.getuid()):
                     raise OmaWhatsAppError(
-                        "OmaWhatsApp refused an unsafe voice-draft directory."
+                        "WhatsApp for Omarchy refused an unsafe voice-draft directory."
                     )
                 if create:
                     os.fchmod(descriptor, 0o700)
                 yield descriptor
         except OSError as exc:
             raise OmaWhatsAppError(
-                "OmaWhatsApp could not open its private voice-draft directory."
+                "WhatsApp for Omarchy could not open its private voice-draft directory."
             ) from exc
         finally:
             if descriptor >= 0:
@@ -1200,7 +1203,7 @@ class Backend:
             normalized.name
         ):
             raise OmaWhatsAppError(
-                "That recording is not an OmaWhatsApp private voice draft."
+                "That recording is not an WhatsApp for Omarchy private voice draft."
             )
         return normalized.name
 
@@ -1218,7 +1221,7 @@ class Backend:
                         or metadata.st_uid != os.getuid()
                         or metadata.st_nlink != 1):
                     raise OmaWhatsAppError(
-                        "OmaWhatsApp refused an unsafe voice draft."
+                        "WhatsApp for Omarchy refused an unsafe voice draft."
                     )
                 if metadata.st_size > MAX_FILE:
                     raise OmaWhatsAppError(
@@ -1237,7 +1240,7 @@ class Backend:
         except FileNotFoundError as exc:
             raise OmaWhatsAppError("That voice draft is no longer available.") from exc
         except OSError as exc:
-            raise OmaWhatsAppError("OmaWhatsApp could not read that voice draft.") from exc
+            raise OmaWhatsAppError("WhatsApp for Omarchy could not read that voice draft.") from exc
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
@@ -1256,7 +1259,7 @@ class Backend:
                     os.fchmod(descriptor, 0o600)
             except OSError as exc:
                 raise OmaWhatsAppError(
-                    "OmaWhatsApp could not create a private voice draft."
+                    "WhatsApp for Omarchy could not create a private voice draft."
                 ) from exc
             finally:
                 if descriptor >= 0:
@@ -1285,7 +1288,7 @@ class Backend:
                 pass
             except OSError as exc:
                 raise OmaWhatsAppError(
-                    "OmaWhatsApp could not discard that private voice draft."
+                    "WhatsApp for Omarchy could not discard that private voice draft."
                 ) from exc
             return {"ok": True, "kind": "voice-draft", "action": "discard"}
         raise OmaWhatsAppError("Choose create, finalize, or discard for the voice draft.")
@@ -1455,7 +1458,7 @@ class Backend:
                 *UI_PREFERENCES,
             }
             if any(key not in allowed for key in update):
-                raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
+                raise OmaWhatsAppError("That WhatsApp for Omarchy setting is not supported.")
             if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
                 raise OmaWhatsAppError("Read receipts must be on or off.")
             if "account_notifications" in update and not isinstance(update["account_notifications"], bool):
@@ -2283,6 +2286,7 @@ class Backend:
         return {
             "ok": True,
             "installed": True,
+            "helper_version": HELPER_VERSION,
             # The rail is unified, but writes and receipts belong to the
             # selected account. Expose both invariants explicitly instead of
             # letting one account's readiness authorize another account.
@@ -2786,7 +2790,7 @@ class Backend:
         waits for the click, so a detached `notify-open` child owns the popup
         and this helper returns at once.
         """
-        command = [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
+        command = [str(NOTIFY_SEND), "--app-name=WhatsApp for Omarchy", "--urgency=normal",
                    "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
                    f"--icon={NOTIFY_APP_ICON}"]
         if image:
@@ -2797,7 +2801,7 @@ class Backend:
             if previous:
                 command.append(f"--replace-id={previous}")
             command.append("--action=default=Open chat")
-            command.extend(["--", summary or "OmaWhatsApp"])
+            command.extend(["--", summary or "WhatsApp for Omarchy"])
             if body:
                 command.append(body)
             request = json.dumps({"command": command, "target": {
@@ -2817,7 +2821,7 @@ class Backend:
             except (OSError, AssertionError):
                 return False
             return True
-        command.extend(["--", summary or "OmaWhatsApp"])
+        command.extend(["--", summary or "WhatsApp for Omarchy"])
         if body:
             command.append(body)
         try:
@@ -3160,7 +3164,7 @@ class Backend:
         overflow = len(pending) - MAX_NOTIFY_BURST
         if overflow > 0:
             if self._deliver_notification(
-                    "OmaWhatsApp", f"{overflow} more chats have new messages"):
+                    "WhatsApp for Omarchy", f"{overflow} more chats have new messages"):
                 sent += 1
             else:
                 failed += overflow
@@ -3184,7 +3188,7 @@ class Backend:
 
     def set_online(self, online: bool) -> dict[str, Any]:
         account = self.active
-        # Online starts sync now; it also starts at login only when OmaWhatsApp
+        # Online starts sync now; it also starts at login only when WhatsApp for Omarchy
         # starts with the system. Offline stops it and keeps it stopped.
         command = "disable" if not online else (
             "enable" if self._preferences().get("start_at_login") is not False else "disable")
@@ -3263,7 +3267,7 @@ class Backend:
         return not any(report.get("sync_active") for report in reports if report.get("online"))
 
     def unlink_account(self, name: Any, confirm: Any) -> dict[str, Any]:
-        """Log one account out of WhatsApp and drop it from OmaWhatsApp.
+        """Log one account out of WhatsApp and drop it from WhatsApp for Omarchy.
 
         The phone loses this linked device. The local archive stays on disk;
         only the session and, for a named account, its config entry go.
@@ -3287,7 +3291,7 @@ class Backend:
                 "removed": removed, "archive_kept": True}
 
     def quit_app(self) -> dict[str, Any]:
-        """Stop every account's sync until OmaWhatsApp opens again."""
+        """Stop every account's sync until WhatsApp for Omarchy opens again."""
         self._set_session_marker("launched", False)
         self._set_session_marker("closed", True)
         for account in self.accounts():
@@ -4131,7 +4135,7 @@ class Backend:
 
         `media download --read-only --output PATH` runs beside the live sync
         instead of pausing it; wacli does not record that path, so the file is
-        kept in OmaWhatsApp's own media folder and remembered in the private
+        kept in WhatsApp for Omarchy's own media folder and remembered in the private
         local-media index the timeline already consults.
         """
         chat = self._chat(jid)
@@ -5426,7 +5430,7 @@ class Backend:
             yield stage_descriptor, root / CLIPBOARD_STAGE_DIRECTORY
         except OSError as exc:
             raise OmaWhatsAppError(
-                "OmaWhatsApp could not open its private clipboard staging directory."
+                "WhatsApp for Omarchy could not open its private clipboard staging directory."
             ) from exc
         finally:
             if stage_descriptor >= 0:
@@ -5632,7 +5636,7 @@ class Backend:
         for item in args:
             if item.split("=", 1)[0] in WACLI_GLOBAL_FLAGS:
                 raise OmaWhatsAppError(
-                    "Pass wacli global options as OmaWhatsApp request fields, not in args."
+                    "Pass wacli global options as WhatsApp for Omarchy request fields, not in args."
                 )
         return args
 
@@ -5866,7 +5870,7 @@ class Backend:
         if metadata is not None and (
             (not regular and not directory) or metadata.st_uid != os.getuid()
         ):
-            raise OmaWhatsAppError("OmaWhatsApp refused an unsafe private export path.")
+            raise OmaWhatsAppError("WhatsApp for Omarchy refused an unsafe private export path.")
         repository_start = destination if directory else parent
         repository = next((
             candidate for candidate in (repository_start, *repository_start.parents)
@@ -6392,18 +6396,18 @@ def main() -> int:
             return emit({
                 "ok": False,
                 "error": clean_error(
-                    exc, "OmaWhatsApp could not recover background sync."
+                    exc, "WhatsApp for Omarchy could not recover background sync."
                 ),
             }, 1)
     if args.command == "link-account":
         try:
             return backend.link_account(args.name, args.authorize)
         except OmaWhatsAppPartialError as exc:
-            print(clean_error(exc, "OmaWhatsApp partly linked that account."),
+            print(clean_error(exc, "WhatsApp for Omarchy partly linked that account."),
                   file=sys.stderr)
             return 1
         except OmaWhatsAppError as exc:
-            print(clean_error(exc, "OmaWhatsApp could not link that account."),
+            print(clean_error(exc, "WhatsApp for Omarchy could not link that account."),
                   file=sys.stderr)
             return 1
     if args.command == "wacli" and args.interactive:
@@ -6415,7 +6419,7 @@ def main() -> int:
                 store=str(args.store or ""),
             )
         except OmaWhatsAppError as exc:
-            return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
+            return emit({"ok": False, "error": clean_error(exc, "WhatsApp for Omarchy failed.")}, 1)
     try:
         if args.command == "session-ready":
             # ExecCondition contract: 0 runs the unit, 1 skips it quietly.
@@ -6612,11 +6616,11 @@ def main() -> int:
     except OmaWhatsAppPartialError as exc:
         return emit({
             "ok": False,
-            "error": clean_error(exc, "OmaWhatsApp partly completed that request."),
+            "error": clean_error(exc, "WhatsApp for Omarchy partly completed that request."),
             "partial": exc.partial,
         }, 1)
     except OmaWhatsAppError as exc:
-        return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
+        return emit({"ok": False, "error": clean_error(exc, "WhatsApp for Omarchy failed.")}, 1)
     return emit({"ok": False, "error": "Unknown command."}, 2)
 
 

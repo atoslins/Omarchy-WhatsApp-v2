@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OmaWhatsApp for AI agents: a Model Context Protocol server over stdio.
+"""WhatsApp for Omarchy for AI agents: a Model Context Protocol server over stdio.
 
 Every tool calls the installed ``omawhatsapp`` helper, which owns the local
 mirror, the guarded wacli gateway and its authorization classes. This server
@@ -33,7 +33,7 @@ PHONE = re.compile(r"^\+?[0-9][0-9 ()\-.]{6,24}$")
 INVITE = re.compile(r"(?:chat\.whatsapp\.com/(?:invite/)?)?([A-Za-z0-9]{16,32})$")
 
 INSTRUCTIONS = """\
-OmaWhatsApp reads the user's local WhatsApp mirror and acts on WhatsApp for them.
+WhatsApp for Omarchy reads the user's local WhatsApp mirror and acts on WhatsApp for them.
 - Resolve a chat before acting: list_chats, find_contacts or search results
   give the exact jid. Never guess one. When several chats match a name, ask.
 - Tools that send, change or delete something on WhatsApp are marked as not
@@ -68,18 +68,18 @@ def helper(command: str, payload: dict[str, Any] | None = None, *args: str,
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ToolError(f"OmaWhatsApp did not answer within {int(timeout)} seconds. "
+        raise ToolError(f"WhatsApp for Omarchy did not answer within {int(timeout)} seconds. "
                         "If this was a send, check the chat before trying again.") from exc
     except OSError as exc:
-        raise ToolError("The OmaWhatsApp helper is not installed.") from exc
+        raise ToolError("The WhatsApp for Omarchy helper is not installed.") from exc
     try:
         value = json.loads(result.stdout or "{}")
     except ValueError as exc:
-        raise ToolError("OmaWhatsApp returned an unreadable answer.") from exc
+        raise ToolError("WhatsApp for Omarchy returned an unreadable answer.") from exc
     if not isinstance(value, dict) or value.get("ok") is not True:
         message = value.get("error") if isinstance(value, dict) else ""
         partial = value.get("partial") if isinstance(value, dict) else None
-        raise ToolError(str(message or "OmaWhatsApp could not complete that request."), partial)
+        raise ToolError(str(message or "WhatsApp for Omarchy could not complete that request."), partial)
     return value
 
 
@@ -1557,7 +1557,7 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": text}], "isError": True}
     except Exception as exc:  # A tool bug must not take the server down.
         return {"content": [{"type": "text",
-                             "text": f"OmaWhatsApp failed unexpectedly ({type(exc).__name__})."}],
+                             "text": f"WhatsApp for Omarchy failed unexpectedly ({type(exc).__name__})."}],
                 "isError": True}
     return {"content": [{"type": "text",
                          "text": json.dumps(result, ensure_ascii=False, separators=(",", ":"))}],
@@ -1580,7 +1580,7 @@ def respond(message: dict[str, Any]) -> dict[str, Any] | None:
         result: Any = {
             "protocolVersion": requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "omawhatsapp", "title": "OmaWhatsApp", "version": VERSION},
+            "serverInfo": {"name": "omawhatsapp", "title": "WhatsApp for Omarchy", "version": VERSION},
             "instructions": INSTRUCTIONS,
         }
     elif method == "ping":

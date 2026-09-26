@@ -2,7 +2,7 @@ import QtQuick
 import QtTest
 import "../plugins/omawhatsapp" as Oma
 
-// L235: the first run explains what OmaWhatsApp is and links the phone from
+// L235: the first run explains what WhatsApp for Omarchy is and links the phone from
 // the window, instead of an empty list that says "Loading…".
 TestCase {
   id: testCase

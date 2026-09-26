@@ -7,7 +7,7 @@ import qs.Ui
 BarWidget {
   id: root
 
-  readonly property string pluginId: "io.github.moizibnyousaf.omawhatsapp"
+  readonly property string pluginId: "io.github.atoslins.whatsapp"
 
   readonly property var oma: bar && bar.shell
     ? bar.shell.serviceFor(root.pluginId) : null
@@ -112,13 +112,13 @@ BarWidget {
     // Closed: grey until it opens again.
     dimmed: root.muted || (!!root.oma && root.oma.closed === true)
     horizontalMargin: 8
-    tooltipText: root.oma ? root.oma.barTooltipWithMute : "OmaWhatsApp · reconnecting"
+    tooltipText: root.oma ? root.oma.barTooltipWithMute : "WhatsApp for Omarchy · reconnecting"
 
     onPressed: function(code) {
       if (code === Qt.MiddleButton) root.dismissNotifications()
       else if (code === Qt.RightButton) root.toggleMute()
       else {
-        // A closed OmaWhatsApp opens again from its icon.
+        // A closed WhatsApp for Omarchy opens again from its icon.
         if (root.oma && root.oma.closed === true) root.oma.launchApp()
         root.toggleDropdown()
       }

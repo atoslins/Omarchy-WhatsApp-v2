@@ -39,7 +39,10 @@ transaction_journal="$transaction_parent/transaction.json"
 check_only=false
 source_plugin_dir=omawhatsapp
 skill_dir=omawhatsapp
-plugin_id=io.github.moizibnyousaf.omawhatsapp
+plugin_id=io.github.atoslins.whatsapp
+# The original OmaWhatsApp plugin shares the helper, services and state, so
+# this install takes its place in the bar instead of running beside it.
+upstream_plugin_id=io.github.moizibnyousaf.omawhatsapp
 install_plugin_dir=$plugin_id
 
 if [[ ${1:-} == "--check" ]]; then
@@ -88,7 +91,7 @@ if [[ ! -f /usr/lib/qt6/plugins/imageformats/libqwebp.so ]]; then
 fi
 
 if [[ ! -x "$user_home/.local/bin/wacli" ]]; then
-  echo "Install wacli at ~/.local/bin/wacli before installing OmaWhatsApp." >&2
+  echo "Install wacli at ~/.local/bin/wacli before installing WhatsApp for Omarchy." >&2
   exit 1
 fi
 
@@ -105,7 +108,7 @@ if [[ -z $wacli_version ]]; then
   exit 1
 fi
 if [[ $(printf '%s\n' "$wacli_minimum_version" "$wacli_version" | sort -V | head -n 1) != "$wacli_minimum_version" ]]; then
-  echo "OmaWhatsApp requires wacli $wacli_minimum_version or newer (found: $wacli_version)." >&2
+  echo "WhatsApp for Omarchy requires wacli $wacli_minimum_version or newer (found: $wacli_version)." >&2
   exit 1
 fi
 if [[ $(printf '%s\n' "$wacli_tested_version" "$wacli_version" | sort -V | tail -n 1) != "$wacli_tested_version" ]]; then
@@ -132,7 +135,7 @@ shell_stopped=false
 cleanup_staging() {
   [[ -e $staging_root || -L $staging_root ]] || return 0
   if ! rm -rf -- "$staging_root"; then
-    echo "Could not remove the OmaWhatsApp staging directory: $staging_root" >&2
+    echo "Could not remove the WhatsApp for Omarchy staging directory: $staging_root" >&2
     return 1
   fi
 }
@@ -150,7 +153,7 @@ finish_install() {
       if omarchy-restart-shell 9>&-; then
         shell_stopped=false
       else
-        echo "Could not restart the shell after cancelling OmaWhatsApp installation." >&2
+        echo "Could not restart the shell after cancelling WhatsApp for Omarchy installation." >&2
         cleanup_failed=1
       fi
     fi
@@ -191,9 +194,9 @@ install -m755 "$repo_root/bin/omawhatsapp-mcp" "$staged_mcp"
 install -m644 "$repo_root/systemd/user/wacli-sync.service" "$staged_service"
 install -m644 "$repo_root/systemd/user/wacli-sync@.service" "$staged_template"
 initial_shell_digest=$(sha256sum "$shell_config" | cut -d ' ' -f 1)
-jq --arg plugin_id "$plugin_id" '
+jq --arg plugin_id "$plugin_id" --arg upstream_id "$upstream_plugin_id" '
   def migrate_id:
-    if (.id == "omawhatsapp" or .id == "omawhatsapp-bar")
+    if (.id == "omawhatsapp" or .id == "omawhatsapp-bar" or .id == $upstream_id)
     then .id = $plugin_id else . end;
   def unique_ids:
     reduce .[] as $item ([];
@@ -230,14 +233,14 @@ if $check_only; then
       '.ok == true and .wacli_parity_version == $version and .operation_count == $count' \
       >/dev/null
   ! rg -q 'TODO|\[TODO' "$staged_skill"
-  jq -e --arg plugin_id "$plugin_id" '
+  jq -e --arg plugin_id "$plugin_id" --arg upstream_id "$upstream_plugin_id" '
     ([.plugins[]? | select(.id == $plugin_id)] | length) == 1 and
     (any((.bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
       .id == $plugin_id)) and
     (all((.plugins + .bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
-      .id != "omawhatsapp" and .id != "omawhatsapp-bar"))
+      .id != "omawhatsapp" and .id != "omawhatsapp-bar" and .id != $upstream_id))
   ' "$temporary" >/dev/null
-  echo "OmaWhatsApp install preflight passed (wacli $wacli_version)."
+  echo "WhatsApp for Omarchy install preflight passed (wacli $wacli_version)."
   exit 0
 fi
 
@@ -251,7 +254,7 @@ jq -e '
     (.unit | test("^wacli-sync(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?\\.service$")))) and
   (([.accounts[].unit] | unique | length) == (.accounts | length))
 ' <<<"$status_json" >/dev/null || {
-  echo "OmaWhatsApp could not resolve a safe sync unit for every account." >&2
+  echo "WhatsApp for Omarchy could not resolve a safe sync unit for every account." >&2
   exit 1
 }
 mapfile -t account_units < <(jq -r '.accounts[].unit' <<<"$status_json")
@@ -263,12 +266,12 @@ mapfile -t account_flags < <(jq -r '.accounts[].account' <<<"$status_json")
 # matches nothing exits 1, which would reject a machine with no instances yet.
 if ! listed_unit_files=$(LC_ALL=C systemctl --user list-unit-files \
     --no-legend --no-pager --plain); then
-  echo "Could not inspect installed OmaWhatsApp sync instances." >&2
+  echo "Could not inspect installed WhatsApp for Omarchy sync instances." >&2
   exit 1
 fi
 if ! listed_units=$(LC_ALL=C systemctl --user list-units --all \
     'wacli-sync@*.service' --no-legend --no-pager --plain); then
-  echo "Could not inspect loaded OmaWhatsApp sync instances." >&2
+  echo "Could not inspect loaded WhatsApp for Omarchy sync instances." >&2
   exit 1
 fi
 declare -A desired_units=()
@@ -331,7 +334,8 @@ jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
   --arg shell_digest "$initial_shell_digest" \
   --arg plugin_artifacts "$(dirname -- "$plugin_root")" \
   --arg legacy_plugin "$plugin_root/$source_plugin_dir" \
-  --arg legacy_bar "$plugin_root/omawhatsapp-bar" --argjson units "$unit_snapshot" '
+  --arg legacy_bar "$plugin_root/omawhatsapp-bar" \
+  --arg upstream_plugin "$plugin_root/$upstream_plugin_id" --argjson units "$unit_snapshot" '
   {
     mode:"install",
     staging_root:$staging_root,
@@ -349,7 +353,8 @@ jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
       {operation:"replace", staged:$staged_shell, target:$shell,
         expected_sha256:$shell_digest},
       {operation:"remove", target:$legacy_plugin, artifact_parent:$plugin_artifacts},
-      {operation:"remove", target:$legacy_bar, artifact_parent:$plugin_artifacts}
+      {operation:"remove", target:$legacy_bar, artifact_parent:$plugin_artifacts},
+      {operation:"remove", target:$upstream_plugin, artifact_parent:$plugin_artifacts}
     ]
   }
 ' > "$transaction_plan"
@@ -422,9 +427,16 @@ fi
 python3 "$transaction_helper" mark-validated --journal "$transaction_journal"
 python3 "$transaction_helper" commit --journal "$transaction_journal"
 
-echo "OmaWhatsApp installed as one resident service/bar plugin with a shared agent skill."
+echo "WhatsApp for Omarchy installed as one resident service/bar plugin with a shared agent skill."
 echo "To link WhatsApp, run:"
 echo "~/.local/bin/omawhatsapp wacli --interactive --authorize interactive -- auth"
 echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."
+# Keybindings are the user's own file: point out, never rewrite, the ones
+# that still call the original plugin's ID.
+if old_bindings=$(grep -rln -- "$upstream_plugin_id" "$user_home/.config/hypr" 2>/dev/null) \
+    && [[ -n $old_bindings ]]; then
+  echo "These keybindings still call $upstream_plugin_id; change it to $plugin_id:"
+  printf '  %s\n' $old_bindings
+fi
 echo "To let Claude Code use WhatsApp, run:"
 echo "claude mcp add --scope user whatsapp -- ~/.local/bin/omawhatsapp-mcp"
