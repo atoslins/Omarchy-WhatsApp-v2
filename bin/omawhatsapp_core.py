@@ -277,6 +277,12 @@ NOTIFY_EXPIRE_MS = 8000
 LID_ALIASES_FILE = "lid-aliases.json"
 MAX_LID_ALIASES = 256
 MAX_LID_ALIASES_STATE = 64 * 1024
+# A received mention arrives in the text as "@" and the member's number: their
+# @lid on current WhatsApp, their phone on older clients. The chat view shows
+# the member's name instead when the local index knows it, and leaves the
+# number when it does not. The lookbehind keeps e-mail addresses out.
+MENTION_TOKEN = re.compile(r"(?<![\w@])@([0-9]{5,20})(?![0-9])")
+MAX_MENTIONS_PER_PAGE = 64
 # The sticker picker: recent distinct stickers, and how many missing files one
 # open may fetch (media download --read-only runs beside the live sync).
 MAX_STICKER_CHOICES = 60
@@ -2803,6 +2809,10 @@ class Backend:
                     [MAX_LID_ALIASES]).fetchall()]
         except (sqlite3.Error, OmaWhatsAppError):
             return {}
+        return self._resolve_lids(lids)
+
+    def _resolve_lids(self, lids: list[str]) -> dict[str, str]:
+        """@lid JID -> phone JID through wacli, each asked once and cached."""
         if not lids:
             return {}
         key = hashlib.sha256(self.active.key.encode("utf-8")).hexdigest()[:24]
@@ -2840,6 +2850,55 @@ class Backend:
         except (OmaWhatsAppError, OSError):
             pass
         return aliases
+
+    def _mention_names(self, texts: list[str]) -> dict[str, str]:
+        """Mentioned number -> contact name, for the "@number" tokens in texts."""
+        numbers = []
+        for text in texts:
+            for number in MENTION_TOKEN.findall(text):
+                if number not in numbers:
+                    numbers.append(number)
+        numbers = numbers[:MAX_MENTIONS_PER_PAGE]
+        if not numbers:
+            return {}
+        name_sql = """SELECT jid, COALESCE(NULLIF(full_name, ''), NULLIF(push_name, ''),
+              NULLIF(first_name, ''), NULLIF(business_name, '')) AS name
+            FROM contacts WHERE jid IN ({})"""
+
+        def names_of(connection: sqlite3.Connection, jids: list[str]) -> dict[str, str]:
+            if not jids:
+                return {}
+            rows = connection.execute(name_sql.format(",".join("?" for _ in jids)), jids)
+            return {str(row["jid"]): str(row["name"]) for row in rows.fetchall() if row["name"]}
+
+        try:
+            with closing(self._connect()) as connection:
+                # Older clients mention by phone, which the index names directly.
+                by_phone = names_of(connection, [f"{n}@s.whatsapp.net" for n in numbers])
+        except (sqlite3.Error, OmaWhatsAppError):
+            return {}
+        names = {n: by_phone[f"{n}@s.whatsapp.net"] for n in numbers
+                 if f"{n}@s.whatsapp.net" in by_phone}
+        # The rest are @lids: wacli ties each to a phone once (cached), and
+        # the phone's contact row gives the name.
+        phones = self._resolve_lids([f"{n}@lid" for n in numbers if n not in names])
+        try:
+            with closing(self._connect()) as connection:
+                by_lid = names_of(connection, sorted(set(phones.values())))
+        except (sqlite3.Error, OmaWhatsAppError):
+            return names
+        for lid, phone in phones.items():
+            if phone in by_lid:
+                names[lid.split("@", 1)[0]] = by_lid[phone]
+        return names
+
+    @staticmethod
+    def _with_mention_names(text: str, names: dict[str, str]) -> str:
+        if not names:
+            return text
+        return MENTION_TOKEN.sub(
+            lambda match: f"@{names[match.group(1)]}" if match.group(1) in names
+            else match.group(0), text)
 
     def _chat_jids(self, jid: str) -> list[str]:
         """A phone chat and the @lid chats wacli filed some of its rows under."""
@@ -4164,6 +4223,10 @@ class Backend:
                     for row in rows if bool(row["from_me"])])
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        mention_names = self._mention_names(
+            [str(row[key] or "") for row in rows
+             for key in ("text", "display_text", "media_caption")]
+            + [str(row["quoted_text"] or "") for row in quoted_rows.values()])
         values = []
         gone_media = self._media_gone()
         for row in rows:
@@ -4193,7 +4256,8 @@ class Backend:
                 local_path = hinted_path
                 local_exists = True
             values.append({
-                "id": message_id, "text": text[:MAX_MESSAGE],
+                "id": message_id,
+                "text": self._with_mention_names(text, mention_names)[:MAX_MESSAGE],
                 "sender": "You" if bool(row["from_me"]) else str(row["sender_name"] or "WhatsApp"),
                 "sender_jid": str(row["sender_jid"] or ""),
                 "timestamp": int(row["ts"]), "from_me": bool(row["from_me"]),
@@ -4211,9 +4275,9 @@ class Backend:
                     and bool(quoted["from_me"])
                     else str((quoted["sender_name"] if quoted is not None else "")
                              or "WhatsApp"),
-                "quoted_text": str(
+                "quoted_text": self._with_mention_names(str(
                     (quoted["quoted_text"] if quoted is not None else "") or ""
-                )[:512],
+                ), mention_names)[:512],
                 "quoted_media_type": str(
                     (quoted["media_type"] if quoted is not None else "") or ""
                 ),
