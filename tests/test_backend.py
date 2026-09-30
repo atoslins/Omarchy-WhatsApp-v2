@@ -1045,6 +1045,45 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("SENT-FILE", ids, "a row is never shown in a chat it cannot be tied to")
         self.assertEqual(first.call_count, 1)
 
+    MENTIONED_PHONE = "15550005555@s.whatsapp.net"
+
+    def _insert_mention(self, text: str) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES ('team@g.us', 'Design team', 'm1', 'member@s.whatsapp.net', 'Sam',
+                           99, 0, ?, '', '', '', '')""", [text])
+            connection.execute(
+                "INSERT INTO contacts VALUES (?, '15550005555', 'Casey', '', '', '', '', 1)",
+                [self.MENTIONED_PHONE])
+
+    def test_a_received_lid_mention_shows_the_members_name(self) -> None:
+        # WhatsApp puts the member's @lid number in the text of a mention.
+        self._insert_mention("@123456789012345 can you look? mail a@123456789012345")
+        with self._resolve_lid("123456789012345@lid", self.MENTIONED_PHONE) as run:
+            text = self.backend.messages("team@g.us")["messages"][0]["text"]
+            self.backend.messages("team@g.us")
+        self.assertEqual(text, "@Casey can you look? mail a@123456789012345",
+                         "the mention is named and an e-mail-like token is left alone")
+        self.assertEqual(run.call_count, 1, "each mentioned @lid is resolved once and cached")
+
+    def test_a_phone_mention_is_named_without_asking_wacli(self) -> None:
+        self._insert_mention("ping @15550005555")
+        with mock.patch.object(self.backend, "_run") as run:
+            text = self.backend.messages("team@g.us")["messages"][0]["text"]
+        self.assertEqual(text, "ping @Casey")
+        run.assert_not_called()
+
+    def test_an_unknown_mention_keeps_its_number(self) -> None:
+        self._insert_mention("@999999999999999 hello")
+        def run(args, **_kwargs):
+            return subprocess.CompletedProcess(
+                args, 0, json.dumps({"success": True, "data": None}), "")
+        with mock.patch.object(self.backend, "_run", side_effect=run):
+            text = self.backend.messages("team@g.us")["messages"][0]["text"]
+        self.assertEqual(text, "@999999999999999 hello")
+
     def _insert_sticker(self, msg_id: str, ts: int, sha: bytes, path: str = "") -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(
