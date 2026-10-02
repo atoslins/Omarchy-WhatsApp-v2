@@ -135,6 +135,80 @@ TestCase {
     compare(Math.round(menu.y), 12)
   }
 
+  // A short row at the bottom edge of a clipped timeline, like the message
+  // list above the composer. It outlives every bubble the tests create in it.
+  Rectangle {
+    objectName: "clippedTimeline"
+    anchors.bottom: parent.bottom
+    width: parent.width
+    height: 90
+    clip: true
+    color: "transparent"
+  }
+
+  function test_the_menu_flips_above_the_actions_on_the_last_row() {
+    // The owner saw the ellipsis menu on the bottom message cut off by the
+    // composer: it must open upwards inside the clipped timeline. The bubble
+    // is tall enough that only the real menu height reveals the overflow,
+    // which is the bug the owner hit.
+    var clip = findChild(testCase, "clippedTimeline")
+    var bubble = createTemporaryObject(bubbleComponent, clip)
+    bubble.message = Object.assign({}, bubble.message, { text: longText + " " + longText })
+    bubble.anchors.bottom = clip.bottom
+    wait(0)
+    hoverRow(bubble)
+    var actions = findChild(bubble, "messageActions")
+    tryVerify(function() { return actions.visible })
+    var more = findChild(bubble, "messageAction-more")
+    verify(more !== null)
+    mouseClick(more)
+    var menu = findChild(bubble, "messageActionMenu")
+    tryVerify(function() { return menu.opened })
+    tryVerify(function() { return menu.height > 0 })
+    verify(menu.y + menu.height <= bubble.visibleBottom() + 0.5,
+      "the menu must stay inside the clip: y=" + menu.y + " height=" + menu.height
+        + " bottom=" + bubble.visibleBottom())
+    verify(menu.y < actions.y, "a row at the bottom opens the menu above the strip")
+  }
+
+  function test_a_menu_that_fits_still_opens_under_the_actions() {
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    hoverRow(bubble)
+    var actions = findChild(bubble, "messageActions")
+    tryVerify(function() { return actions.visible })
+    var more = findChild(bubble, "messageAction-more")
+    verify(more !== null)
+    mouseClick(more)
+    var menu = findChild(bubble, "messageActionMenu")
+    tryVerify(function() { return menu.opened })
+    tryVerify(function() { return menu.height > 0 })
+    verify(menu.y >= actions.y + actions.height, "plenty of room keeps the menu below")
+  }
+
+  function test_a_short_outgoing_bubble_keeps_the_menu_inside_the_row() {
+    // The owner saw the menu cut off on the right of a short outgoing bubble:
+    // the menu is wider than the bubble, so it must grow leftwards, staying
+    // inside the row instead of running past the window.
+    var bubble = createTemporaryObject(bubbleComponent, testCase, {
+      message: { id: "mine", text: "test", sender: "You", timestamp: 1787540100,
+        from_me: true, media_type: "", reactions: [] }
+    })
+    var surface = findChild(bubble, "messageBubbleSurface")
+    hoverRow(bubble)
+    var actions = findChild(bubble, "messageActions")
+    tryVerify(function() { return actions.visible })
+    var more = findChild(bubble, "messageAction-more")
+    verify(more !== null)
+    mouseClick(more)
+    var menu = findChild(bubble, "messageActionMenu")
+    tryVerify(function() { return menu.opened })
+    tryVerify(function() { return menu.height > 0 })
+    verify(surface.width < menu.width, "the bubble is narrower than the menu")
+    verify(surface.x + menu.x + menu.width <= bubble.width + 0.5,
+      "the menu must not spill past the row's right edge")
+    verify(surface.x + menu.x >= -0.5, "nor past its left edge")
+  }
+
   SignalSpy { id: saveSpy; signalName: "saveRequested" }
 
   function test_save_as_is_offered_for_media_only() {

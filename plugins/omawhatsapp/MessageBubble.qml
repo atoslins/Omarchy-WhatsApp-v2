@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import qs.Commons
 import qs.Ui as Ui
 import "FormatModel.js" as FormatModel
@@ -136,7 +137,7 @@ Item {
   function runMenuAction(action) {
     actionMenu.close()
     if (action === "reply") root.replyRequested()
-    else if (action === "react") reactionPicker.open()
+    else if (action === "react") root.openReactionPicker()
     else if (action === "copy") root.copyRequested(root.bodyText)
     else if (action === "copy-link") root.copyRequested(root.links[0].url)
     else if (action === "edit") root.editRequested()
@@ -249,11 +250,46 @@ Item {
   // button opens them under the action strip.
   property bool menuAtPointer: false
   property point menuPoint: Qt.point(0, 0)
+  // Decided when a menu opens, before it is shown: a menu that would spill
+  // past the bottom of the timeline flips above the action strip.
+  property bool actionMenuAbove: false
+  property bool reactionPickerAbove: false
   function openContextMenu(x, y) {
     menuAtPointer = true
     menuPoint = Qt.point(x, y)
     root.selectedRequested()
     actionMenu.open()
+  }
+  function openActionMenu() {
+    menuAtPointer = false
+    // The rows are built only while the popup is shown, so its final height is
+    // not known yet: the popup estimates it (expectedHeight) and corrects the
+    // decision once the real height arrives (see onHeightChanged).
+    actionMenuAbove = actionSurface.y + actionSurface.height + Style.space(3)
+      + actionMenu.expectedHeight > visibleBottom()
+    actionMenu.open()
+  }
+  function openReactionPicker() {
+    reactionPickerAbove = actionSurface.y + actionSurface.height + Style.space(3)
+      + reactionPicker.height > visibleBottom()
+    reactionPicker.open()
+  }
+
+  // The timeline clips its rows, so a menu opened under the last message was
+  // cut off by the composer. The popups are drawn over the whole window and
+  // clipped at its edge, so the visible area ends at the window bottom, or at
+  // the row's clipping ancestor when that is higher, in this row's coordinates.
+  function visibleBottom() {
+    var boundary = bubble.mapFromItem(null, 0, Window.height).y
+    var item = bubble.parent
+    while (item) {
+      if (item.clip === true) {
+        boundary = Math.min(boundary, bubble.mapFromItem(item, 0, item.height).y)
+        break
+      }
+      item = item.parent
+    }
+    return boundary
   }
 
   TextMetrics {
@@ -925,8 +961,8 @@ Item {
             onClicked: {
               root.selectedRequested()
               if (modelData.action === "reply") root.replyRequested()
-              else if (modelData.action === "react") reactionPicker.open()
-              else { root.menuAtPointer = false; actionMenu.open() }
+              else if (modelData.action === "react") root.openReactionPicker()
+              else root.openActionMenu()
             }
           }
         }
@@ -949,7 +985,11 @@ Item {
     Popup {
       id: reactionPicker
       x: Math.max(0, Math.min(bubble.width - width, actionSurface.x))
-      y: actionSurface.y + actionSurface.height + Style.space(3)
+      // Under the strip, flipped above it when the row is at the bottom of
+      // the timeline and the picker would be cut off.
+      y: root.reactionPickerAbove
+        ? actionSurface.y - height - Style.space(3)
+        : actionSurface.y + actionSurface.height + Style.space(3)
       width: emojiRow.implicitWidth + Style.space(12)
       height: Style.space(38)
       padding: 0
@@ -994,12 +1034,33 @@ Item {
     Popup {
       id: actionMenu
       objectName: "messageActionMenu"
+      // The rows exist only while the popup is shown, so their height is
+      // estimated from the model (32px rows, 2px between, 5px padding twice).
+      readonly property real expectedHeight: root.menuActions.length * Style.space(32)
+        + Math.max(0, root.menuActions.length - 1) * Style.space(2) + Style.space(10)
+      // When the real height arrives, settle the flip. Guarded so a closed
+      // popup collapsing back to its resting height cannot move anything.
+      onHeightChanged: {
+        if (opened && !root.menuAtPointer) {
+          root.actionMenuAbove = actionSurface.y + actionSurface.height + Style.space(3)
+            + height > root.visibleBottom()
+        }
+      }
       x: root.menuAtPointer
         ? Math.max(-bubble.x, Math.min(root.width - bubble.x - width, root.menuPoint.x))
-        : Math.max(0, bubble.width - width)
+        // Beside the strip: right-aligned with the bubble, and never past the
+        // row's edges. A short bubble is narrower than the menu, so aligning
+        // its left edge (the old Math.max(0, …)) pushed the menu off the
+        // window on the right.
+        : Math.max(-bubble.x, Math.min(root.width - bubble.x - width, bubble.width - width))
+      // At the pointer, kept inside the visible timeline; under the strip,
+      // flipped above it when the row is at the bottom and it would be cut
+      // off by the composer.
       y: root.menuAtPointer
-        ? root.menuPoint.y
-        : actionSurface.y + actionSurface.height + Style.space(3)
+        ? Math.min(root.menuPoint.y, Math.max(0, root.visibleBottom() - height))
+        : root.actionMenuAbove
+          ? actionSurface.y - height - Style.space(3)
+          : actionSurface.y + actionSurface.height + Style.space(3)
       width: Style.space(178)
       height: menuColumn.implicitHeight + Style.space(10)
       padding: Style.space(5)
