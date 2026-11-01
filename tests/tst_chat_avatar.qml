@@ -21,6 +21,11 @@ TestCase {
 
   Component { id: appComponent; Oma.App { demoMode: true; opened: true } }
 
+  function init() {
+    // A photo that keeps asking for a new decode size shows up as a loop.
+    failOnWarning(/Binding loop detected/)
+  }
+
   function test_conversation_header_follows_the_selected_chat_photo() {
     var app = createTemporaryObject(appComponent, testCase)
     verify(app !== null)
