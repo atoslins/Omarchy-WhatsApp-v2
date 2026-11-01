@@ -83,6 +83,11 @@ Item {
       anchors.fill: parent
       source: root.avatarSource
       fillMode: Image.PreserveAspectCrop
+      // Decode at the size it is drawn, not at the size WhatsApp serves: a
+      // rail full of full-size photos costs memory and decode time.
+      sourceSize: Qt.size(
+        Math.ceil(Math.max(root.width, root.implicitWidth) * Screen.devicePixelRatio),
+        Math.ceil(Math.max(root.height, root.implicitHeight) * Screen.devicePixelRatio))
       asynchronous: true
       cache: true
       smooth: true

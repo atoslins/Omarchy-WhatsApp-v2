@@ -65,6 +65,21 @@ TestCase {
       Qt.resolvedUrl("../plugins/omawhatsapp/assets/demo-photo.png"))
   }
 
+  function test_a_photo_is_decoded_at_the_size_it_is_drawn() {
+    // The demo photo is 256x144: decoded to cover 38x38, not at full size.
+    var avatar = createTemporaryObject(avatarComponent, testCase, {
+      chat: { name: "Synthetic Person", kind: "dm",
+        avatar_path: "__demo_avatar__" }
+    })
+    verify(avatar !== null)
+    tryVerify(function() { return avatar.avatarReady }, 5000)
+    var image = findChild(avatar, "chatAvatarImage")
+    verify(image.implicitWidth < 256 && image.implicitHeight < 144,
+      "decoded at " + image.implicitWidth + "x" + image.implicitHeight)
+    verify(image.implicitWidth >= 38 && image.implicitHeight >= 38,
+      "still covers the avatar: " + image.implicitWidth + "x" + image.implicitHeight)
+  }
+
   function test_remote_urls_never_cross_the_qml_boundary() {
     var avatar = createTemporaryObject(avatarComponent, testCase, {
       chat: { name: "Synthetic Person", kind: "dm",
