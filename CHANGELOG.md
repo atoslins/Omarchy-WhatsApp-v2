@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.6](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.5...v0.16.6) (2026-11-01)
+
+
+### Fixes
+
+* **app:** give chat photos one decode size so the binding settles ([#17](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/17)) ([663b5ba](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/663b5ba1eb7a85013eda20ca28d17440238fa519))
+
 ## [0.16.5](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.4...v0.16.5) (2026-11-01)
 
 
