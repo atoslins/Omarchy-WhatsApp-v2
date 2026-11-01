@@ -25,6 +25,11 @@ Item {
 
   implicitWidth: 38
   implicitHeight: implicitWidth
+  // One side for the decoded photo. Width and height arrive one after the
+  // other (height: width), and a single value keeps the image from being
+  // asked for a new size while the first one is still being applied.
+  readonly property int photoPixels: Math.ceil(
+    Math.max(width, height, implicitWidth) * Screen.devicePixelRatio)
 
   // People are round and groups a rounded square, so the two read apart
   // before the name does; without a photo each has its own color.
@@ -85,9 +90,7 @@ Item {
       fillMode: Image.PreserveAspectCrop
       // Decode at the size it is drawn, not at the size WhatsApp serves: a
       // rail full of full-size photos costs memory and decode time.
-      sourceSize: Qt.size(
-        Math.ceil(Math.max(root.width, root.implicitWidth) * Screen.devicePixelRatio),
-        Math.ceil(Math.max(root.height, root.implicitHeight) * Screen.devicePixelRatio))
+      sourceSize: Qt.size(root.photoPixels, root.photoPixels)
       asynchronous: true
       cache: true
       smooth: true
