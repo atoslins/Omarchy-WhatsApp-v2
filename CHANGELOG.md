@@ -6,7 +6,7 @@
 ### Fixes
 
 * **app:** qualify the theme palette singleton as Commons.Color ([#11](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/11)) ([afa32f3](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/afa32f3f87a20070183c660102c2b7a099e70f8a))
-* **messages:** show names for received [@mentions](https://github.com/mentions) ([#8](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/8)) ([e9908c0](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/e9908c06d51367222dbb0763b1b4c4af27e289ab))
+* **messages:** show names for received `@mentions` ([#8](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/8)) ([e9908c0](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/e9908c06d51367222dbb0763b1b4c4af27e289ab))
 
 
 ### Performance
