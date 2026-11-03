@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.7](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.6...v0.16.7) (2026-11-03)
+
+
+### Performance
+
+* **messages:** stop the mention scan at the page cap ([#19](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/19)) ([8920e1e](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/8920e1ecfa2fc885254efa2e59a38838508bf1c3))
+
 ## [0.16.6](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.5...v0.16.6) (2026-11-01)
 
 
