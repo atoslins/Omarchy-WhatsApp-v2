@@ -2853,12 +2853,17 @@ class Backend:
 
     def _mention_names(self, texts: list[str]) -> dict[str, str]:
         """Mentioned number -> contact name, for the "@number" tokens in texts."""
-        numbers = []
+        # One pass that stops at the cap: the texts come from senders, so a
+        # page full of distinct "@number" tokens costs no more than its length.
+        seen: dict[str, None] = {}
         for text in texts:
-            for number in MENTION_TOKEN.findall(text):
-                if number not in numbers:
-                    numbers.append(number)
-        numbers = numbers[:MAX_MENTIONS_PER_PAGE]
+            for match in MENTION_TOKEN.finditer(text):
+                seen.setdefault(match.group(1))
+                if len(seen) == MAX_MENTIONS_PER_PAGE:
+                    break
+            if len(seen) == MAX_MENTIONS_PER_PAGE:
+                break
+        numbers = list(seen)
         if not numbers:
             return {}
         name_sql = """SELECT jid, COALESCE(NULLIF(full_name, ''), NULLIF(push_name, ''),

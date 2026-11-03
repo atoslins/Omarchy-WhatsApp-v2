@@ -1068,6 +1068,39 @@ class BackendTests(unittest.TestCase):
                          "the mention is named and an e-mail-like token is left alone")
         self.assertEqual(run.call_count, 1, "each mentioned @lid is resolved once and cached")
 
+    def test_a_page_of_mentions_resolves_only_the_first_distinct_numbers(self) -> None:
+        # Sender-controlled text: thousands of distinct "@number" tokens must
+        # not grow the lookup past the cap, and repeats count once.
+        tokens = [f"@{10_000_000 + n}" for n in range(5000)]
+        self._insert_mention(" ".join([tokens[0]] * 3 + tokens))
+        asked: list[list[str]] = []
+        def resolve(lids: list[str]) -> dict[str, str]:
+            asked.append(list(lids))
+            return {}
+        pattern = backend_module.MENTION_TOKEN
+        scanned = 0
+        class CountingPattern:
+            def finditer(self, text: str):
+                nonlocal scanned
+                for match in pattern.finditer(text):
+                    scanned += 1
+                    yield match
+            def findall(self, text: str) -> list[str]:
+                nonlocal scanned
+                found = pattern.findall(text)
+                scanned += len(found)
+                return found
+            def __getattr__(self, name: str):
+                return getattr(pattern, name)
+        with mock.patch.object(self.backend, "_resolve_lids", side_effect=resolve), \
+                mock.patch.object(backend_module, "MENTION_TOKEN", CountingPattern()):
+            text = self.backend.messages("team@g.us")["messages"][0]["text"]
+        cap = backend_module.MAX_MENTIONS_PER_PAGE
+        self.assertEqual(asked, [[f"{10_000_000 + n}@lid" for n in range(cap)]],
+                         "the first distinct numbers, in order, up to the cap")
+        self.assertEqual(scanned, 3 + cap, "the scan stops once the cap is reached")
+        self.assertTrue(text.startswith(f"{tokens[0]} {tokens[0]}"), "unknown numbers stay")
+
     def test_a_phone_mention_is_named_without_asking_wacli(self) -> None:
         self._insert_mention("ping @15550005555")
         with mock.patch.object(self.backend, "_run") as run:
