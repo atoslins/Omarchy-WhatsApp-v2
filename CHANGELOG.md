@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.8](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.7...v0.16.8) (2026-11-06)
+
+
+### Fixes
+
+* **accounts:** pause the root sync while the account list changes ([#22](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/22)) ([bbb1d90](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/bbb1d90c39d98a3be485db7e9a82779b13752254))
+* **app:** start an animated sticker only once it has loaded ([#23](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/23)) ([29ab367](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/29ab36798a62afa78e031989b8e6c8cfc95da7ed))
+
 ## [0.16.7](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.6...v0.16.7) (2026-11-03)
 
 
