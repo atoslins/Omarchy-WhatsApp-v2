@@ -101,6 +101,11 @@ class BackendTests(unittest.TestCase):
         environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
         environment.start()
         self.addCleanup(environment.stop)
+        # Likewise the wacli account list: never this machine's own.
+        account_list = mock.patch.object(
+            backend_module, "ACCOUNT_CONFIG", self.root / "config.yaml")
+        account_list.start()
+        self.addCleanup(account_list.stop)
         self.store = self.root / "wacli"
         self.store.mkdir()
         self.wacli = self.root / "wacli-bin"
