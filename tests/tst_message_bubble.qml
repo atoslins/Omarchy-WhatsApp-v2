@@ -124,4 +124,34 @@ TestCase {
     compare(image.width, 160)
     verify(findChild(bubble, "animatedMediaSurface") === null)
   }
+
+  function fixturePath(name) {
+    var url = String(Qt.resolvedUrl(".generated-media/" + name))
+    return decodeURIComponent(url.slice(7))
+  }
+
+  Component {
+    id: animatedStickerComponent
+    Oma.MessageBubble {
+      width: 800
+      message: ({ id: "synthetic-animated-sticker", text: "", sender: "Demo",
+        timestamp: 1787540100, from_me: false, media_type: "sticker",
+        mime_type: "image/webp", local_path: testCase.fixturePath("animated.webp"),
+        reactions: [] })
+      foreground: "#eeeeee"; background: "#111111"; accent: "#66ccaa"
+      dim: "#999999"; dimmer: "#777777"; fontFamily: "monospace"
+    }
+  }
+
+  function test_an_animated_sticker_plays_once_loaded() {
+    // On Qt 6.12, a sticker set playing as soon as its frame count was known
+    // crashed the whole test run (and the shell) with a stack overflow.
+    var bubble = createTemporaryObject(animatedStickerComponent, testCase)
+    var image = findChild(bubble, "stickerSurface")
+    tryCompare(image, "status", Image.Ready)
+    compare(image.frameCount, 2)
+    tryCompare(image, "playing", true)
+    var first = image.currentFrame
+    tryVerify(function() { return image.currentFrame !== first }, 2000, "it animates")
+  }
 }
