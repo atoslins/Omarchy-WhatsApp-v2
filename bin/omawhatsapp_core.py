@@ -722,6 +722,15 @@ WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
     ("sync",): "sync",
     ("version",): "local-read",
 }
+
+# wacli rewrites config.yaml under the root store's lock for these.
+ACCOUNT_LIST_WRITES = frozenset({
+    ("accounts", "add"),
+    ("accounts", "remove"),
+    ("accounts", "use"),
+})
+
+
 class Account:
     """One wacli account: a name, the store it owns, and its sync unit.
 
@@ -967,8 +976,11 @@ class Backend:
             raise OmaWhatsAppError("Named wacli accounts could not be discovered safely.")
         data = envelope.get("data") if isinstance(envelope, dict) else None
         rows = data.get("accounts") if isinstance(data, dict) else None
-        if not isinstance(rows, list) or not rows or len(rows) > MAX_ACCOUNTS:
-            raise OmaWhatsAppError("The wacli account list is invalid or empty.")
+        if not isinstance(rows, list) or len(rows) > MAX_ACCOUNTS:
+            raise OmaWhatsAppError("The wacli account list is invalid.")
+        # Removing the last named account leaves wacli's config empty.
+        if not rows:
+            return implicit
         accounts: list[Account] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -990,8 +1002,9 @@ class Backend:
         if len({account.name for account in accounts}) != len(accounts) \
                 or len({account.key for account in accounts}) != len(accounts):
             raise OmaWhatsAppError("The wacli account list contains duplicate identities.")
-        if sum(account.default for account in accounts) != 1:
-            raise OmaWhatsAppError("The wacli account list must identify exactly one default.")
+        # Removing the default leaves none: plain wacli is then the root store.
+        if sum(account.default for account in accounts) > 1:
+            raise OmaWhatsAppError("The wacli account list names more than one default.")
         root_store = self.store_dir.resolve(strict=False)
         root_session = root_store / "session.db"
         if root_session.is_file() and all(account.store_dir != root_store for account in accounts):
@@ -1034,7 +1047,9 @@ class Backend:
         self._accounts = None
         self._active = None
 
-    def link_account(self, value: Any, authorization: Any) -> int:
+    def link_account(
+        self, value: Any, authorization: Any, auth_args: Sequence[str] = ()
+    ) -> int:
         """Interactively add or resume one named account in a terminal."""
         if str(authorization or "") != "interactive":
             raise OmaWhatsAppError(
@@ -1058,15 +1073,15 @@ class Backend:
         if existing is not None:
             if (existing.store_dir / "session.db").is_file():
                 raise OmaWhatsAppError(f"Account {name!r} is already linked.")
-            result, _, _ = self._transport_interactive(
-                ["auth"], authorization="interactive", account=name
-            )
         else:
             if len(accounts) >= MAX_ACCOUNTS:
                 raise OmaWhatsAppError("WhatsApp for Omarchy already has the maximum number of accounts.")
-            result, _, _ = self._transport_interactive(
-                ["accounts", "add", name], authorization="interactive"
-            )
+            self._add_account_entry(name)
+            self._refresh_account_registry()
+        # A new account and an unfinished one both link the same way.
+        result, _, _ = self._transport_interactive(
+            ["auth", *auth_args], authorization="interactive", account=name
+        )
         self._refresh_account_registry()
         try:
             linked = self.account(name)
@@ -1077,6 +1092,45 @@ class Backend:
                 ) from exc
             return result
         return self._finalize_link(linked, result)
+
+    def _add_account_entry(self, name: str) -> None:
+        """Add a named account to wacli's config before its QR code is shown."""
+        result = self._change_account_list(
+            ["--json", "accounts", "add", name, "--no-auth"]
+        )
+        if self._locked(result):
+            raise OmaWhatsAppError(
+                "Another wacli command is using the account list. Close it and link again."
+            )
+        self._envelope(result)
+
+    def _change_account_list(
+        self,
+        args: list[str],
+        *,
+        timeout: float = 30,
+        stdout_limit: int = MAX_WACLI_OUTPUT,
+        stderr_limit: int = MAX_PROCESS_ERROR,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one wacli command that rewrites config.yaml.
+
+        wacli changes config.yaml under the store lock of the folder that
+        holds it. That folder is also the root store, whose sync keeps the
+        lock for as long as it runs, so that sync yields for the write alone,
+        whichever account the command is for.
+        """
+        config_dir = self.account_config.parent.resolve(strict=False)
+        owner = next((candidate for candidate in self.accounts()
+                      if candidate.unit and candidate.store_dir == config_dir), None)
+        if owner is None:
+            return self._run(
+                args, timeout=timeout, stdout_limit=stdout_limit,
+                stderr_limit=stderr_limit, account=None,
+            )
+        return self._mutate(
+            args, timeout=timeout, require_online=False, stdout_limit=stdout_limit,
+            stderr_limit=stderr_limit, account=None, lifecycle=owner,
+        )
 
     def _finalize_link(self, account: Account, result: int) -> int:
         """Reconcile one terminal auth result and enable its sync exactly once."""
@@ -2570,8 +2624,13 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
+        lifecycle: Account | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        lifecycle_account = (
+        """Run one write, yielding the sync that holds the store lock if needed.
+
+        ``lifecycle`` names that sync when it is not the account's own.
+        """
+        lifecycle_account = lifecycle if lifecycle is not None else (
             self.active if account is ACTIVE_ACCOUNT or account is None else account
         )
         if not isinstance(lifecycle_account, Account):
@@ -4052,10 +4111,11 @@ class Backend:
             if result.returncode != 0:
                 raise OmaWhatsAppError(clean_error(result.stderr or result.stdout,
                     "WhatsApp did not accept the logout; the account stays linked."))
-            removed = False
-            if account.selector not in {"implicit", "store"}:
-                removal = self._run(["--json", "accounts", "remove", account.name], timeout=30, account=None)
-                removed = removal.returncode == 0
+        removed = False
+        if account.selector not in {"implicit", "store"}:
+            # The account list sits under another account's lock.
+            removal = self._change_account_list(["--json", "accounts", "remove", account.name])
+            removed = removal.returncode == 0
         self._refresh_account_registry()
         return {"ok": True, "kind": "unlink", "account": account.name,
                 "removed": removed, "archive_kept": True}
@@ -6971,9 +7031,15 @@ class Backend:
                     # The scope is already spelled out in global_args.
                     account=None,
                 )
+            elif path in ACCOUNT_LIST_WRITES:
+                result = self._change_account_list(
+                    command,
+                    timeout=timeout + 5,
+                    stdout_limit=output_limit,
+                    stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+                )
             else:
                 local_destructive = path in {
-                    ("accounts", "remove"),
                     ("messages", "purge"),
                     ("store", "cleanup"),
                 }
@@ -7083,6 +7149,20 @@ class Backend:
         account: str = "",
         store: str = "",
     ) -> int:
+        args = list(values)
+        if args and args[0] == "--":
+            args = args[1:]
+        if args[:2] == ["accounts", "add"] \
+                and not self._transport_boolean_flag(args, "--no-auth"):
+            if account or store:
+                raise OmaWhatsAppError(
+                    "accounts add names its own account. Drop --account and --store."
+                )
+            tail = self._transport_args(args)[2:]
+            if not tail or tail[0].startswith("-"):
+                raise OmaWhatsAppError("Choose one exact valid account name.")
+            # Its auth flags are auth's; the config write yields the root sync.
+            return self.link_account(tail[0], authorization, auth_args=tail[1:])
         result, scoped, path = self._transport_interactive(
             values, authorization=authorization, account=account, store=store
         )
