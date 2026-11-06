@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.9](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.8...v0.16.9) (2026-11-06)
+
+
+### Fixes
+
+* **dropdown:** preserve attachments selected from the compact client ([#21](https://github.com/atoslins/Omarchy-WhatsApp-v2/issues/21)) ([cf3ec17](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/cf3ec176e5b385e91966134fbfeb1a13a7f2a0c0))
+
 ## [0.16.8](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.7...v0.16.8) (2026-11-06)
 
 
