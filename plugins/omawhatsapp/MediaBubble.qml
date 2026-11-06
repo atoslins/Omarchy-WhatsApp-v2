@@ -350,7 +350,10 @@ Item {
         cache: true
         smooth: true
         mipmap: true
-        playing: root.surfaceActive && frameCount > 1
+        // Only once loaded. frameCount is known while the frames are still
+        // being cached, and Qt 6.12 playing from there recurses until the
+        // stack overflows, taking the shell down with it.
+        playing: root.surfaceActive && status === Image.Ready && frameCount > 1
       }
       Text {
         textFormat: Text.PlainText
